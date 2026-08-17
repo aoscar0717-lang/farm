@@ -43,17 +43,51 @@ def new_game(seed: int = 0) -> GameState:
         "max_thieves": 2,
         "free_dog": False,
         "status": "playing",            
-        "last_msg": "開放世界：按 [B] 打開商店選購道具！白天時間 120 秒。" 
+        "last_msg": "開放世界：按 [B] 打開商店選購道具！白天時間 120 秒。",
+        "wood": 0,
+        "water": [],
+        "trees": []
     }
+    
+    # Generate 1-2 water pools
+    for _ in range(random.randint(1, 2)):
+        pool_w = random.randint(2, 3) * ITEM_SIZE
+        pool_h = random.randint(2, 3) * ITEM_SIZE
+        pool_x = random.randint(0, (GRID_W - pool_w) // ITEM_SIZE) * ITEM_SIZE
+        pool_y = random.randint(0, (GRID_H - pool_h) // ITEM_SIZE) * ITEM_SIZE
+        state["water"].append((pool_x, pool_y, pool_w, pool_h))
+        
+    # Generate 3-5 trees
+    for _ in range(random.randint(3, 5)):
+        tx = random.randint(0, GRID_W // ITEM_SIZE - 1) * ITEM_SIZE
+        ty = random.randint(0, GRID_H // ITEM_SIZE - 1) * ITEM_SIZE
+        
+        # Check overlap with water
+        overlap = False
+        for wx, wy, ww, wh in state["water"]:
+            if _rects_overlap(tx, ty, ITEM_SIZE, ITEM_SIZE, wx, wy, ww, wh):
+                overlap = True
+                break
+        
+        if not overlap and (tx, ty) not in state["trees"]:
+            state["trees"].append((tx, ty))
     
     return state
 
 def _rects_overlap(x1, y1, w1, h1, x2, y2, w2, h2):
     return not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1)
 
-def _is_occupied(state, x, y, size=ITEM_SIZE, include_crops=True):
-    if x < 0 or x + size > GRID_W or y < 0 or y + size > GRID_H:
+def _is_obstacle(state, x, y):
+    if x < 0 or x + ITEM_SIZE > GRID_W or y < 0 or y + ITEM_SIZE > GRID_H:
         return True
+    for wx, wy, ww, wh in state.get("water", []):
+        if _rects_overlap(x, y, ITEM_SIZE, ITEM_SIZE, wx, wy, ww, wh): return True
+    for tx, ty in state.get("trees", []):
+        if _rects_overlap(x, y, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE): return True
+    return False
+
+def _is_occupied(state, x, y, size=ITEM_SIZE, include_crops=True):
+    if _is_obstacle(state, x, y): return True
     
     all_entities = [(f[0], f[1]) for f in state["fences"]] + state["dogs"] + state.get("cats",[]) + state.get("geese",[]) + state.get("owls",[])
     for task in state["building_tasks"]:
@@ -83,6 +117,13 @@ def _end_night(state):
             state["last_msg"] = f"{state['last_msg']} 支付每日租金 ${rent}。"
         else:
             state["last_msg"] = f"夜晚結束！支付每日租金 ${rent}。"
+        
+        # 機率性重生樹木 (每晚 30% 機率，最多 8 棵)
+        if random.random() < 0.3 and len(state.get("trees", [])) < 8:
+            tx = random.randint(0, GRID_W // ITEM_SIZE - 1) * ITEM_SIZE
+            ty = random.randint(0, GRID_H // ITEM_SIZE - 1) * ITEM_SIZE
+            if not _is_occupied(state, tx, ty):
+                state["trees"].append((tx, ty))
         
         state["phase"] = "day"
         state["day_count"] += 1
@@ -268,13 +309,13 @@ def apply_action(state: GameState, action: str) -> GameState:
         parts = action.split("_")
         try: pos = (int(parts[2]), int(parts[3]))
         except: return _working_copy
-        if _working_copy["money"] < 100: return _working_copy
+        if _working_copy.get("wood", 0) < 1: return _working_copy
         if pos in _working_copy["crops"]:
             if not any(f[0] == pos[0] and f[1] == pos[1] for f in _working_copy.get("fences", [])):
                 if not any(t["type"] == "fence" and t["pos"] == pos for t in _working_copy["building_tasks"]):
                     _working_copy["building_tasks"].append({"type": "fence", "pos": pos, "progress": 0, "max_progress": 2})
-                    _working_copy["money"] -= 100
-                    _working_copy["last_msg"] = "開始加裝木圍欄..."
+                    _working_copy["wood"] -= 1
+                    _working_copy["last_msg"] = "消耗 1 木材，開始加裝木圍欄..."
             
     elif action.startswith("build_scarecrow_"):
         if _working_copy["phase"] != "day": return _working_copy
@@ -315,6 +356,10 @@ def apply_action(state: GameState, action: str) -> GameState:
             fence = next(f for f in _working_copy["fences"] if f[0] == pos[0] and f[1] == pos[1])
             _working_copy["fences"].remove(fence)
             _working_copy["last_msg"] = "移除了木圍欄！"
+        elif pos in _working_copy.get("trees", []):
+            _working_copy["trees"].remove(pos)
+            _working_copy["wood"] = _working_copy.get("wood", 0) + 1
+            _working_copy["last_msg"] = "砍伐樹木，獲得 1 木材！"
         else:
             tasks = [t for t in _working_copy["building_tasks"] if t["pos"] == pos]
             if tasks:
@@ -442,7 +487,38 @@ def _simulate_night_path(state):
             best_target = t_pos
             
     if best_target is None: return [], None
-    return [(best_target[0], best_target[1])], best_target
+    
+    start_grid = (int(tx // 5), int(ty // 5))
+    target_grid = (int(best_target[0] // 5), int(best_target[1] // 5))
+    
+    queue = [start_grid]
+    came_from = {start_grid: None}
+    
+    while queue:
+        curr = queue.pop(0)
+        if curr == target_grid: break
+            
+        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            nx, ny = curr[0] + dx, curr[1] + dy
+            if 0 <= nx <= 20 and 0 <= ny <= 20:
+                if (nx, ny) not in came_from:
+                    px, py = nx * 5, ny * 5
+                    if (nx, ny) == target_grid or not _is_obstacle(state, px, py):
+                        came_from[(nx, ny)] = curr
+                        queue.append((nx, ny))
+                        
+    if target_grid not in came_from:
+        return [(best_target[0], best_target[1])], best_target
+        
+    path = []
+    curr = target_grid
+    while curr != start_grid and curr is not None:
+        if curr == target_grid: path.append((best_target[0], best_target[1]))
+        else: path.append((curr[0] * 5, curr[1] * 5))
+        curr = came_from[curr]
+        
+    path.reverse()
+    return path, best_target
 
 def is_terminal(state: GameState) -> bool:
     return state.get("status") == "game_over"

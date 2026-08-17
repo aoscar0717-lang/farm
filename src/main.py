@@ -98,8 +98,8 @@ camera_y = (WORLD_H - HEIGHT) // 2
 TOOL_NAMES = {
     "tomato": "番茄種子", "carrot": "紅蘿蔔種子", "corn": "玉米種子", "pumpkin": "南瓜種子",
     "fence": "木圍欄", "scarecrow": "稻草人",
-    "dog": "看門狗", "cat": "招財貓", "goose": "大白鵝", "owl": "貓頭鷹",
-    "fertilizer": "魔法肥料", "shovel": "鐵鏟"
+    "dog": "看門狗", "cat": "招財貓", "goose": "戰鬥大鵝", "owl": "暗夜貓頭鷹",
+    "fertilizer": "魔法肥料", "shovel": "鏟子/斧頭"
 }
 
 def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
@@ -130,6 +130,28 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
                 pygame.draw.circle(screen, backup_color, rect.center, ITEM_PX // 2)
             else:
                 pygame.draw.rect(screen, backup_color, rect)
+                
+    # Draw Water
+    for wx, wy, ww, wh in state.get("water", []):
+        screen_x = wx * CELL_SIZE - camera_x
+        screen_y = wy * CELL_SIZE - camera_y
+        screen_w = ww * CELL_SIZE
+        screen_h = wh * CELL_SIZE
+        if screen_x + screen_w > 0 and screen_x < WIDTH and screen_y + screen_h > 0 and screen_y < HEIGHT:
+            rect = pygame.Rect(screen_x, screen_y, screen_w, screen_h)
+            pygame.draw.rect(screen, (100, 150, 255), rect) # Light Blue water
+            pygame.draw.rect(screen, (150, 150, 150), rect, 4) # Stone border
+            
+    # Draw Trees
+    for tx, ty in state.get("trees", []):
+        screen_x = tx * CELL_SIZE - camera_x
+        screen_y = ty * CELL_SIZE - camera_y
+        if screen_x + ITEM_PX > 0 and screen_x < WIDTH and screen_y + ITEM_PX > 0 and screen_y < HEIGHT:
+            rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
+            pygame.draw.rect(screen, (139, 69, 19), (rect.centerx - 10, rect.bottom - 30, 20, 30)) # Trunk
+            pygame.draw.circle(screen, (34, 139, 34), (rect.centerx, rect.bottom - 40), 25) # Leaves
+            pygame.draw.circle(screen, (50, 205, 50), (rect.centerx - 15, rect.bottom - 30), 20)
+            pygame.draw.circle(screen, (50, 205, 50), (rect.centerx + 15, rect.bottom - 30), 20)
 
     # Draw Crops
     for crop in state["crops"]:
@@ -320,7 +342,7 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
     text_surf = font_large.render(phase_text, True, WHITE)
     screen.blit(text_surf, (40, 30))
     
-    pet_stats = f"狗: {len(state.get('dogs',[]))}/10   貓: {len(state.get('cats',[]))}/10   鵝: {len(state.get('geese',[]))}/5   鷹: {len(state.get('owls',[]))}/5"
+    pet_stats = f"木材: {state.get('wood', 0)}   狗: {len(state.get('dogs',[]))}/10   貓: {len(state.get('cats',[]))}/10   鵝: {len(state.get('geese',[]))}/5   鷹: {len(state.get('owls',[]))}/5"
     pet_surf = font_small.render(pet_stats, True, (200, 200, 255))
     screen.blit(pet_surf, (40, 65))
     
@@ -385,7 +407,7 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
             ]
         elif active_tab == "def":
             items = [
-                {"id": "fence", "name": "木圍欄", "price": 100, "desc": "絕對路障，小偷需繞路"},
+                {"id": "fence", "name": "木圍欄", "price": "1 木材", "desc": "絕對路障，小偷需繞路"},
                 {"id": "scarecrow", "name": "稻草人", "price": 150, "desc": "放在田裡當誘餌"}
             ]
         elif active_tab == "pet":
