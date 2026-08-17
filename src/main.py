@@ -31,14 +31,18 @@ ITEM_PX = CELL_SIZE * ITEM_SIZE
 WORLD_W = GRID_W * CELL_SIZE
 WORLD_H = GRID_H * CELL_SIZE
 
-try:
-    font_large = pygame.font.SysFont("microsoftjhenghei", 36)
-    font_small = pygame.font.SysFont("microsoftjhenghei", 24)
-    font_tiny = pygame.font.SysFont("microsoftjhenghei", 18)
-except:
-    font_large = pygame.font.Font(None, 48)
-    font_small = pygame.font.Font(None, 32)
-    font_tiny = pygame.font.Font(None, 24)
+import os
+
+mac_font_path = "/System/Library/Fonts/STHeiti Light.ttc"
+    
+if os.path.exists(mac_font_path):
+        font_large = pygame.font.Font(mac_font_path, 36)
+        font_small = pygame.font.Font(mac_font_path, 24)
+        font_tiny = pygame.font.Font(mac_font_path, 18)
+else:
+        font_large = pygame.font.SysFont("microsoftjhenghei,simhei,arialunicodems", 36)
+        font_small = pygame.font.SysFont("microsoftjhenghei,simhei,arialunicodems", 24)
+        font_tiny = pygame.font.SysFont(mac_font_path if os.path.exists(mac_font_path) else "microsoftjhenghei,simhei,arialunicodems", 18)
 
 TICK_EVENT = pygame.USEREVENT + 1
 pygame.time.set_timer(TICK_EVENT, 1000)
