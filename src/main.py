@@ -149,31 +149,54 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
         max_stage = data["max_stage"]
         ctype = data["type"]
         
-        center = rect.center
-        if stage == 0:
-            # Seedling
-            pygame.draw.circle(screen, (144, 238, 144), (center[0]-8, center[1]+8), 6)
-            pygame.draw.circle(screen, (144, 238, 144), (center[0]+8, center[1]+8), 6)
-        elif stage > 0 and stage < max_stage:
-            # Growing
-            pygame.draw.circle(screen, (50, 205, 50), (center[0], center[1]), 12)
-            pygame.draw.circle(screen, (50, 205, 50), (center[0]-12, center[1]+10), 10)
-            pygame.draw.circle(screen, (50, 205, 50), (center[0]+12, center[1]+10), 10)
+        # 1. Smooth progress calculation
+        if stage < max_stage and state["phase"] == "day":
+            day_progress = (120 - state["time_left"]) / 120.0
         else:
-            # Mature
-            if ctype == "tomato":
-                pygame.draw.circle(screen, (255, 99, 71), center, 18)
-                pygame.draw.circle(screen, (34, 139, 34), (center[0], center[1]-15), 5)
-            elif ctype == "carrot":
-                pygame.draw.polygon(screen, (255, 140, 0), [(center[0], center[1]+18), (center[0]-10, center[1]-12), (center[0]+10, center[1]-12)])
-                pygame.draw.circle(screen, (34, 139, 34), (center[0], center[1]-18), 6)
-            elif ctype == "corn":
-                pygame.draw.ellipse(screen, (255, 215, 0), (center[0]-10, center[1]-18, 20, 36))
-                pygame.draw.polygon(screen, (154, 205, 50), [(center[0], center[1]+18), (center[0]-15, center[1]), (center[0]-5, center[1]+18)])
-            elif ctype == "pumpkin":
-                pygame.draw.circle(screen, (255, 127, 80), center, 22)
-                pygame.draw.arc(screen, (200, 100, 50), (center[0]-18, center[1]-18, 36, 36), 0, 3.14, 2)
-                pygame.draw.rect(screen, (34, 139, 34), (center[0]-2, center[1]-26, 4, 8))
+            day_progress = 0
+            
+        if stage >= max_stage:
+            total_progress = 1.0
+        else:
+            total_progress = (stage + day_progress) / max_stage
+            
+        # 2. Draw mature crop onto a temporary surface
+        crop_surf = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+        center = (ITEM_PX // 2, ITEM_PX // 2)
+        
+        if ctype == "tomato":
+            pygame.draw.circle(crop_surf, (255, 99, 71), center, 18)
+            pygame.draw.circle(crop_surf, (34, 139, 34), (center[0], center[1]-15), 5)
+        elif ctype == "carrot":
+            pygame.draw.polygon(crop_surf, (255, 140, 0), [(center[0], center[1]+18), (center[0]-10, center[1]-12), (center[0]+10, center[1]-12)])
+            pygame.draw.circle(crop_surf, (34, 139, 34), (center[0], center[1]-18), 6)
+        elif ctype == "corn":
+            pygame.draw.ellipse(crop_surf, (255, 215, 0), (center[0]-10, center[1]-18, 20, 36))
+            pygame.draw.polygon(crop_surf, (154, 205, 50), [(center[0], center[1]+18), (center[0]-15, center[1]), (center[0]-5, center[1]+18)])
+        elif ctype == "pumpkin":
+            pygame.draw.circle(crop_surf, (255, 127, 80), center, 22)
+            pygame.draw.arc(crop_surf, (200, 100, 50), (center[0]-18, center[1]-18, 36, 36), 0, 3.14, 2)
+            pygame.draw.rect(crop_surf, (34, 139, 34), (center[0]-2, center[1]-26, 4, 8))
+            
+        # 3. Growth Animation (Scaling)
+        scale = 0.2 + 0.8 * total_progress
+        if scale > 1.0: scale = 1.0
+        scaled_size = int(ITEM_PX * scale)
+        if scaled_size > 0:
+            scaled_surf = pygame.transform.scale(crop_surf, (scaled_size, scaled_size))
+            offset = (ITEM_PX - scaled_size) // 2
+            screen.blit(scaled_surf, (cx + offset, cy + offset))
+            
+        # 4. Progress Bar
+        bar_w = ITEM_PX - 20
+        bar_h = 6
+        bar_x = cx + 10
+        bar_y = cy + ITEM_PX - 12
+        pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_w, bar_h))
+        fill_w = int(bar_w * total_progress)
+        color = (50, 205, 50) if stage < max_stage else (255, 215, 0)
+        if fill_w > 0:
+            pygame.draw.rect(screen, color, (bar_x, bar_y, fill_w, bar_h))
 
     # Draw Scarecrows
     for sc in state.get("scarecrows", []):
@@ -199,7 +222,22 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
             pygame.draw.rect(screen, (0, 255, 0), (screen_x, screen_y - 10, ITEM_PX * (hp / max(1, hp, 3)), 6))
 
     for fence in state["fences"]: 
-        draw_obj((fence[0], fence[1]), images["fence"], (139, 69, 19))
+        x, y = fence[0], fence[1]
+        screen_x = x * CELL_SIZE - camera_x
+        screen_y = y * CELL_SIZE - camera_y
+        
+        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT:
+            continue
+            
+        rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
+        img = images.get("fence")
+        if img:
+            scaled_img = pygame.transform.scale(img, (ITEM_PX, ITEM_PX))
+            scaled_img.set_alpha(100) # 更高的透明度 (100)
+            screen.blit(scaled_img, rect)
+        else:
+            # Fallback
+            pygame.draw.rect(screen, (139, 69, 19), rect)
 
     for dog in state["dogs"]: draw_obj(dog, images["dog"], YELLOW, "circle")
     for cat in state.get("cats", []): draw_obj(cat, images["cat"], (255,165,0))
@@ -237,17 +275,58 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
                 
             screen.blit(s, (screen_x, screen_y))
 
+    # 畫建造中的項目
+    for task in state.get("building_tasks", []):
+        x, y = task["pos"]
+        screen_x = x * CELL_SIZE - camera_x
+        screen_y = y * CELL_SIZE - camera_y
+        
+        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT:
+            continue
+            
+        rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
+        progress_ratio = task["progress"] / task["max_progress"]
+        h = int(ITEM_PX * progress_ratio)
+        if h <= 0: h = 1
+        
+        img = None
+        t_type = task["type"]
+        if t_type == "dog": img = images.get("dog")
+        elif t_type == "cat": img = images.get("cat")
+        elif t_type == "goose": img = images.get("goose")
+        elif t_type == "owl": img = images.get("owl")
+        elif t_type == "fence": img = images.get("fence")
+            
+        if img:
+            scaled_img = pygame.transform.scale(img, (ITEM_PX, ITEM_PX))
+            scaled_img.set_alpha(150)
+            crop_rect = pygame.Rect(0, ITEM_PX - h, ITEM_PX, h)
+            screen.blit(scaled_img, (rect.x, rect.y + ITEM_PX - h), crop_rect)
+        elif t_type == "crop":
+            pygame.draw.rect(screen, (101, 67, 33), (rect.x, rect.y + ITEM_PX - h, ITEM_PX, h))
+            
+        b_text = font_tiny.render("building", True, WHITE)
+        screen.blit(b_text, (rect.centerx - b_text.get_width()//2, rect.centery - b_text.get_height()//2))
+
     # Top Panel
-    top_panel = pygame.Surface((WIDTH - 40, 60), pygame.SRCALPHA)
+    top_panel = pygame.Surface((WIDTH - 40, 80), pygame.SRCALPHA)
     pygame.draw.rect(top_panel, (0, 0, 0, 180), top_panel.get_rect(), border_radius=15)
     screen.blit(top_panel, (20, 20))
     
-    phase_text = f"第 {state['day_count']} 天 - 白天 ({state['time_left']}秒)" if state['phase'] == "day" else "夜晚結算中..."
+    mins = state['time_left'] // 60
+    secs = state['time_left'] % 60
+    phase_str = "白天" if state['phase'] == "day" else "夜晚"
+    phase_text = f"第 {state['day_count']} 回合 - {phase_str} ({mins:02d}:{secs:02d})"
     text_surf = font_large.render(phase_text, True, WHITE)
     screen.blit(text_surf, (40, 30))
     
-    money_surf = font_small.render(f"資金: ${state['money']}", True, YELLOW)
-    screen.blit(money_surf, (WIDTH - 150, 35))
+    pet_stats = f"狗: {len(state.get('dogs',[]))}/10   貓: {len(state.get('cats',[]))}/10   鵝: {len(state.get('geese',[]))}/5   鷹: {len(state.get('owls',[]))}/5"
+    pet_surf = font_small.render(pet_stats, True, (200, 200, 255))
+    screen.blit(pet_surf, (40, 65))
+    
+    rent = 20 + (state["day_count"] - 1) * 10
+    money_surf = font_small.render(f"資金: ${state['money']} (今晚租金: ${rent})", True, YELLOW)
+    screen.blit(money_surf, (WIDTH - money_surf.get_width() - 40, 35))
     
     # Bottom Panel
     bottom_panel = pygame.Surface((WIDTH - 40, 80), pygame.SRCALPHA)
@@ -299,10 +378,10 @@ def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
         items = []
         if active_tab == "seed":
             items = [
-                {"id": "tomato", "name": "番茄種子", "price": 30, "desc": "1天熟，收益$60"},
-                {"id": "carrot", "name": "紅蘿蔔種子", "price": 50, "desc": "2天熟，收益$120"},
-                {"id": "corn", "name": "玉米種子", "price": 100, "desc": "2天熟，收益$250"},
-                {"id": "pumpkin", "name": "南瓜種子", "price": 200, "desc": "3天熟，收益$600"}
+                {"id": "tomato", "name": "番茄種子", "price": 30, "desc": "1天熟，收益$90"},
+                {"id": "carrot", "name": "紅蘿蔔種子", "price": 50, "desc": "2天熟，收益$180"},
+                {"id": "corn", "name": "玉米種子", "price": 100, "desc": "2天熟，收益$375"},
+                {"id": "pumpkin", "name": "南瓜種子", "price": 200, "desc": "3天熟，收益$900"}
             ]
         elif active_tab == "def":
             items = [
