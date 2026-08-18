@@ -9,3 +9,10 @@ dist/
 .env
 .env.*
 .DS_Store
+
+scratch/
+log.txt
+crop_preview.py
+fix_renderer.py
+update_renderer.py
+temp*.png

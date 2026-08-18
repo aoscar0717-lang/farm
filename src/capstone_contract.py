@@ -10,14 +10,14 @@ GRID_W = 100
 GRID_H = 100
 
 CROP_INFO = {
-    "radish": {"price": 30, "growth_time": 1, "yield": 50, "level_req": 1},
-    "corn": {"price": 100, "growth_time": 2, "yield": 250, "level_req": 2},
-    "pumpkin": {"price": 300, "growth_time": 3, "yield": 1000, "level_req": 3}
+    "radish": {"price": 30, "growth_time": 5, "yield": 50, "level_req": 1},
+    "carrot": {"price": 100, "growth_time": 5, "yield": 250, "level_req": 2},
+    "pumpkin": {"price": 300, "growth_time": 5, "yield": 1000, "level_req": 3}
 }
 
 CROP_NAMES = {
     "radish": "白蘿蔔",
-    "corn": "甜玉米",
+    "carrot": "胡蘿蔔",
     "pumpkin": "魔法南瓜"
 }
 
@@ -76,12 +76,10 @@ def new_game(seed: int = 0) -> GameState:
         
         "free_dog": False,
         "status": "playing",            
-        "last_msg": "開放世界：按 [B] 打開商店選購道具！左側為農田區，右側為佈置區。",
-        "wood": 0,
-        "stone": 0,
+        "last_msg": "歡迎來到農場！按 [B] 打開商店，用鋤頭[1]開墾農田，種植作物賺錢！",
         "inventory": {
             "radish": {"normal": 0, "rare": 0, "epic": 0, "legendary": 0},
-            "corn": {"normal": 0, "rare": 0, "epic": 0, "legendary": 0},
+            "carrot": {"normal": 0, "rare": 0, "epic": 0, "legendary": 0},
             "pumpkin": {"normal": 0, "rare": 0, "epic": 0, "legendary": 0}
         },
         "farmland": [],
@@ -90,18 +88,12 @@ def new_game(seed: int = 0) -> GameState:
         "rocks": []
     }
     
-    # Generate 3-5 trees
-    for _ in range(random.randint(3, 5)):
-        tx = random.randint(0, GRID_W // ITEM_SIZE - 1) * ITEM_SIZE
-        ty = random.randint(0, GRID_H // ITEM_SIZE - 1) * ITEM_SIZE
-        
-        if (tx, ty) not in state["trees"]:
-            state["trees"].append((tx, ty))
+    # Auto-generation of trees has been disabled
             
-    # Generate 5-8 rocks
+    # Generate 5-8 rocks (grid coords)
     for _ in range(random.randint(5, 8)):
-        rx = random.randint(0, GRID_W // ITEM_SIZE - 1) * ITEM_SIZE
-        ry = random.randint(0, GRID_H // ITEM_SIZE - 1) * ITEM_SIZE
+        rx = random.randint(2, GRID_W - 2)
+        ry = random.randint(2, GRID_H - 2)
         
         if (rx, ry) not in state["trees"] and (rx, ry) not in state["rocks"]:
             state["rocks"].append((rx, ry))
@@ -112,12 +104,13 @@ def _rects_overlap(x1, y1, w1, h1, x2, y2, w2, h2):
     return not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1)
 
 def _is_obstacle(state, x, y):
+    px, py = x * ITEM_SIZE, y * ITEM_SIZE
     for tx, ty in state.get("trees", []):
-        if _rects_overlap(x, y, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE): return True
+        if _rects_overlap(px, py, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE): return True
     for rx, ry in state.get("rocks", []):
-        if _rects_overlap(x, y, ITEM_SIZE, ITEM_SIZE, rx, ry, ITEM_SIZE, ITEM_SIZE): return True
+        if _rects_overlap(px, py, ITEM_SIZE, ITEM_SIZE, rx, ry, ITEM_SIZE, ITEM_SIZE): return True
     for f in state.get("fences", []):
-        if _rects_overlap(x, y, ITEM_SIZE, ITEM_SIZE, f[0], f[1], ITEM_SIZE, ITEM_SIZE): return True
+        if x == f[0] and y == f[1]: return True
     return False
 
 def _can_build_fence(state, pos):
@@ -168,7 +161,7 @@ def _is_occupied(state, x, y, size=ITEM_SIZE, include_crops=True):
         all_entities += state["crops"]
         
     for ex, ey in all_entities:
-        if _rects_overlap(x, y, size, size, ex, ey, ITEM_SIZE, ITEM_SIZE):
+        if ex == x and ey == y:  # exact grid cell match
             return True
             
     return False
@@ -466,7 +459,8 @@ def apply_action(state: GameState, action: str) -> GameState:
                     if data["stage"] >= data["max_stage"]:
                         crop_income += CROP_INFO[data["type"]]["yield"]
                     else:
-                        data["stage"] += 1
+                        growth_amount = 2 if data.get("fertilized") else 1
+                        data["stage"] = min(data["stage"] + growth_amount, data["max_stage"])
                         
             if crop_income > 0:
                 _working_copy["money"] += crop_income
@@ -498,9 +492,6 @@ def apply_action(state: GameState, action: str) -> GameState:
         parts = action.split("_")
         try: pos = (int(parts[2]), int(parts[3]))
         except: return _working_copy
-        if pos[0] >= 50:
-            _working_copy["last_msg"] = "農田只能開墾在左側農田區！"
-            return _working_copy
         if not _is_occupied(_working_copy, pos[0], pos[1]) and pos not in _working_copy["farmland"]:
             _working_copy["building_tasks"].append({"type": "farmland", "pos": pos, "progress": 0, "max_progress": 2})
             _working_copy["last_msg"] = "開始開墾農田..."
@@ -537,12 +528,9 @@ def apply_action(state: GameState, action: str) -> GameState:
         if _working_copy["phase"] != "day": return _working_copy
         parts = action.split("_")
         try: 
-            crop_type = parts[2]
-            pos = (int(parts[3]), int(parts[4]))
+            crop_type = "_".join(parts[2:-2])
+            pos = (int(parts[-2]), int(parts[-1]))
         except: return _working_copy
-        if pos[0] >= 50:
-            _working_copy["last_msg"] = "作物只能種植在左側農田區！"
-            return _working_copy
         if crop_type not in CROP_INFO: return _working_copy
         
         req_level = CROP_INFO[crop_type].get("level_req", 1)
@@ -562,14 +550,9 @@ def apply_action(state: GameState, action: str) -> GameState:
         if _working_copy["phase"] != "day": return _working_copy
         parts = action.split("_")
         try:
-            decor_type = parts[2]
-            pos = (int(parts[3]), int(parts[4]))
+            decor_type = "_".join(parts[2:-2])
+            pos = (int(parts[-2]), int(parts[-1]))
         except: return _working_copy
-        
-        if pos[0] < 50:
-            _working_copy["last_msg"] = "景觀物只能佈置在右側佈置區！"
-            return _working_copy
-            
         if decor_type not in DECOR_INFO: return _working_copy
         price = DECOR_INFO[decor_type]["price"]
         if _working_copy["money"] < price: return _working_copy
@@ -584,18 +567,15 @@ def apply_action(state: GameState, action: str) -> GameState:
         parts = action.split("_")
         try: pos = (int(parts[2]), int(parts[3]))
         except: return _working_copy
-        if pos[0] >= 50:
-            _working_copy["last_msg"] = "圍欄只能蓋在左側農田區！"
-            return _working_copy
-        if _working_copy.get("wood", 0) < 1: return _working_copy
+        if _working_copy["money"] < 20: return _working_copy
         if not _is_occupied(_working_copy, pos[0], pos[1]):
             if not _can_build_fence(_working_copy, pos):
                 _working_copy["last_msg"] = "無法建造！不能將農田完全封死！"
                 return _working_copy
             if not any(t["type"] == "fence" and t["pos"] == pos for t in _working_copy["building_tasks"]):
                 _working_copy["building_tasks"].append({"type": "fence", "pos": pos, "progress": 0, "max_progress": 2})
-                _working_copy["wood"] -= 1
-                _working_copy["last_msg"] = "消耗 1 木材，開始加裝木圍欄..."
+                _working_copy["money"] -= 20
+                _working_copy["last_msg"] = "消耗 $20，開始加裝木圍欄..."
                 
     elif action.startswith("place_trap_"):
         if _working_copy["phase"] != "day": return _working_copy
@@ -622,25 +602,43 @@ def apply_action(state: GameState, action: str) -> GameState:
             _working_copy["free_dog"] = False
             _working_copy["last_msg"] = "呼叫看門狗..."
             
-    elif action.startswith("use_axe_"):
+
+            
+    elif action.startswith("click_"):
+        parts = action.split("_")
+        try: pos = (float(parts[1]), float(parts[2]))
+        except: return _working_copy
+        
+        if _working_copy["phase"] == "night":
+            if _working_copy.get("thief_pos"):
+                tx, ty = _working_copy["thief_pos"]
+                if math.hypot(tx - pos[0], ty - pos[1]) < ITEM_SIZE:
+                    if _working_copy.get("thief_iframes", 0) <= 0:
+                        _working_copy["thief_hp"] -= 1
+                        _working_copy["thief_iframes"] = 15
+                        _working_copy["last_msg"] = "擊中小偷！"
+            if _working_copy.get("boar_pos"):
+                bx, by = _working_copy["boar_pos"]
+                if math.hypot(bx - pos[0], by - pos[1]) < ITEM_SIZE:
+                    if _working_copy.get("boar_iframes", 0) <= 0:
+                        _working_copy["boar_hp"] -= 1
+                        _working_copy["boar_iframes"] = 15
+                        _working_copy["last_msg"] = "擊中野豬！"
+                        
+    elif action.startswith("use_fertilizer_"):
         if _working_copy["phase"] != "day": return _working_copy
         parts = action.split("_")
         try: pos = (int(parts[2]), int(parts[3]))
         except: return _working_copy
         
-        hit_tree = None
-        for tx, ty in _working_copy.get("trees", []):
-            if _rects_overlap(pos[0], pos[1], ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
-                hit_tree = (tx, ty)
-                break
-                
-        if hit_tree:
-            _working_copy["trees"].remove(hit_tree)
-            _working_copy["wood"] = _working_copy.get("wood", 0) + 1
-            _working_copy["last_msg"] = "伐木成功！獲得 1 單位的木材。"
+        if pos in _working_copy["crops"]:
+            data = _working_copy["crop_data"].get(pos)
+            if data and not data.get("fertilized"):
+                data["fertilized"] = True
+                _working_copy["last_msg"] = "施肥成功！作物生長速度加快。"
         else:
-            _working_copy["last_msg"] = "這裡沒有樹木可以砍伐。"
-            
+            _working_copy["last_msg"] = "這裡沒有作物可以施肥。"
+
     elif action.startswith("use_shovel_"):
         if _working_copy["phase"] != "day": return _working_copy
         parts = action.split("_")
@@ -650,19 +648,25 @@ def apply_action(state: GameState, action: str) -> GameState:
             _working_copy["crops"].remove(pos)
             if pos in _working_copy["crop_data"]: del _working_copy["crop_data"][pos]
             _working_copy["last_msg"] = "移除了農田！"
-        elif any(f[0] == pos[0] and f[1] == pos[1] for f in _working_copy["fences"]):
+        elif any(f[0] == pos[0] and f[1] == pos[1] for f in _working_copy.get("fences", [])):
             fence = next(f for f in _working_copy["fences"] if f[0] == pos[0] and f[1] == pos[1])
             _working_copy["fences"].remove(fence)
             _working_copy["last_msg"] = "移除了木圍欄！"
-        elif any(d[0] == pos[0] and d[1] == pos[1] for d in _working_copy["decorations"]):
+        elif any(d[0] == pos[0] and d[1] == pos[1] for d in _working_copy.get("decorations", [])):
             decor = next(d for d in _working_copy["decorations"] if d[0] == pos[0] and d[1] == pos[1])
             _working_copy["decorations"].remove(decor)
             _update_prosperity_and_level(_working_copy)
             _working_copy["last_msg"] = "移除了景觀物！"
+        elif pos in _working_copy.get("traps", []):
+            _working_copy["traps"].remove(pos)
+            _working_copy["last_msg"] = "回收了捕獸夾！"
+        elif pos in _working_copy.get("dogs", []):
+            _working_copy["dogs"].remove(pos)
+            _working_copy["last_msg"] = "收回了看門狗！"
         elif pos in _working_copy.get("trees", []):
-            _working_copy["trees"].remove(pos)
-            _working_copy["wood"] = _working_copy.get("wood", 0) + 1
-            _working_copy["last_msg"] = "砍伐樹木，獲得 1 木材！"
+            _working_copy["last_msg"] = "樹木是景觀，無法用鐵鏟移除！"
+        elif pos in _working_copy.get("rocks", []):
+            _working_copy["last_msg"] = "石頭是景觀，無法用鐵鏟移除！"
         else:
             tasks = [t for t in _working_copy["building_tasks"] if t["pos"] == pos]
             if tasks:

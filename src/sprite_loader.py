@@ -47,3 +47,17 @@ class SpriteLoader:
                 img = pygame.transform.scale(img, target_size)
             return img
         return None
+
+    def get_image(self, filename, target_size=None):
+        cache_key = f"image_{filename}"
+        if cache_key not in self.cache:
+            path = os.path.join(ASSETS_DIR, filename)
+            if not os.path.exists(path): return None
+            try:
+                self.cache[cache_key] = pygame.image.load(path).convert_alpha()
+            except pygame.error:
+                return None
+        img = self.cache[cache_key]
+        if target_size:
+            img = pygame.transform.scale(img, target_size)
+        return img
