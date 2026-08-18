@@ -1,470 +1,68 @@
 import sys
 import os
-import random
+import pygame
+import time
+from copy import deepcopy
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import pygame
-from src.capstone_contract import new_game, apply_action, is_terminal, ITEM_SIZE, GRID_W, GRID_H
-
+# Initialize pygame before loading modules
 pygame.init()
 
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GRAY = (200, 200, 200)
-DARK_GREEN = (34, 139, 34)
-GRASS_GREEN = (143, 188, 143)
-RED = (220, 20, 60)
-BLUE = (65, 105, 225)
-YELLOW = (255, 215, 0)
+from src.config import WIDTH, HEIGHT, MARGIN_TOP, MARGIN_BOTTOM, WORLD_W, WORLD_H, CELL_SIZE
+from src.capstone_contract import new_game, apply_action, is_terminal
+from src.assets import screen, get_bg_surfs, night_filter
+from src.renderer import draw_board
+from src.input_handler import handle_mouse_click, handle_keyboard_events
+from src.tutorial import note_event
+from src.thought import get_contemplation_lines
+from src.ui import draw_contemplation
 
-CELL_SIZE = 10
-MARGIN_TOP = 0
-MARGIN_BOTTOM = 0
-
-info = pygame.display.Info()
-WIDTH = info.current_w
-HEIGHT = info.current_h
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-pygame.display.set_caption("農場防禦 - 開放世界沙盒版")
-
-ITEM_PX = CELL_SIZE * ITEM_SIZE
-WORLD_W = GRID_W * CELL_SIZE
-WORLD_H = GRID_H * CELL_SIZE
-
-import os
-
-mac_font_path = "/System/Library/Fonts/STHeiti Light.ttc"
-    
-if os.path.exists(mac_font_path):
-        font_large = pygame.font.Font(mac_font_path, 36)
-        font_small = pygame.font.Font(mac_font_path, 24)
-        font_tiny = pygame.font.Font(mac_font_path, 18)
-else:
-        font_large = pygame.font.SysFont("microsoftjhenghei,simhei,arialunicodems", 36)
-        font_small = pygame.font.SysFont("microsoftjhenghei,simhei,arialunicodems", 24)
-        font_tiny = pygame.font.SysFont(mac_font_path if os.path.exists(mac_font_path) else "microsoftjhenghei,simhei,arialunicodems", 18)
+def log_action(msg):
+    with open("log.txt", "a", encoding="utf-8") as f:
+        f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
 
 TICK_EVENT = pygame.USEREVENT + 1
 pygame.time.set_timer(TICK_EVENT, 1000)
 
-assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets'))
-if not os.path.exists(assets_dir):
-    os.makedirs(assets_dir)
-
-images = {}
-
-def load_image(filename, target_size=(ITEM_PX, ITEM_PX)):
-    filepath = os.path.join(assets_dir, filename)
-    if os.path.exists(filepath):
-        img = pygame.image.load(filepath).convert_alpha()
-        img = pygame.transform.scale(img, target_size)
-        width, height = img.get_size()
-        visited = set()
-        queue = [(0, 0), (width-1, 0), (0, height-1), (width-1, height-1)]
-        while queue:
-            x, y = queue.pop(0)
-            if (x, y) in visited: continue
-            if x < 0 or x >= width or y < 0 or y >= height: continue
-            visited.add((x, y))
-            r, g, b, a = img.get_at((x, y))
-            if r > 240 and g > 240 and b > 240:
-                img.set_at((x, y), (255, 255, 255, 0))
-                queue.extend([(x+1, y), (x-1, y), (x, y+1), (x, y-1)])
-        return img
-    return None
-
-images["thief"] = load_image("thief.jpg")
-images["fence"] = load_image("fence.jpg")
-images["dog"] = load_image("dog.jpg")
-images["cat"] = load_image("cat.jpg")
-images["goose"] = load_image("goose.jpg")
-images["owl"] = load_image("owl.jpg")
-
-grass_pattern = pygame.Surface((200, 200))
-grass_pattern.fill((168, 213, 117))
-for _ in range(15):
-    gx = random.randint(0, 199)
-    gy = random.randint(0, 199)
-    pygame.draw.circle(grass_pattern, (148, 195, 97), (gx, gy), random.randint(5, 12))
-for _ in range(20):
-    fx = random.randint(0, 199)
-    fy = random.randint(0, 199)
-    f_color = (255, 215, 0) if random.random() > 0.5 else (255, 255, 255)
-    pygame.draw.circle(grass_pattern, f_color, (fx, fy), 2)
-for _ in range(20):
-    sx = random.randint(0, 199)
-    sy = random.randint(0, 199)
-    pygame.draw.rect(grass_pattern, (150, 150, 150), (sx, sy, 3, 2))
-
-camera_x = (WORLD_W - WIDTH) // 2
-camera_y = (WORLD_H - HEIGHT) // 2
-
-TOOL_NAMES = {
-    "tomato": "番茄種子", "carrot": "紅蘿蔔種子", "corn": "玉米種子", "pumpkin": "南瓜種子",
-    "fence": "木圍欄", "scarecrow": "稻草人",
-    "dog": "看門狗", "cat": "招財貓", "goose": "大白鵝", "owl": "貓頭鷹",
-    "fertilizer": "魔法肥料", "shovel": "鐵鏟"
-}
-
-def draw_board(state, current_tool, mouse_pos, shop_open, active_tab):
-    screen.fill(BLACK)
-    
-    # 讓草地填滿整個螢幕，不受限於世界邊界
-    for y in range(- (camera_y % 200), HEIGHT, 200):
-        for x in range(- (camera_x % 200), WIDTH, 200):
-            screen.blit(grass_pattern, (x, y))
-            
-    # 畫出世界邊界
-    world_rect = pygame.Rect(-camera_x, -camera_y, WORLD_W, WORLD_H)
-    pygame.draw.rect(screen, (50, 100, 50), world_rect, 5)
-    
-    def draw_obj(pos, img, backup_color, shape="rect"):
-        x, y = pos
-        screen_x = x * CELL_SIZE - camera_x
-        screen_y = y * CELL_SIZE - camera_y
-        
-        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT:
-            return
-            
-        rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
-        if img:
-            screen.blit(img, rect)
-        else:
-            if shape == "circle":
-                pygame.draw.circle(screen, backup_color, rect.center, ITEM_PX // 2)
-            else:
-                pygame.draw.rect(screen, backup_color, rect)
-
-    # Draw Crops
-    for crop in state["crops"]:
-        data = state["crop_data"].get(crop)
-        if not data: continue
-        cx = crop[0] * CELL_SIZE - camera_x
-        cy = crop[1] * CELL_SIZE - camera_y
-        
-        if cx + ITEM_PX < 0 or cx > WIDTH or cy + ITEM_PX < 0 or cy > HEIGHT:
-            continue
-            
-        rect = pygame.Rect(cx, cy, ITEM_PX, ITEM_PX)
-        pygame.draw.rect(screen, (101, 67, 33), rect) # Dirt
-        pygame.draw.rect(screen, (80, 50, 20), rect, 2)
-        
-        stage = data["stage"]
-        max_stage = data["max_stage"]
-        ctype = data["type"]
-        
-        # 1. Smooth progress calculation
-        if stage < max_stage and state["phase"] == "day":
-            day_progress = (120 - state["time_left"]) / 120.0
-        else:
-            day_progress = 0
-            
-        if stage >= max_stage:
-            total_progress = 1.0
-        else:
-            total_progress = (stage + day_progress) / max_stage
-            
-        # 2. Draw mature crop onto a temporary surface
-        crop_surf = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
-        center = (ITEM_PX // 2, ITEM_PX // 2)
-        
-        if ctype == "tomato":
-            pygame.draw.circle(crop_surf, (255, 99, 71), center, 18)
-            pygame.draw.circle(crop_surf, (34, 139, 34), (center[0], center[1]-15), 5)
-        elif ctype == "carrot":
-            pygame.draw.polygon(crop_surf, (255, 140, 0), [(center[0], center[1]+18), (center[0]-10, center[1]-12), (center[0]+10, center[1]-12)])
-            pygame.draw.circle(crop_surf, (34, 139, 34), (center[0], center[1]-18), 6)
-        elif ctype == "corn":
-            pygame.draw.ellipse(crop_surf, (255, 215, 0), (center[0]-10, center[1]-18, 20, 36))
-            pygame.draw.polygon(crop_surf, (154, 205, 50), [(center[0], center[1]+18), (center[0]-15, center[1]), (center[0]-5, center[1]+18)])
-        elif ctype == "pumpkin":
-            pygame.draw.circle(crop_surf, (255, 127, 80), center, 22)
-            pygame.draw.arc(crop_surf, (200, 100, 50), (center[0]-18, center[1]-18, 36, 36), 0, 3.14, 2)
-            pygame.draw.rect(crop_surf, (34, 139, 34), (center[0]-2, center[1]-26, 4, 8))
-            
-        # 3. Growth Animation (Scaling)
-        scale = 0.2 + 0.8 * total_progress
-        if scale > 1.0: scale = 1.0
-        scaled_size = int(ITEM_PX * scale)
-        if scaled_size > 0:
-            scaled_surf = pygame.transform.scale(crop_surf, (scaled_size, scaled_size))
-            offset = (ITEM_PX - scaled_size) // 2
-            screen.blit(scaled_surf, (cx + offset, cy + offset))
-            
-        # 4. Progress Bar
-        bar_w = ITEM_PX - 20
-        bar_h = 6
-        bar_x = cx + 10
-        bar_y = cy + ITEM_PX - 12
-        pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_w, bar_h))
-        fill_w = int(bar_w * total_progress)
-        color = (50, 205, 50) if stage < max_stage else (255, 215, 0)
-        if fill_w > 0:
-            pygame.draw.rect(screen, color, (bar_x, bar_y, fill_w, bar_h))
-
-    # Draw Scarecrows
-    for sc in state.get("scarecrows", []):
-        cx = sc[0] * CELL_SIZE - camera_x
-        cy = sc[1] * CELL_SIZE - camera_y
-        if cx + ITEM_PX < 0 or cx > WIDTH or cy + ITEM_PX < 0 or cy > HEIGHT:
-            continue
-        rect = pygame.Rect(cx, cy, ITEM_PX, ITEM_PX)
-        center = rect.center
-        pygame.draw.rect(screen, (139, 69, 19), (center[0]-3, center[1]-15, 6, 30))
-        pygame.draw.rect(screen, (139, 69, 19), (center[0]-15, center[1]-5, 30, 4))
-        pygame.draw.circle(screen, (245, 222, 179), (center[0], center[1]-20), 10)
-        pygame.draw.polygon(screen, (100, 100, 100), [(center[0]-12, center[1]-25), (center[0]+12, center[1]-25), (center[0], center[1]-40)])
-
-    if state["thief_pos"][0] >= 0: 
-        draw_obj(state["thief_pos"], images["thief"], RED, "circle")
-        tx, ty = state["thief_pos"]
-        screen_x = int(tx * CELL_SIZE) - camera_x
-        screen_y = int(ty * CELL_SIZE) - camera_y
-        if 0 <= screen_x <= WIDTH and 0 <= screen_y <= HEIGHT:
-            hp = state.get("thief_hp", 3)
-            pygame.draw.rect(screen, RED, (screen_x, screen_y - 10, ITEM_PX, 6))
-            pygame.draw.rect(screen, (0, 255, 0), (screen_x, screen_y - 10, ITEM_PX * (hp / max(1, hp, 3)), 6))
-
-    for fence in state["fences"]: 
-        x, y = fence[0], fence[1]
-        screen_x = x * CELL_SIZE - camera_x
-        screen_y = y * CELL_SIZE - camera_y
-        
-        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT:
-            continue
-            
-        rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
-        img = images.get("fence")
-        if img:
-            scaled_img = pygame.transform.scale(img, (ITEM_PX, ITEM_PX))
-            scaled_img.set_alpha(100) # 更高的透明度 (100)
-            screen.blit(scaled_img, rect)
-        else:
-            # Fallback
-            pygame.draw.rect(screen, (139, 69, 19), rect)
-
-    for dog in state["dogs"]: draw_obj(dog, images["dog"], YELLOW, "circle")
-    for cat in state.get("cats", []): draw_obj(cat, images["cat"], (255,165,0))
-    for goose in state.get("geese", []): draw_obj(goose, images["goose"], WHITE)
-    for owl in state.get("owls", []): draw_obj(owl, images["owl"], (139,69,19))
-    
-    if state['phase'] == "day" and mouse_pos and not shop_open:
-        mx, my = mouse_pos
-        if my >= 0 and my < HEIGHT:
-            gx = (mx + camera_x - ITEM_PX // 2) // CELL_SIZE
-            gy = (my + camera_y - ITEM_PX // 2) // CELL_SIZE
-            gx = max(0, min(GRID_W - ITEM_SIZE, gx))
-            gy = max(0, min(GRID_H - ITEM_SIZE, gy))
-            
-            screen_x = gx * CELL_SIZE - camera_x
-            screen_y = gy * CELL_SIZE - camera_y
-            
-            s = pygame.Surface((ITEM_PX, ITEM_PX))
-            s.set_alpha(128)
-            
-            if current_tool == "fertilizer":
-                s.fill((173, 255, 47))
-            elif current_tool == "shovel":
-                s.fill((169, 169, 169))
-            else:
-                s.fill(WHITE)
-                preview_img = images.get(current_tool)
-                if preview_img: 
-                    s.blit(pygame.transform.scale(preview_img, (ITEM_PX, ITEM_PX)), (0, 0))
-                else:
-                    # Text fallback for cursor
-                    tool_name = TOOL_NAMES.get(current_tool, current_tool)[:2]
-                    txt = font_small.render(tool_name, True, BLACK)
-                    s.blit(txt, (ITEM_PX//2 - txt.get_width()//2, ITEM_PX//2 - txt.get_height()//2))
-                
-            screen.blit(s, (screen_x, screen_y))
-
-    # 畫建造中的項目
-    for task in state.get("building_tasks", []):
-        x, y = task["pos"]
-        screen_x = x * CELL_SIZE - camera_x
-        screen_y = y * CELL_SIZE - camera_y
-        
-        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT:
-            continue
-            
-        rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
-        progress_ratio = task["progress"] / task["max_progress"]
-        h = int(ITEM_PX * progress_ratio)
-        if h <= 0: h = 1
-        
-        img = None
-        t_type = task["type"]
-        if t_type == "dog": img = images.get("dog")
-        elif t_type == "cat": img = images.get("cat")
-        elif t_type == "goose": img = images.get("goose")
-        elif t_type == "owl": img = images.get("owl")
-        elif t_type == "fence": img = images.get("fence")
-            
-        if img:
-            scaled_img = pygame.transform.scale(img, (ITEM_PX, ITEM_PX))
-            scaled_img.set_alpha(150)
-            crop_rect = pygame.Rect(0, ITEM_PX - h, ITEM_PX, h)
-            screen.blit(scaled_img, (rect.x, rect.y + ITEM_PX - h), crop_rect)
-        elif t_type == "crop":
-            pygame.draw.rect(screen, (101, 67, 33), (rect.x, rect.y + ITEM_PX - h, ITEM_PX, h))
-            
-        b_text = font_tiny.render("building", True, WHITE)
-        screen.blit(b_text, (rect.centerx - b_text.get_width()//2, rect.centery - b_text.get_height()//2))
-
-    # Top Panel
-    top_panel = pygame.Surface((WIDTH - 40, 80), pygame.SRCALPHA)
-    pygame.draw.rect(top_panel, (0, 0, 0, 180), top_panel.get_rect(), border_radius=15)
-    screen.blit(top_panel, (20, 20))
-    
-    mins = state['time_left'] // 60
-    secs = state['time_left'] % 60
-    phase_str = "白天" if state['phase'] == "day" else "夜晚"
-    phase_text = f"第 {state['day_count']} 回合 - {phase_str} ({mins:02d}:{secs:02d})"
-    text_surf = font_large.render(phase_text, True, WHITE)
-    screen.blit(text_surf, (40, 30))
-    
-    pet_stats = f"狗: {len(state.get('dogs',[]))}/10   貓: {len(state.get('cats',[]))}/10   鵝: {len(state.get('geese',[]))}/5   鷹: {len(state.get('owls',[]))}/5"
-    pet_surf = font_small.render(pet_stats, True, (200, 200, 255))
-    screen.blit(pet_surf, (40, 65))
-    
-    rent = 20 + (state["day_count"] - 1) * 10
-    money_surf = font_small.render(f"資金: ${state['money']} (今晚租金: ${rent})", True, YELLOW)
-    screen.blit(money_surf, (WIDTH - money_surf.get_width() - 40, 35))
-    
-    # Bottom Panel
-    bottom_panel = pygame.Surface((WIDTH - 40, 80), pygame.SRCALPHA)
-    pygame.draw.rect(bottom_panel, (0, 0, 0, 180), bottom_panel.get_rect(), border_radius=15)
-    screen.blit(bottom_panel, (20, HEIGHT - 100))
-    
-    msg = state.get("last_msg", "")
-    msg_surf = font_small.render(msg, True, WHITE)
-    screen.blit(msg_surf, (40, HEIGHT - 85))
-    
-    help_text = "[空白]: 進入夜晚  [B]: 打開商店  [WASD/右鍵]: 移動視角"
-    help_surf = font_tiny.render(help_text, True, (200, 200, 200))
-    screen.blit(help_surf, (40, HEIGHT - 45))
-    
-    indicator = font_small.render(f"裝備中: {TOOL_NAMES.get(current_tool, current_tool)}", True, WHITE)
-    screen.blit(indicator, (WIDTH - indicator.get_width() - 40, HEIGHT - 85))
-    
-    # Shop UI
-    if shop_open:
-        shop_surf = pygame.Surface((WIDTH, HEIGHT))
-        shop_surf.set_alpha(150)
-        shop_surf.fill(BLACK)
-        screen.blit(shop_surf, (0, 0))
-        
-        shop_rect = pygame.Rect(50, 50, WIDTH - 100, HEIGHT - 100)
-        pygame.draw.rect(screen, (245, 245, 250), shop_rect, border_radius=15)
-        
-        # Tabs
-        tab_w = (shop_rect.width - 90) // 4
-        tab_seed = pygame.Rect(70, 70, tab_w, 40)
-        tab_def = pygame.Rect(70 + tab_w + 10, 70, tab_w, 40)
-        tab_pet = pygame.Rect(70 + (tab_w + 10)*2, 70, tab_w, 40)
-        tab_tool = pygame.Rect(70 + (tab_w + 10)*3, 70, tab_w, 40)
-        
-        pygame.draw.rect(screen, BLUE if active_tab == "seed" else GRAY, tab_seed, border_radius=10)
-        pygame.draw.rect(screen, BLUE if active_tab == "def" else GRAY, tab_def, border_radius=10)
-        pygame.draw.rect(screen, BLUE if active_tab == "pet" else GRAY, tab_pet, border_radius=10)
-        pygame.draw.rect(screen, BLUE if active_tab == "tool" else GRAY, tab_tool, border_radius=10)
-        
-        ts1 = font_small.render("種子商店", True, WHITE)
-        ts2 = font_small.render("防禦建築", True, WHITE)
-        ts3 = font_small.render("寵物商店", True, WHITE)
-        ts4 = font_small.render("實用工具", True, WHITE)
-        screen.blit(ts1, (tab_seed.centerx - ts1.get_width()//2, tab_seed.centery - ts1.get_height()//2))
-        screen.blit(ts2, (tab_def.centerx - ts2.get_width()//2, tab_def.centery - ts2.get_height()//2))
-        screen.blit(ts3, (tab_pet.centerx - ts3.get_width()//2, tab_pet.centery - ts3.get_height()//2))
-        screen.blit(ts4, (tab_tool.centerx - ts4.get_width()//2, tab_tool.centery - ts4.get_height()//2))
-        
-        items = []
-        if active_tab == "seed":
-            items = [
-                {"id": "tomato", "name": "番茄種子", "price": 30, "desc": "1天熟，收益$90"},
-                {"id": "carrot", "name": "紅蘿蔔種子", "price": 50, "desc": "2天熟，收益$180"},
-                {"id": "corn", "name": "玉米種子", "price": 100, "desc": "2天熟，收益$375"},
-                {"id": "pumpkin", "name": "南瓜種子", "price": 200, "desc": "3天熟，收益$900"}
-            ]
-        elif active_tab == "def":
-            items = [
-                {"id": "fence", "name": "木圍欄", "price": 100, "desc": "絕對路障，小偷需繞路"},
-                {"id": "scarecrow", "name": "稻草人", "price": 150, "desc": "放在田裡當誘餌"}
-            ]
-        elif active_tab == "pet":
-            items = [
-                {"id": "dog", "name": "看門狗", "price": "FREE" if state.get("free_dog") else 200, "desc": "夜晚咬退小偷"},
-                {"id": "cat", "name": "招財貓", "price": 150, "desc": "白天隨機撿錢"},
-                {"id": "goose", "name": "大白鵝", "price": 300, "desc": "全域緩速小偷"},
-                {"id": "owl", "name": "貓頭鷹", "price": 250, "desc": "機率嚇跑小偷"}
-            ]
-        elif active_tab == "tool":
-            items = [
-                {"id": "fertilizer", "name": "魔法肥料", "price": 80, "desc": "瞬間成熟"},
-                {"id": "shovel", "name": "鐵鏟", "price": "FREE", "desc": "移除物件 (免費)"}
-            ]
-            
-        y_offset = 130
-        for item in items:
-            card_rect = pygame.Rect(70, y_offset, shop_rect.width - 40, 70)
-            pygame.draw.rect(screen, WHITE, card_rect, border_radius=10)
-            
-            img = images.get(item["id"])
-            if img:
-                screen.blit(pygame.transform.scale(img, (50, 50)), (card_rect.x + 10, card_rect.y + 10))
-            else:
-                pygame.draw.rect(screen, (220, 220, 220), (card_rect.x + 10, card_rect.y + 10, 50, 50), border_radius=5)
-                fb_text = font_tiny.render(item["name"][:2], True, (100, 100, 100))
-                screen.blit(fb_text, (card_rect.x + 35 - fb_text.get_width()//2, card_rect.y + 35 - fb_text.get_height()//2))
-                
-            n_surf = font_small.render(item["name"], True, BLACK)
-            screen.blit(n_surf, (card_rect.x + 70, card_rect.y + 10))
-            
-            d_surf = font_tiny.render(item["desc"], True, GRAY)
-            screen.blit(d_surf, (card_rect.x + 70, card_rect.y + 35))
-            
-            p_surf = font_small.render(f"${item['price']}" if isinstance(item['price'], int) else item['price'], True, YELLOW if item['price'] != "FREE" else RED)
-            screen.blit(p_surf, (card_rect.right - 80, card_rect.centery - p_surf.get_height()//2))
-            
-            if card_rect.collidepoint(mouse_pos):
-                pygame.draw.rect(screen, BLUE, card_rect, 2, border_radius=10)
-            
-            y_offset += 85
-            
-    if is_terminal(state):
-        s = pygame.Surface((WIDTH, HEIGHT))
-        s.set_alpha(200)
-        s.fill(BLACK)
-        screen.blit(s, (0, 0))
-        
-        res_surf = font_large.render("GAME OVER", True, RED)
-        res_rect = res_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30))
-        screen.blit(res_surf, res_rect)
-        
-        info_surf = font_small.render(f"你總共生存了 {state['day_count'] - 1} 天", True, WHITE)
-        info_rect = info_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 20))
-        screen.blit(info_surf, info_rect)
-
 def play():
-    global camera_x, camera_y
     state = new_game()
     clock = pygame.time.Clock()
-    current_tool = "tomato"
+    current_tool = "hoe"
     shop_open = False
     active_tab = "seed"
+    active_zone = "farm"
     
+    camera_x = (WORLD_W - WIDTH) // 2
+    camera_y = (WORLD_H - HEIGHT) // 2
+    _initial_camera = (camera_x, camera_y)
+
     pygame.mouse.get_rel()
-    
+
     last_night_tick = 0
     night_tick_delay = 33
-    
-    night_filter = pygame.Surface((WIDTH, HEIGHT - MARGIN_TOP - MARGIN_BOTTOM))
-    night_filter.set_alpha(100)
-    night_filter.fill((0, 0, 80))
-    
+    night_start_time = None   # time.time() when night phase began
+    NIGHT_FADE_DURATION = 2.0  # seconds for night to fully darken
+
+    # -- 思索模式 (contemplation mode) -----------------------------------
+    # Holding F pauses the simulation (crops/enemies/day timer) and dims
+    # the screen while a short, situational hint is shown. See
+    # src/tutorial.py for what gets shown and why -- nothing here decides
+    # tutorial *content*, this just wires the F key to it.
+    f_held = False
+    f_held_since = None
+    CONTEMPLATION_FADE_DURATION = 0.25
+    contemplation_filter = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    contemplation_filter.fill((5, 5, 15))
+
+    import time
+
+    # Trigger background load
+    get_bg_surfs()
+
     running = True
     while running:
+        old_zone = active_zone
         mouse_pos = pygame.mouse.get_pos()
         
         for event in pygame.event.get():
@@ -473,106 +71,135 @@ def play():
                 break
                 
             if event.type == TICK_EVENT:
-                if not is_terminal(state):
+                # Holding F pauses the simulation -- see the f_held block below.
+                if not is_terminal(state) and not f_held:
                     state = apply_action(state, "tick")
-                
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if not is_terminal(state):
-                    mx, my = event.pos
-                    
-                    if shop_open:
-                        shop_rect = pygame.Rect(50, 50, WIDTH - 100, HEIGHT - 100)
-                        if not shop_rect.collidepoint(mx, my):
-                            shop_open = False
-                        else:
-                            tab_w = (shop_rect.width - 90) // 4
-                            tab_seed = pygame.Rect(70, 70, tab_w, 40)
-                            tab_def = pygame.Rect(70 + tab_w + 10, 70, tab_w, 40)
-                            tab_pet = pygame.Rect(70 + (tab_w + 10)*2, 70, tab_w, 40)
-                            tab_tool = pygame.Rect(70 + (tab_w + 10)*3, 70, tab_w, 40)
-                            
-                            if tab_seed.collidepoint(mx, my): active_tab = "seed"
-                            elif tab_def.collidepoint(mx, my): active_tab = "def"
-                            elif tab_pet.collidepoint(mx, my): active_tab = "pet"
-                            elif tab_tool.collidepoint(mx, my): active_tab = "tool"
-                            
-                            y_offset = 130
-                            items_len = 4 if active_tab in ["seed", "pet"] else 2
-                            for i in range(items_len):
-                                card_rect = pygame.Rect(70, y_offset, shop_rect.width - 40, 70)
-                                if card_rect.collidepoint(mx, my):
-                                    if active_tab == "seed": current_tool = ["tomato", "carrot", "corn", "pumpkin"][i]
-                                    elif active_tab == "def": current_tool = ["fence", "scarecrow"][i]
-                                    elif active_tab == "pet": current_tool = ["dog", "cat", "goose", "owl"][i]
-                                    elif active_tab == "tool": current_tool = ["fertilizer", "shovel"][i]
-                                    shop_open = False
-                                    break
-                                y_offset += 85
-                    else:
-                        if my >= MARGIN_TOP and my < HEIGHT - MARGIN_BOTTOM:
-                            gx = (mx + camera_x - ITEM_PX // 2) // CELL_SIZE
-                            gy = (my - MARGIN_TOP + camera_y - ITEM_PX // 2) // CELL_SIZE
-                            
-                            tx, ty = state["thief_pos"]
-                            if state["phase"] == "night" and tx <= gx + ITEM_SIZE//2 < tx + ITEM_SIZE and ty <= gy + ITEM_SIZE//2 < ty + ITEM_SIZE:
-                                state = apply_action(state, f"click_{tx}_{ty}")
-                            else:
-                                if current_tool == "fence": state = apply_action(state, f"build_fence_{gx}_{gy}")
-                                elif current_tool == "scarecrow": state = apply_action(state, f"build_scarecrow_{gx}_{gy}")
-                                elif current_tool in ["tomato", "carrot", "corn", "pumpkin"]: state = apply_action(state, f"plant_crop_{current_tool}_{gx}_{gy}")
-                                elif current_tool == "fertilizer": state = apply_action(state, f"use_fertilizer_{gx}_{gy}")
-                                elif current_tool == "shovel": state = apply_action(state, f"use_shovel_{gx}_{gy}")
-                                elif current_tool == "dog": state = apply_action(state, f"place_dog_{gx}_{gy}")
-                                elif current_tool == "cat": state = apply_action(state, f"place_cat_{gx}_{gy}")
-                                elif current_tool == "goose": state = apply_action(state, f"place_goose_{gx}_{gy}")
-                                elif current_tool == "owl": state = apply_action(state, f"place_owl_{gx}_{gy}")
-                            
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE:
-                    if not is_terminal(state): state = apply_action(state, "start_night")
-                elif event.key == pygame.K_r: state = new_game()
-                elif event.key == pygame.K_b: shop_open = not shop_open
-                elif event.key == pygame.K_1: current_tool = "fence"
-                elif event.key == pygame.K_2: current_tool = "dog"
-                elif event.key == pygame.K_3: current_tool = "tomato"
 
-        keys = pygame.key.get_pressed()
-        cam_speed = 15
-        if keys[pygame.K_w] or keys[pygame.K_UP]: camera_y -= cam_speed
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]: camera_y += cam_speed
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]: camera_x -= cam_speed
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]: camera_x += cam_speed
+            if event.type == pygame.MOUSEBUTTONDOWN and not f_held:
+                log_action(f"Click at {mouse_pos}, tool={current_tool}, zone={active_zone}, cam=({camera_x},{camera_y})")
+                state, current_tool, shop_open, active_tab, active_zone = handle_mouse_click(
+                    state, event, current_tool, shop_open, active_tab, camera_x, camera_y, active_zone
+                )
+                log_action(f"After click: tool={current_tool}, msg={state.get('last_msg')}")
+                                
+            elif event.type == pygame.KEYDOWN:
+                log_action(f"Key pressed: {pygame.key.name(event.key)}")
+                if event.key == pygame.K_0:
+                    state["debug_show_grid"] = not state.get("debug_show_grid", False)
+                elif state.get("debug_scale_mode"):
+                    from src.config import SPRITE_SCALES
+                    k = list(SPRITE_SCALES.keys())[state.get("debug_scale_idx", 0)]
+                    w, h = SPRITE_SCALES[k]
+                    if event.key == pygame.K_TAB:
+                        idx = state.get("debug_scale_idx", 0)
+                        keys_list = list(SPRITE_SCALES.keys())
+                        state["debug_scale_idx"] = (idx + 1) % len(keys_list)
+                    elif event.key == pygame.K_MINUS: SPRITE_SCALES[k] = (round(w-0.1, 1), h)
+                    elif event.key == pygame.K_EQUALS: SPRITE_SCALES[k] = (round(w+0.1, 1), h)
+                    elif event.key == pygame.K_LEFTBRACKET: SPRITE_SCALES[k] = (w, round(h-0.1, 1))
+                    elif event.key == pygame.K_RIGHTBRACKET: SPRITE_SCALES[k] = (w, round(h+0.1, 1))
+                    elif event.key == pygame.K_F10:
+                        print("Current SPRITE_SCALES:")
+                        for key, val in SPRITE_SCALES.items():
+                            print(f'    "{key}": {val},')
+                else:
+                    state, current_tool, shop_open, active_zone = handle_keyboard_events(
+                        state, event, current_tool, shop_open, active_zone
+                    )
+
+        keys_pressed = pygame.key.get_pressed()
+
+        # F is a hold-to-enter / release-to-exit toggle, not a single
+        # keypress -- continuous polling (like WASD below) is the correct
+        # way to detect "held", KEYDOWN/KEYUP would double-fire on repeat.
+        f_held = keys_pressed[pygame.K_f]
+        if f_held and f_held_since is None:
+            f_held_since = time.time()
+        elif not f_held:
+            f_held_since = None
+
+        keys_dict = {
+            pygame.K_w: keys_pressed[pygame.K_w],
+            pygame.K_UP: keys_pressed[pygame.K_UP],
+            pygame.K_s: keys_pressed[pygame.K_s],
+            pygame.K_DOWN: keys_pressed[pygame.K_DOWN],
+            pygame.K_a: keys_pressed[pygame.K_a],
+            pygame.K_LEFT: keys_pressed[pygame.K_LEFT],
+            pygame.K_d: keys_pressed[pygame.K_d],
+            pygame.K_RIGHT: keys_pressed[pygame.K_RIGHT],
+        }
         
         mouse_buttons = pygame.mouse.get_pressed()
-        if mouse_buttons[2]:
-            mx, my = pygame.mouse.get_rel()
-            camera_x -= mx
-            camera_y -= my
-        else:
-            pygame.mouse.get_rel()
-            
-        # 如果螢幕比世界還大，將視角置中，否則限制在邊界內
-        if WORLD_W < WIDTH:
+        mouse_rel = pygame.mouse.get_rel() if mouse_buttons[2] else (0, 0)
+        if not mouse_buttons[2]:
+            pygame.mouse.get_rel() # clear relative movement
+        if old_zone != active_zone:
+            # Farm and decor are separate maps now, each with its own (0,0)
+            # origin -- switching zones re-centers the camera on the newly
+            # entered map instead of jumping to an offset within one shared
+            # coordinate line.
             camera_x = (WORLD_W - WIDTH) // 2
-        else:
-            camera_x = max(0, min(WORLD_W - WIDTH, camera_x))
-            
-        if WORLD_H < HEIGHT:
             camera_y = (WORLD_H - HEIGHT) // 2
+            note_event(state, "zone_switched")
+
+        from src.input_handler import update_camera
+        camera_x, camera_y = update_camera(
+            camera_x, camera_y,
+            mouse_buttons[2], mouse_rel, keys_dict,
+            WORLD_W, WORLD_H, WIDTH, HEIGHT, active_zone
+        )
+        if (camera_x, camera_y) != _initial_camera:
+            note_event(state, "camera_moved")
+
+        # Grid cell the mouse is hovering, in the same units/snap the click
+        # handler and renderer's placement preview already use -- this is
+        # what lets 思索模式 hints react to *where* the cursor is, not just
+        # which tool/zone is active. None while the shop covers the world.
+        if mouse_pos and not shop_open:
+            hover_world_x = mouse_pos[0] + camera_x
+            hover_world_y = mouse_pos[1] + camera_y
+            _hover_grid_px = CELL_SIZE * 10
+            hover_pos = (
+                int(hover_world_x // _hover_grid_px) * 10,
+                int(hover_world_y // _hover_grid_px) * 10,
+            )
         else:
-            camera_y = max(0, min(WORLD_H - HEIGHT, camera_y))
-        
-        if state["phase"] == "night" and not is_terminal(state):
+            hover_pos = None
+
+        # Holding F pauses enemy/night ticking too, same reasoning as the
+        # TICK_EVENT gate above.
+        if state["phase"] == "night" and not is_terminal(state) and not f_held:
             current_time = pygame.time.get_ticks()
             if current_time - last_night_tick > night_tick_delay:
                 state = apply_action(state, "night_tick")
                 last_night_tick = current_time
 
-        draw_board(state, current_tool, mouse_pos, shop_open, active_tab)
+        screen.fill((0, 0, 0))
+        from src.renderer import draw_board
+        draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone)
         
         if state["phase"] == "night":
+            # Smooth fade-in for night filter
+            if night_start_time is None:
+                night_start_time = time.time()
+            elapsed = time.time() - night_start_time
+            fade_ratio = min(1.0, elapsed / NIGHT_FADE_DURATION)
+            night_filter.set_alpha(int(150 * fade_ratio))
             screen.blit(night_filter, (0, 0))
-            
+        else:
+            night_start_time = None  # Reset when day begins
+
+        # 思索模式：dim the (still-visible, just paused) world and show a
+        # short, situational hint. Suppressed while the shop is open so the
+        # two overlays never fight for the same screen space.
+        if f_held and not shop_open:
+            elapsed = time.time() - f_held_since if f_held_since else 0.0
+            fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
+            contemplation_filter.set_alpha(int(120 * fade_ratio))
+            screen.blit(contemplation_filter, (0, 0))
+            lines = get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos)
+            draw_contemplation(screen, lines, fade_ratio)
+
         pygame.display.flip()
         clock.tick(30)
         

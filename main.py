@@ -12,7 +12,7 @@ def print_board(state):
             pos = (x, y)
             if pos == state["thief_pos"]:
                 row += "🥷 " # 小偷
-            elif pos in state.get("crops", []) or pos == state.get("crop_pos"):
+            elif pos in state.get("crops", []):
                 row += "🌱 " # 農作物
             elif pos in state["fences"]:
                 row += "🚧 " # 圍欄
