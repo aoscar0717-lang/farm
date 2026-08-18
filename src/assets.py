@@ -35,7 +35,7 @@ def load_image(filename, target_size=(ITEM_PX, ITEM_PX)):
     return None
 
 images["thief"] = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Character/Walk.png", 0, 0, 32, 32, (60, 60))
-images["fence"] = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Fence's copiar.png", 0, 0, 16, 16, (ITEM_PX, ITEM_PX))
+images["fence"] = sprite_loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png", 3, 0, 16, 16, (ITEM_PX, ITEM_PX))
 images["dog"] = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Male Cow Brown.png", 0, 0, 32, 32, (60, 60))
 images["cat"] = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png", 0, 0, 16, 16, (60, 60))
 images["goose"] = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Chicken Red.png", 0, 0, 16, 16, (60, 60))

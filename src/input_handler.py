@@ -1,6 +1,7 @@
 import pygame
 from src.config import *
 from src.capstone_contract import apply_action, new_game, is_terminal, CROP_INFO
+from src.tutorial import note_event
 
 def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera_x, camera_y, active_zone):
     if is_terminal(state):
@@ -117,39 +118,44 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
                 return state, current_tool, shop_open, active_tab, active_zone
             elif shop_btn_rect.collidepoint(mx, my):
                 shop_open = True
+                note_event(state, "shop_opened")
                 return state, current_tool, shop_open, active_tab, active_zone
                 
-            if current_tool:
+            if not shop_open and my > MARGIN_TOP and my < HEIGHT - MARGIN_BOTTOM:
+                # Farm and decor are independent maps now: whichever zone the
+                # camera is currently showing is exactly the zone the click
+                # belongs to, so there's no "wrong side of the world" check
+                # needed anymore (there's no shared coordinate line to cross).
                 world_x = mx + camera_x
                 world_y = my + camera_y
-                # Snap to ITEM_PX grid to prevent overlapping
-                ITEM_PX = CELL_SIZE * 10
-                gx = int(world_x // ITEM_PX) * 10
-                gy = int(world_y // ITEM_PX) * 10
-                
-                if current_tool == "hoe":
-                    state = apply_action(state, f"use_hoe_{gx}_{gy}")
-                elif current_tool == "scythe":
-                    state = apply_action(state, f"use_scythe_{gx}_{gy}")
-                elif current_tool == "shovel":
-                    state = apply_action(state, f"use_shovel_{gx}_{gy}")
-                elif current_tool == "fertilizer":
-                    state = apply_action(state, f"use_fertilizer_{gx}_{gy}")
-                elif current_tool in ["radish", "carrot", "pumpkin"]:
-                    state = apply_action(state, f"plant_crop_{current_tool}_{gx}_{gy}")
-                elif current_tool in ["stone_path", "flower", "bench", "fountain"]:
-                    state = apply_action(state, f"build_decor_{current_tool}_{gx}_{gy}")
-                elif current_tool == "fence":
-                    state = apply_action(state, f"build_fence_{gx}_{gy}")
-                elif current_tool == "trap":
-                    state = apply_action(state, f"place_trap_{gx}_{gy}")
-                elif current_tool == "dog":
-                    state = apply_action(state, f"place_dog_{gx}_{gy}")
-            else:
-                world_x = mx + camera_x
-                world_y = my + camera_y
-                gx, gy = world_x, world_y
-                state = apply_action(state, f"click_{gx}_{gy}")
+
+                if current_tool:
+                    # Snap to ITEM_PX grid to prevent overlapping
+                    ITEM_PX = CELL_SIZE * 10
+                    gx = int(world_x // ITEM_PX) * 10
+                    gy = int(world_y // ITEM_PX) * 10
+
+                    if current_tool == "hoe":
+                        state = apply_action(state, f"use_hoe_{gx}_{gy}", active_zone)
+                    elif current_tool == "scythe":
+                        state = apply_action(state, f"use_scythe_{gx}_{gy}", active_zone)
+                    elif current_tool == "shovel":
+                        state = apply_action(state, f"use_shovel_{gx}_{gy}", active_zone)
+                    elif current_tool == "fertilizer":
+                        state = apply_action(state, f"use_fertilizer_{gx}_{gy}", active_zone)
+                    elif current_tool in ["radish", "carrot", "pumpkin"]:
+                        state = apply_action(state, f"plant_crop_{current_tool}_{gx}_{gy}", active_zone)
+                    elif current_tool in ["stone_path", "flower", "bench", "fountain"]:
+                        state = apply_action(state, f"build_decor_{current_tool}_{gx}_{gy}", active_zone)
+                    elif current_tool == "fence":
+                        state = apply_action(state, f"build_fence_{gx}_{gy}", active_zone)
+                    elif current_tool == "trap":
+                        state = apply_action(state, f"place_trap_{gx}_{gy}", active_zone)
+                    elif current_tool == "dog":
+                        state = apply_action(state, f"place_dog_{gx}_{gy}", active_zone)
+                else:
+                    gx, gy = world_x, world_y
+                    state = apply_action(state, f"click_{gx}_{gy}", active_zone)
                 
     return state, current_tool, shop_open, active_tab, active_zone
 
@@ -160,6 +166,8 @@ def handle_keyboard_events(state, event, current_tool, shop_open, active_zone):
         active_zone = "decor" if active_zone == "farm" else "farm"
     elif event.key == pygame.K_b:
         shop_open = not shop_open
+        if shop_open:
+            note_event(state, "shop_opened")
     elif event.key == pygame.K_SPACE:
         if not is_terminal(state): 
             state = apply_action(state, "start_night")
@@ -178,21 +186,18 @@ def update_camera(camera_x, camera_y, mouse_pressed, mouse_rel, keys, WORLD_W, W
     if keys.get(pygame.K_s, False) or keys.get(pygame.K_DOWN, False): camera_y += cam_speed
     if keys.get(pygame.K_a, False) or keys.get(pygame.K_LEFT, False): camera_x -= cam_speed
     if keys.get(pygame.K_d, False) or keys.get(pygame.K_RIGHT, False): camera_x += cam_speed
-    
+
     if mouse_pressed:
         mx, my = mouse_rel
         camera_x -= mx
         camera_y -= my
-        
-    # Split world into two maps: Farm (0 to 50*CELL_SIZE) and Decor (50*CELL_SIZE to WORLD_W)
-    mid_x = 50 * 32  # 1600
-    map_w = mid_x
-    
-    if active_zone == "farm":
-        camera_x = max(0, min(camera_x, max(0, map_w - WIDTH)))
-    else:
-        camera_x = max(mid_x, min(camera_x, max(mid_x, WORLD_W - WIDTH)))
-            
+
+    # Farm and decor are independent maps, each with its own (0,0) origin.
+    # Both zones use the same WORLD_W/WORLD_H (they're the same size), so the
+    # clamp formula is identical for either -- but crucially there is no
+    # shared halfway line between them anymore; active_zone is kept in the
+    # signature only in case the two maps ever need different sizes later.
+    camera_x = max(0, min(camera_x, max(0, WORLD_W - WIDTH)))
     camera_y = max(0, min(camera_y, max(0, WORLD_H - HEIGHT)))
-        
+
     return camera_x, camera_y

@@ -3,16 +3,20 @@ import time
 from src.config import *
 from src.assets import images, night_filter, get_bg_surfs, sprite_loader
 from src.ui import draw_hud, draw_shop, draw_game_over
-from src.capstone_contract import is_terminal
+from src.capstone_contract import is_terminal, fence_damage_state, DECOR_MAX_HP
 
-def is_cell_occupied(state, gx, gy):
+def is_cell_occupied(zone, gx, gy):
     pos = (gx, gy)
-    if pos in state.get("crops", []): return True
-    if any(f[0] == gx and f[1] == gy for f in state.get("fences", [])): return True
-    if pos in state.get("trees", []): return True
+    if pos in zone.get("crops", []): return True
+    if any(f[0] == gx and f[1] == gy for f in zone.get("fences", [])): return True
+    if pos in zone.get("trees", []): return True
 
 def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone):
-    
+    # Farm and decor are independent maps now -- everything drawn below
+    # (except HUD-level globals like money/phase/inventory) reads from the
+    # currently active zone's own entity lists, never the other zone's.
+    zstate = state[active_zone]
+
     bg_left, bg_right = get_bg_surfs()
     bg = bg_left if active_zone == "farm" else bg_right
     pw, ph = bg.get_size()
@@ -40,27 +44,25 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
             else:
                 pygame.draw.rect(screen, backup_color, rect)
                 
-    # Draw Trees
+    # Draw Trees — each tree has its own animation phase for natural look
     import time
-    anim_frame = int(time.time() * 4) % 4
-    tree_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_01_strip4.png", 0, anim_frame, 32, 34, (int(ITEM_PX * SPRITE_SCALES["tree"][0]), int(ITEM_PX * SPRITE_SCALES["tree"][1])))
-    for tx, ty in state.get("trees", []):
+    for tx, ty in zstate.get("trees", []):
+        phase_offset = (tx * 7 + ty * 13) % 40 / 10.0  # unique phase per tree
+        anim_frame = int((time.time() + phase_offset) * 3) % 4
+        tree_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_01_strip4.png", 0, anim_frame, 32, 34, (int(ITEM_PX * SPRITE_SCALES["tree"][0]), int(ITEM_PX * SPRITE_SCALES["tree"][1])))
         screen_x, screen_y = get_screen_coords(tx, ty)
         if screen_x is None: continue
         if screen_x + ITEM_PX > 0 and screen_x < WIDTH and screen_y + ITEM_PX > 0 and screen_y < HEIGHT:
             if tree_img:
-                # Center tree base on the cell
                 screen.blit(tree_img, (screen_x - ITEM_PX // 4, screen_y - int(ITEM_PX * 1.25)))
             else:
                 rect = pygame.Rect(screen_x, screen_y, ITEM_PX, ITEM_PX)
-                pygame.draw.rect(screen, (139, 69, 19), (rect.centerx - 10, rect.bottom - 30, 20, 30)) # Trunk
-                pygame.draw.circle(screen, (34, 139, 34), (rect.centerx, rect.bottom - 40), 25) # Leaves
-                pygame.draw.circle(screen, (50, 205, 50), (rect.centerx - 15, rect.bottom - 30), 20)
-                pygame.draw.circle(screen, (50, 205, 50), (rect.centerx + 15, rect.bottom - 30), 20)
+                pygame.draw.rect(screen, (139, 69, 19), (rect.centerx - 10, rect.bottom - 30, 20, 30))
+                pygame.draw.circle(screen, (34, 139, 34), (rect.centerx, rect.bottom - 40), 25)
 
     # Draw Rocks
     rock_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Tileset/spr_tileset_sunnysideworld_16px.png", 61, 2, 16, 16, (int(ITEM_PX * SPRITE_SCALES["rock"][0]), int(ITEM_PX * SPRITE_SCALES["rock"][1])))
-    for rx, ry in state.get("rocks", []):
+    for rx, ry in zstate.get("rocks", []):
         screen_x, screen_y = get_screen_coords(rx, ry)
         if screen_x is None: continue
         if screen_x + ITEM_PX > 0 and screen_x < WIDTH and screen_y + ITEM_PX > 0 and screen_y < HEIGHT:
@@ -70,29 +72,26 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
                 rect = pygame.Rect(screen_x + 10, screen_y + 30, ITEM_PX - 20, ITEM_PX - 30)
                 pygame.draw.ellipse(screen, (105, 105, 105), rect)
 
-    # Draw Farmland (beneath crops) — seamless tilled soil
-    for fx, fy in state.get("farmland", []):
+    # Draw Farmland — use Sprout Lands Tilled_Dirt sprite (col=3, row=1 = center fully-tilled tile)
+    _tilled_img = sprite_loader.get_sprite(
+        "Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Tilled_Dirt.png",
+        3, 1, 16, 16, (ITEM_PX, ITEM_PX)
+    )
+    for fx, fy in zstate.get("farmland", []):
         cx, cy = get_screen_coords(fx, fy)
         if cx is None: continue
         if cx + ITEM_PX < 0 or cx > WIDTH or cy + ITEM_PX < 0 or cy > HEIGHT: continue
-        
-        rect = pygame.Rect(cx, cy, ITEM_PX, ITEM_PX)
-        # Base dirt
-        pygame.draw.rect(screen, (110, 72, 38), rect)
-        # Subtle cross-hatch texture
-        inner = rect.inflate(-4, -4)
-        pygame.draw.rect(screen, (90, 56, 24), inner, 1)
-        # Small pebble dots for texture
-        import random as _rnd
-        _rnd.seed(fx * 1000 + fy)
-        for _ in range(3):
-            px = cx + _rnd.randint(6, ITEM_PX - 6)
-            py = cy + _rnd.randint(6, ITEM_PX - 6)
-            pygame.draw.circle(screen, (75, 46, 18), (px, py), 2)
+        if _tilled_img:
+            screen.blit(_tilled_img, (cx, cy))
+        else:
+            rect = pygame.Rect(cx, cy, ITEM_PX, ITEM_PX)
+            pygame.draw.rect(screen, (110, 72, 38), rect)
+            inner = rect.inflate(-4, -4)
+            pygame.draw.rect(screen, (90, 56, 24), inner, 1)
 
     # Draw Crops
-    for crop in state["crops"]:
-        data = state["crop_data"].get(crop)
+    for crop in zstate["crops"]:
+        data = zstate["crop_data"].get(crop)
         if not data: continue
         cx, cy = get_screen_coords(crop[0], crop[1])
         if cx is None: continue
@@ -153,26 +152,156 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
 
     # Draw Scarecrows
     scarecrow_img = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, 13, 16, 16, (int(ITEM_PX * SPRITE_SCALES["scarecrow"][0]), int(ITEM_PX * SPRITE_SCALES["scarecrow"][1])))
-    for sx, sy in state.get("scarecrows", []):
+    for sx, sy in zstate.get("scarecrows", []):
         cx, cy = get_screen_coords(sx, sy)
         if cx is None: continue
         if scarecrow_img:
             screen.blit(scarecrow_img, (cx, cy))
 
-    # Draw Fences
-    fence_img = images.get("fence")
-    for fx, fy, fhp in state.get("fences", []):
+    # Draw Fences — Wang tile bitmask: pick tile based on N/E/S/W neighbors
+    # Sprout Lands Fences.png is 4x4 (64x64px, each tile 16x16)
+    # Tile layout (col, row):
+    #   Solo = (0,0), H-left-end=(1,0), H-right-end=(3,0), H-middle=(2,0)
+    #   V-top-end=(0,1), V-bottom-end=(0,3), V-middle=(0,2)
+    #   Corner TL=(1,1), Corner TR=(3,1), Corner BL=(1,3), Corner BR=(3,3)
+    #   T-junction L=(0,2), R=(3,2), T=(1,1), B=(1,3)  — simplified cross=(1,2)
+    _fence_path = "Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png"
+    fence_set = {(f[0], f[1]) for f in zstate.get("fences", [])}
+
+    def _fence_tile(row, col):
+        return sprite_loader.get_sprite(_fence_path, row, col, 16, 16, (ITEM_PX, ITEM_PX))
+
+    # Fence combat feedback (farm zone only -- the thief is the only thing
+    # that fights fences; decor's boar keeps its own old per-tick behavior
+    # untouched, so there's nothing new to visualize there).
+    _attack_target = zstate.get("thief_attack_target_fence") if active_zone == "farm" else None
+    _hit_flash_ticks = zstate.get("thief_hit_flash", 0) if active_zone == "farm" else 0
+
+    for fx, fy, fhp in zstate.get("fences", []):
         screen_x, screen_y = get_screen_coords(fx, fy)
         if screen_x is None: continue
+        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT: continue
+
+        # Check cardinal neighbors (grid coords aligned to ITEM_SIZE)
+        N = (fx, fy - ITEM_SIZE) in fence_set
+        S = (fx, fy + ITEM_SIZE) in fence_set
+        E = (fx + ITEM_SIZE, fy) in fence_set
+        W = (fx - ITEM_SIZE, fy) in fence_set
+
+        # Bitmask: N=8, E=4, S=2, W=1
+        mask = (N << 3) | (E << 2) | (S << 1) | W
+
+        # Map bitmask to (row, col) in Fences.png
+        FENCE_MAP = {
+            0b0000: (3, 0),  # 0: isolated
+            0b0001: (3, 3),  # 1: W only
+            0b0010: (0, 0),  # 2: S only
+            0b0011: (0, 3),  # 3: S, W
+            0b0100: (3, 1),  # 4: E only
+            0b0101: (3, 2),  # 5: E, W
+            0b0110: (0, 1),  # 6: S, E
+            0b0111: (0, 2),  # 7: S, E, W
+            0b1000: (2, 0),  # 8: N only
+            0b1001: (2, 3),  # 9: N, W
+            0b1010: (1, 0),  # 10: N, S
+            0b1011: (1, 3),  # 11: N, S, W
+            0b1100: (2, 1),  # 12: N, E
+            0b1101: (2, 2),  # 13: N, E, W
+            0b1110: (1, 1),  # 14: N, S, E
+            0b1111: (1, 2),  # 15: N, S, E, W
+        }
+        row, col = FENCE_MAP.get(mask, (3, 0))
+        fence_img = _fence_tile(row, col)
+
+        # --- Damage state (完整/受損/嚴重受損): intact/damaged/critical,
+        # driven purely by fhp via the same fence_damage_state() helper
+        # capstone_contract.py uses -- so the visual tier and the actual
+        # gameplay tier can never disagree.
+        dmg_state = fence_damage_state(fhp)
+
+        # Is *this* fence the one currently being actively hit this frame?
+        is_being_hit = (
+            _hit_flash_ticks > 0
+            and _attack_target is not None
+            and _attack_target[0] == fx and _attack_target[1] == fy
+        )
+
+        # --- 敲擊感 (impact feel): a sharp jitter for the few ticks right
+        # after a hit lands, plus a much smaller constant "unstable" wobble
+        # once critically damaged so the state still reads at a glance
+        # between hits, not just at the instant of impact.
+        shake_x = shake_y = 0
+        if is_being_hit:
+            seed = int(time.time() * 60) + fx * 3 + fy * 7
+            shake_x = (seed % 5) - 2
+            shake_y = ((seed // 5) % 5) - 2
+        elif dmg_state == "critical":
+            wob = int(time.time() * 6 + fx * 0.5 + fy * 0.3)
+            shake_x = (wob % 3) - 1
+
+        draw_x, draw_y = screen_x + shake_x, screen_y + shake_y
+
         if fence_img:
-            screen.blit(fence_img, (screen_x, screen_y))
+            screen.blit(fence_img, (draw_x, draw_y))
         else:
-            pygame.draw.rect(screen, (139, 69, 19), (screen_x + 5, screen_y + 5, ITEM_PX - 10, ITEM_PX - 10))
-            pygame.draw.rect(screen, (160, 82, 45), (screen_x + 10, screen_y + 10, ITEM_PX - 20, ITEM_PX - 20))
+            pygame.draw.rect(screen, (139, 69, 19), (draw_x + 5, draw_y + 5, ITEM_PX - 10, ITEM_PX - 10))
+
+        # Damage tint + cracks -- darker/redder the worse it gets, so the
+        # player can tell "this one's about to go" without a separate HP
+        # bar cluttering every fence tile.
+        if dmg_state == "damaged":
+            overlay = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            overlay.fill((90, 45, 20, 70))
+            screen.blit(overlay, (draw_x, draw_y))
+        elif dmg_state == "critical":
+            overlay = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            overlay.fill((60, 20, 10, 130))
+            screen.blit(overlay, (draw_x, draw_y))
+            crack = (25, 12, 5)
+            pygame.draw.line(screen, crack, (draw_x + 3, draw_y + 3), (draw_x + ITEM_PX - 5, draw_y + ITEM_PX - 5), 2)
+            pygame.draw.line(screen, crack, (draw_x + ITEM_PX - 5, draw_y + 5), (draw_x + 5, draw_y + ITEM_PX - 3), 2)
+
+        # White hit-flash the moment(s) a blow actually lands.
+        if is_being_hit:
+            flash = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            flash.fill((255, 255, 255, 90))
+            screen.blit(flash, (draw_x, draw_y))
+
+    # 摧毀動畫 (collapse animation): a fence that hit 0 HP doesn't just pop
+    # out of existence -- capstone_contract.py hands it off to
+    # collapsing_fences for a short countdown before actually removing it
+    # (see _tick_collapsing_fences), and we draw that countdown here as a
+    # shrinking, sinking, fading silhouette so the removal reads as a
+    # collapse rather than a disappearance.
+    _COLLAPSE_ANIM_TICKS = 12  # keep in sync with capstone_contract.py's collapsing_fences seed value
+    for cx, cy, ticks_left in zstate.get("collapsing_fences", []):
+        screen_x, screen_y = get_screen_coords(cx, cy)
+        if screen_x is None: continue
+        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT: continue
+
+        progress = 1.0 - max(0.0, min(1.0, ticks_left / _COLLAPSE_ANIM_TICKS))
+        scale = max(0.15, 1.0 - progress * 0.8)
+        alpha = max(0, int(255 * (1.0 - progress)))
+        sink = int(progress * (ITEM_PX * 0.4))
+
+        collapse_img = _fence_tile(3, 0)  # broken/isolated post stands in for rubble
+        if collapse_img:
+            w = max(1, int(ITEM_PX * scale))
+            h = max(1, int(ITEM_PX * scale))
+            scaled = pygame.transform.scale(collapse_img, (w, h))
+            scaled.set_alpha(alpha)
+            screen.blit(scaled, (screen_x + (ITEM_PX - w) // 2, screen_y + (ITEM_PX - h) // 2 + sink))
+        else:
+            rubble = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            pygame.draw.rect(
+                rubble, (90, 60, 30, alpha),
+                (int(ITEM_PX * 0.2), int(ITEM_PX * 0.6) + sink, int(ITEM_PX * 0.6), int(ITEM_PX * 0.3)),
+            )
+            screen.blit(rubble, (screen_x, screen_y))
 
     # 畫出陷阱
     trap_img = images.get("trap")
-    for tx, ty in state.get("traps", []):
+    for tx, ty in zstate.get("traps", []):
         screen_x, screen_y = get_screen_coords(tx, ty)
         if screen_x is None: continue
         if trap_img:
@@ -182,11 +311,41 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
             pygame.draw.line(screen, (200, 0, 0), (screen_x + 20, screen_y + ITEM_PX - 10), (screen_x + ITEM_PX - 20, screen_y + ITEM_PX - 10), 3)
             
     # 畫出景觀物
-    for d in state.get("decorations", []):
+    # V1.1 balance fix: decorations now actually have durability (the boar
+    # lands cooldown-gated hits on the hp field instead of one-shotting
+    # whatever it arrives at -- see _night_tick_boar), so give that damage
+    # a simple, existing-asset-friendly visual: a proportional shake +
+    # darkening tint while damaged, plus a brief white flash on the exact
+    # tick(s) a hit lands. No new sprites/tiers needed -- just effects
+    # layered on top of whatever art already renders each decor type.
+    _decor_attack_target = zstate.get("target_decor") if active_zone == "decor" else None
+    _decor_hit_flash_ticks = zstate.get("boar_hit_flash", 0) if active_zone == "decor" else 0
+
+    for d in zstate.get("decorations", []):
         dx, dy, dtype, hp = d
-        screen_x, screen_y = get_screen_coords(dx, dy)
-        if screen_x is None: continue
-        
+        base_x, base_y = get_screen_coords(dx, dy)
+        if base_x is None: continue
+
+        damage_frac = max(0.0, min(1.0, 1.0 - (hp / DECOR_MAX_HP))) if DECOR_MAX_HP else 0.0
+        is_being_hit = (
+            _decor_hit_flash_ticks > 0
+            and _decor_attack_target is not None
+            and _decor_attack_target[0] == dx and _decor_attack_target[1] == dy
+        )
+
+        shake_x = shake_y = 0
+        if is_being_hit:
+            seed = int(time.time() * 60) + dx * 3 + dy * 7
+            shake_x = (seed % 5) - 2
+            shake_y = ((seed // 5) % 5) - 2
+        elif damage_frac > 0:
+            # Gentle constant wobble, scaling with how damaged it is, so a
+            # damaged decoration still reads as "unstable" between hits.
+            wob = int(time.time() * 6 + dx * 0.5 + dy * 0.3)
+            shake_x = ((wob % 3) - 1) if damage_frac > 0.4 else 0
+
+        screen_x, screen_y = base_x + shake_x, base_y + shake_y
+
         if dtype == "fountain":
                 anim_frame = int(time.time() * 9) % 9
                 windmill_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Other/spr_deco_windmill_strip9.png", 0, anim_frame, 112, 112, (int(ITEM_PX * SPRITE_SCALES["windmill"][0]), int(ITEM_PX * SPRITE_SCALES["windmill"][1])))
@@ -209,12 +368,56 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
                     pygame.draw.rect(screen, (139, 69, 19), (screen_x + 10, screen_y + 10, 10, 40))
                     pygame.draw.rect(screen, (139, 69, 19), (screen_x + ITEM_PX - 20, screen_y + 10, 10, 40))
 
+        # Damage tint: darkens/reddens proportionally to how much HP has
+        # been lost (no discrete tiers, unlike the fence's 3-tier system --
+        # "不要擅自增加新的景觀升級系統" means keep this to a single simple
+        # continuous effect rather than a whole new damage-state UI).
+        if damage_frac > 0:
+            overlay = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            overlay.fill((70, 25, 15, int(140 * damage_frac)))
+            screen.blit(overlay, (screen_x, screen_y))
+
+        # White hit-flash the moment(s) a blow actually lands.
+        if is_being_hit:
+            flash = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            flash.fill((255, 255, 255, 90))
+            screen.blit(flash, (screen_x, screen_y))
+
+    # 景觀物摧毀動畫: mirrors the fence collapse animation -- a decoration
+    # that hit 0 HP lingers in collapsing_decorations for a short countdown
+    # (see _tick_collapsing_decorations) instead of vanishing outright.
+    _DECOR_COLLAPSE_ANIM_TICKS = 12  # keep in sync with capstone_contract.py's collapsing_decorations seed value
+    for cx, cy, cdtype, ticks_left in zstate.get("collapsing_decorations", []):
+        screen_x, screen_y = get_screen_coords(cx, cy)
+        if screen_x is None: continue
+        if screen_x + ITEM_PX < 0 or screen_x > WIDTH or screen_y + ITEM_PX < 0 or screen_y > HEIGHT: continue
+
+        progress = 1.0 - max(0.0, min(1.0, ticks_left / _DECOR_COLLAPSE_ANIM_TICKS))
+        scale = max(0.15, 1.0 - progress * 0.8)
+        alpha = max(0, int(255 * (1.0 - progress)))
+        sink = int(progress * (ITEM_PX * 0.4))
+
+        collapse_img = images.get(cdtype)
+        if collapse_img:
+            w = max(1, int(ITEM_PX * scale))
+            h = max(1, int(ITEM_PX * scale))
+            scaled = pygame.transform.scale(collapse_img, (w, h))
+            scaled.set_alpha(alpha)
+            screen.blit(scaled, (screen_x + (ITEM_PX - w) // 2, screen_y + (ITEM_PX - h) // 2 + sink))
+        else:
+            rubble = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            pygame.draw.rect(
+                rubble, (110, 90, 90, alpha),
+                (int(ITEM_PX * 0.2), int(ITEM_PX * 0.6) + sink, int(ITEM_PX * 0.6), int(ITEM_PX * 0.3)),
+            )
+            screen.blit(rubble, (screen_x, screen_y))
+
     # 畫出寵物
     import time
     anim_frame = int(time.time() * 4) % 4
     # Goldie is 32x40, row 4 is walking down (4 frames)
     dog_img = sprite_loader.get_sprite("Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png", 4, anim_frame, 32, 40, (int(ITEM_PX * SPRITE_SCALES["dog"][0]), int(ITEM_PX * SPRITE_SCALES["dog"][1])))
-    for dx, dy in state.get("dogs", []):
+    for dx, dy in zstate.get("dogs", []):
         screen_x, screen_y = get_screen_coords(dx, dy)
         if screen_x is None: continue
         if dog_img:
@@ -222,17 +425,18 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
         else:
             pygame.draw.circle(screen, (205, 133, 63), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
 
-    # Draw Thief
-    if state["thief_pos"] is not None:
-        tx, ty = state["thief_pos"]
+    # Draw Thief (farm zone only -- zstate.get("thief_pos") is always None
+    # while viewing the decor map, since that key never gets set there)
+    if zstate.get("thief_pos") is not None:
+        tx, ty = zstate["thief_pos"]
         screen_x, screen_y = get_screen_coords(tx, ty)
         if screen_x is None: pass
-        
+
         thief_dir_row = 0
         flip_x = False
-        
-        if state.get("thief_path"):
-            target = state["thief_path"][0]
+
+        if zstate.get("thief_path"):
+            target = zstate["thief_path"][0]
             dx = target[0] - tx
             dy = target[1] - ty
             if abs(dx) > abs(dy):
@@ -251,19 +455,19 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
         else:
             pygame.draw.circle(screen, RED, (screen_x + ITEM_PX//2, screen_y + ITEM_PX//2), ITEM_PX // 2)
             
-        hp = state.get("thief_hp", 3)
+        hp = zstate.get("thief_hp", 3)
         pygame.draw.rect(screen, RED, (screen_x, screen_y - 10, ITEM_PX, 6))
-    # Draw Boar
-    if state.get("boar_pos"):
-        bx, by = state["boar_pos"]
+    # Draw Boar (decor zone only -- same reasoning as the thief above)
+    if zstate.get("boar_pos"):
+        bx, by = zstate["boar_pos"]
         screen_x, screen_y = get_screen_coords(bx, by)
         if screen_x is None: pass
-        
+
         boar_dir_row = 0
         flip_x = False
-        
-        if state.get("boar_path"):
-            target = state["boar_path"][0]
+
+        if zstate.get("boar_path"):
+            target = zstate["boar_path"][0]
             dx = target[0] - bx
             dy = target[1] - by
             if abs(dx) > abs(dy):
@@ -282,88 +486,57 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
         else:
             pygame.draw.circle(screen, (50, 50, 50), (screen_x + ITEM_PX//2, screen_y + ITEM_PX//2), ITEM_PX // 2)
             
-        hp = state.get("boar_hp", 5)
+        hp = zstate.get("boar_hp", 5)
         pygame.draw.rect(screen, RED, (screen_x, screen_y - 10, ITEM_PX, 6))
         pygame.draw.rect(screen, (0, 255, 0), (screen_x, screen_y - 10, ITEM_PX * (hp / max(1, hp, 5)), 6))
     
     if state['phase'] == "day" and mouse_pos and not shop_open:
         mx, my = mouse_pos
         if current_tool is not None and my >= 0 and my < HEIGHT:
-            gx = (mx + camera_x - ITEM_PX // 2) // CELL_SIZE
-            gy = (my + camera_y - ITEM_PX // 2) // CELL_SIZE
-            
-            screen_x, screen_y = get_screen_coords(gx, gy)
-            if screen_x is not None:
-                s = pygame.Surface((ITEM_PX, ITEM_PX))
-                s.set_alpha(128)
-            
-                occupied = is_cell_occupied(state, gx, gy)
-            
-                if current_tool == "fertilizer":
-                    s.fill((173, 255, 47))
-                elif current_tool == "shovel":
-                    s.fill((169, 169, 169))
-                else:
-                    for dx in range(ITEM_SIZE):
-                        for dy in range(ITEM_SIZE):
-                            sub_x = gx + dx
-                            sub_y = gy + dy
-                        
-                            occupant = None
-                        
-                            # Check water
-                            for wx, wy, ww, wh in state.get("water", []):
-                                if not (sub_x + 1 <= wx or wx + ww <= sub_x or sub_y + 1 <= wy or wy + wh <= sub_y):
-                                    occupant = "water"
-                                    break
-                                
-                            if not occupant:
-                                for tx, ty in state.get("trees", []):
-                                    if not (sub_x + 1 <= tx or tx + ITEM_SIZE <= sub_x or sub_y + 1 <= ty or ty + ITEM_SIZE <= sub_y):
-                                        occupant = "tree"
-                                        break
-                                    
-                            if not occupant:
-                                for ex, ey in state.get("crops", []):
-                                    if not (sub_x + 1 <= ex or ex + ITEM_SIZE <= sub_x or sub_y + 1 <= ey or ey + ITEM_SIZE <= sub_y):
-                                        occupant = "crop"
-                                        break
-                                    
-                            if not occupant:
-                                all_ents = [(f[0], f[1]) for f in state.get("fences", [])] + state.get("dogs", []) + state.get("cats", []) + state.get("geese", []) + state.get("owls", [])
-                                for t in state.get("building_tasks", []):
-                                    if t.get("type") != "fence": all_ents.append(t["pos"])
-                                for ex, ey in all_ents:
-                                    if not (sub_x + 1 <= ex or ex + ITEM_SIZE <= sub_x or sub_y + 1 <= ey or ey + ITEM_SIZE <= sub_y):
-                                        occupant = "entity"
-                                        break
+            # Snap cursor to ITEM_PX grid
+            world_x = mx + camera_x
+            world_y = my + camera_y
+            ITEM_PX_grid = CELL_SIZE * 10
+            snap_gx = int(world_x // ITEM_PX_grid) * 10
+            snap_gy = int(world_y // ITEM_PX_grid) * 10
+            screen_x, screen_y = get_screen_coords(snap_gx, snap_gy)
 
-                            if current_tool == "axe":
-                                color = (0, 255, 0) if occupant == "tree" else (255, 0, 0)
-                            elif current_tool == "scythe":
-                                color = (0, 255, 0) if occupant == "crop" else (255, 0, 0)
-                            elif current_tool == "shovel":
-                                color = (0, 255, 0) if occupant in ["crop", "entity"] else (255, 0, 0)
-                            elif current_tool == "pickaxe":
-                                color = (0, 255, 0) if occupant == "rock" else (255, 0, 0)
-                            else: # Seeds, hoe, fences, pets, etc.
-                                color = (255, 0, 0) if occupant else (0, 255, 0)
-                            
-                            rect = (dx * CELL_SIZE, dy * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                            pygame.draw.rect(s, color, rect)
-                            pygame.draw.rect(s, (0, 0, 0), rect, 1) # Grid dashed/border lines
-                    
-                preview_img = images.get(current_tool)
-                if preview_img:
-                    pw, ph = preview_img.get_size()
-                    s.blit(preview_img, ((ITEM_PX - pw) // 2, (ITEM_PX - ph) // 2))
-                else:
-                    # Text fallback for cursor
-                    tool_name = TOOL_NAMES.get(current_tool, current_tool)[:2]
-                    txt = font_small.render(tool_name, True, BLACK)
-                    s.blit(txt, (ITEM_PX//2 - txt.get_width()//2, ITEM_PX//2 - txt.get_height()//2))
-                
-                screen.blit(s, (screen_x, screen_y))
+            # Determine if placeable
+            occupied = is_cell_occupied(zstate, snap_gx, snap_gy)
+            if current_tool == "axe":
+                placeable = (snap_gx, snap_gy) in zstate.get("trees", [])
+            elif current_tool == "scythe":
+                placeable = (snap_gx, snap_gy) in zstate.get("crops", [])
+            elif current_tool == "pickaxe":
+                placeable = (snap_gx, snap_gy) in zstate.get("rocks", [])
+            elif current_tool == "shovel":
+                placeable = occupied
+            elif current_tool == "fence" and (snap_gx, snap_gy) in zstate.get("farmland", []):
+                placeable = False
+            else:
+                placeable = not occupied
+
+            # Draw a clean single highlight box
+            frame_color = (80, 255, 80, 200) if placeable else (255, 60, 60, 200)
+            s = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)
+            # Semi-transparent fill
+            fill_alpha = 40 if placeable else 60
+            s.fill((*frame_color[:3], fill_alpha))
+            # Bold border
+            pygame.draw.rect(s, (*frame_color[:3], 220), s.get_rect(), 3, border_radius=4)
+
+            # Tool icon centered
+            preview_img = images.get(current_tool)
+            if preview_img:
+                icon = pygame.transform.scale(preview_img, (36, 36))
+                s.blit(icon, ((ITEM_PX - 36) // 2, (ITEM_PX - 36) // 2))
+            else:
+                tool_name = TOOL_NAMES.get(current_tool, current_tool)[:2]
+                txt = font_small.render(tool_name, True, (255, 255, 255))
+                s.blit(txt, (ITEM_PX//2 - txt.get_width()//2, ITEM_PX//2 - txt.get_height()//2))
+
+            screen.blit(s, (screen_x, screen_y))
+
 
     if current_tool is not None and not shop_open:
         # Draw ITEM_PX grid overlay
@@ -377,7 +550,7 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
         screen.blit(grid_surf, (0, MARGIN_TOP))
         
     # 畫建造中的項目（帶真實進度條）
-    for task in state.get("building_tasks", []):
+    for task in zstate.get("building_tasks", []):
         x, y = task["pos"]
         screen_x, screen_y = get_screen_coords(x, y)
         if screen_x is None: continue
@@ -492,8 +665,8 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
             screen.blit(tip_surf, (tx + 8, ty + 4))
 
     # ── Highlight fully-grown (harvestable) crops with golden glow ─────────
-    for crop in state.get("crops", []):
-        data = state["crop_data"].get(crop)
+    for crop in zstate.get("crops", []):
+        data = zstate["crop_data"].get(crop)
         if data and data["stage"] >= data["max_stage"]:
             cx, cy = get_screen_coords(crop[0], crop[1])
             if cx is None: continue
@@ -515,33 +688,33 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
     pygame.draw.rect(mm_surf, (80, 100, 80, 220), mm_surf.get_rect(), 1, border_radius=6)
 
     # Farmland patches
-    for fx, fy in state.get("farmland", []):
+    for fx, fy in zstate.get("farmland", []):
         mmfx = int(fx * CELL_SIZE * scale_x)
         mmfy = int(fy * CELL_SIZE * scale_y)
         pygame.draw.rect(mm_surf, (110, 72, 38), (mmfx, mmfy, max(2, int(ITEM_PX * scale_x)), max(2, int(ITEM_PX * scale_y))))
 
     # Crops (green dots)
-    for cr in state.get("crops", []):
-        data = state["crop_data"].get(cr)
+    for cr in zstate.get("crops", []):
+        data = zstate["crop_data"].get(cr)
         col = (255, 215, 0) if (data and data["stage"] >= data.get("max_stage", 5)) else (80, 200, 80)
         mmcx = int(cr[0] * CELL_SIZE * scale_x)
         mmcy = int(cr[1] * CELL_SIZE * scale_y)
         pygame.draw.rect(mm_surf, col, (mmcx, mmcy, 3, 3))
 
     # Trees (dark green)
-    for tx2, ty2 in state.get("trees", []):
+    for tx2, ty2 in zstate.get("trees", []):
         pygame.draw.rect(mm_surf, (30, 100, 30), (int(tx2 * CELL_SIZE * scale_x), int(ty2 * CELL_SIZE * scale_y), 3, 3))
 
     # Fences (brown)
-    for fx2, fy2, _ in state.get("fences", []):
+    for fx2, fy2, _ in zstate.get("fences", []):
         pygame.draw.rect(mm_surf, (139, 90, 43), (int(fx2 * CELL_SIZE * scale_x), int(fy2 * CELL_SIZE * scale_y), 2, 2))
 
-    # Enemies
-    if state.get("thief_pos"):
-        ex, ey = state["thief_pos"]
+    # Enemies (whichever threat exists in the currently viewed zone)
+    if zstate.get("thief_pos"):
+        ex, ey = zstate["thief_pos"]
         pygame.draw.rect(mm_surf, (255, 50, 50), (int(ex * CELL_SIZE * scale_x) - 2, int(ey * CELL_SIZE * scale_y) - 2, 5, 5))
-    if state.get("boar_pos"):
-        bx2, by2 = state["boar_pos"]
+    if zstate.get("boar_pos"):
+        bx2, by2 = zstate["boar_pos"]
         pygame.draw.rect(mm_surf, (200, 80, 20), (int(bx2 * CELL_SIZE * scale_x) - 2, int(by2 * CELL_SIZE * scale_y) - 2, 5, 5))
 
     # Camera viewport rectangle
