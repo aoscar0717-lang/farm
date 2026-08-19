@@ -361,10 +361,14 @@ class NightwatchFarmApp:
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
-        # Time-scale control
+        # Time-scale control -- 0.1 級距微調 (0.0 暫停 ~ 2.0 二倍速)。
+        # 用 +/-0.1 直接運算取代查表，TIME_SCALE_MIN/MAX/STEP 只是夾值用的
+        # 邊界常數，不再是一份固定速度清單。
         self.time_scale = 1.0
         self.time_scale_before_pause = 1.0
-        self.TIME_SCALE_STEPS = (0.0, 1.0, 2.0, 4.0)
+        self.TIME_SCALE_MIN = 0.0
+        self.TIME_SCALE_MAX = 2.0
+        self.TIME_SCALE_STEP = 0.1
 
         self.flash_vfx_timer = 0.0
         self._init_ui()
@@ -479,18 +483,24 @@ class NightwatchFarmApp:
                             self.time_scale = 0.0
                             self.log_messages.append("⏸ 已暫停")
                         else:
+                            # 記住暫停前的速度（可能是 1.5 這種 0.1 級距值，
+                            # 不是只能回到 1.0），恢復時原樣還原。
                             self.time_scale = self.time_scale_before_pause
-                            self.log_messages.append(f"▶ 恢復 {self.time_scale:g}x")
+                            self.log_messages.append(f"▶ 恢復 {self.time_scale:.1f}x")
                     elif event.key == pygame.K_LEFTBRACKET:
-                        idx = self.TIME_SCALE_STEPS.index(self.time_scale) if self.time_scale in self.TIME_SCALE_STEPS else 1
-                        idx = max(0, idx - 1)
-                        self.time_scale = self.TIME_SCALE_STEPS[idx]
+                        # 直接 -0.1 運算，而不是查表。Python 浮點數
+                        # 0.1 這種值沒辦法精確表示，連續相加減會累積誤差
+                        # (例如 0.7 - 0.1 可能變成 0.5999999999999999)，
+                        # 所以每次運算完都用 round(..., 1) 修回乾淨的一位
+                        # 小數，再用 max/min 夾在 [TIME_SCALE_MIN,
+                        # TIME_SCALE_MAX] 範圍內。
+                        new_scale = round(self.time_scale - self.TIME_SCALE_STEP, 1)
+                        self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
                     elif event.key == pygame.K_RIGHTBRACKET:
-                        idx = self.TIME_SCALE_STEPS.index(self.time_scale) if self.time_scale in self.TIME_SCALE_STEPS else 1
-                        idx = min(len(self.TIME_SCALE_STEPS) - 1, idx + 1)
-                        self.time_scale = self.TIME_SCALE_STEPS[idx]
+                        new_scale = round(self.time_scale + self.TIME_SCALE_STEP, 1)
+                        self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
 
@@ -999,7 +1009,7 @@ class NightwatchFarmApp:
         if self.time_scale == 0:
             speed_txt, speed_col = "⏸ 已暫停 (P)", (255, 100, 100)
         else:
-            speed_txt, speed_col = f"{self.time_scale:g}x ([/]/P)", (200, 220, 255)
+            speed_txt, speed_col = f"{self.time_scale:.1f}x ([/]/P)", (200, 220, 255)
         speed_surf = FONT_MD.render(speed_txt, True, speed_col)
         self.screen.blit(speed_surf, (SCREEN_WIDTH - speed_surf.get_width() - 24, 24))
 
