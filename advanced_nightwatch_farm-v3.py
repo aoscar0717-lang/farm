@@ -453,6 +453,11 @@ class NightwatchFarmApp:
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
+
+        # 拖曳連續種植/建造 (Drag-to-Build)：按住左鍵不放、滑鼠掃過去的
+        # 每一格都會自動觸發跟點一下一樣的動作，玩家不用瘋狂連點。
+        self.is_dragging_action = False  # 左鍵是否正按著（且起點是地圖，不是 UI 面板）
+        self.last_action_grid = None     # 上一次成功觸發動作的網格座標，避免同一格重複觸發
         self.sound.play_bgm(is_day=True)
         # Time-scale control -- 0.1 級距微調 (0.0 暫停 ~ 2.0 二倍速)。
         # 用 +/-0.1 直接運算取代查表，TIME_SCALE_MIN/MAX/STEP 只是夾值用的
@@ -561,6 +566,8 @@ class NightwatchFarmApp:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_mouse_down(event)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    self._handle_mouse_up(event)
                 elif event.type == pygame.MOUSEMOTION:
                     self._handle_mouse_move(event)
                 elif event.type == pygame.MOUSEWHEEL:
@@ -638,6 +645,26 @@ class NightwatchFarmApp:
             self.hovered_grid = (gx, gy)
         else:
             self.hovered_grid = None
+
+        # 拖曳連續種植/建造 (Drag-to-Build)：左鍵按住不放的期間，滑鼠
+        # 移動到新的一格就重播一次跟點擊一樣的判定，不用瘋狂連點。
+        # - self.hovered_grid 為 None 代表游標已經滑出地圖範圍（例如滑到
+        #   右側商店面板），天然滿足「拖曳動作只在世界地圖範圍內生效，
+        #   不要拖到 UI 按鈕上還誤觸發」的要求，不用另外判斷面板範圍。
+        # - 用 != self.last_action_grid 防呆，同一格不會因為滑鼠在格子
+        #   內小幅晃動就重複觸發。
+        # - 暫停選單/開場彈窗/遊戲結束畫面開著時不觸發，避免拖曳的殘留
+        #   狀態在跳出這些模態視窗時還偷偷對地圖做事。
+        if (
+            self.is_dragging_action
+            and self.hovered_grid is not None
+            and self.hovered_grid != self.last_action_grid
+            and not self.show_pause_menu
+            and not self.show_intro
+            and not self.game.game_over
+        ):
+            self.last_action_grid = self.hovered_grid
+            self._perform_grid_interaction(mx, my, is_drag=True)
 
     # 這幾個放置動作各自要求的地圖分區（跟 game_state.py 的
     # place_decoration/place_defense/plant_crop 判斷條件一致，只用來畫
@@ -829,9 +856,40 @@ class NightwatchFarmApp:
                         self.sound.play("error")
                 return
 
+        # 走到這裡代表這一下點擊/拖曳落在地圖上，不是任何 UI 面板/按鈕
+        # ——上面一長串 UI 元素的 collidepoint 檢查全部沒命中才會到這，
+        # 天然滿足「拖曳動作只在世界地圖範圍內生效」的要求，不用另外
+        # 判斷一次。這裡開始正式進入拖曳連續種植/建造 (Drag-to-Build)：
+        # 按下當下把這一格記成拖曳起點，之後滑鼠移動只要進入新的一格
+        # 就會重播一次同樣的判定（見 _handle_mouse_move）。
+        self.is_dragging_action = True
+        self.last_action_grid = self.hovered_grid
+
+        self._perform_grid_interaction(mx, my, is_drag=False)
+
+    def _perform_grid_interaction(self, mx: int, my: int, is_drag: bool):
+        """左鍵在地圖上按下、或拖曳滑過新的一格時，實際要執行的判定
+        (跟原本 _handle_mouse_down 尾端完全同一份邏輯，抽出來給拖曳
+        重複呼叫，兩邊行為保證一致)。
+
+        is_drag=True 時只重播「會採收/種植/建造/剷除/澆水」這幾種可以
+        連續動作的分支（優先權 1 跟 3），跳過手電筒照暈 (優先權 0) 跟
+        指揮哨 (優先權 2) 這兩個瞄準型的主動技能——這兩個不是「連續種植
+        或建造」的範疇，如果拖曳掃過去的每一格都照暈/吹哨，手感會很奇怪
+        （而且手電筒還有冷卻時間，拖曳只會洗一堆冷卻中的失敗訊息）。
+        普通點擊 (is_drag=False) 完全不受影響，跟修改前一模一樣。
+        """
         # 地圖座標換算
         world_gx = (mx - GRID_X) / CELL_SIZE
         world_gy = (my - GRID_Y) / CELL_SIZE
+
+        # 拖曳時手電筒/指揮哨這兩個瞄準型技能整個不參與（見這個函式的
+        # docstring）：不能讓拖曳掃過的格子落到下面第 3 優先權的
+        # _apply_grid_action()，那邊的 elif 鏈沒有 FLASHLIGHT/WHISTLE
+        # 對應分支，會掉進「未知操作」分支狂噴失敗浮動文字，這裡直接
+        # 提前 return 當作這一次拖曳移動沒有動作，安靜跳過。
+        if is_drag and self.selected_action in ("FLASHLIGHT", "WHISTLE"):
+            return
 
         # 0. 最優先權（僅限夜晚 + 已裝備手電筒）：優先判定敵人。
         # 夜晚會自動裝備手電筒，這裡要排在「格子上有成熟作物就先採收」
@@ -841,7 +899,7 @@ class NightwatchFarmApp:
         # use_flashlight_stun() 內部本來就會依游標位置比對 self.game.enemies
         # 的距離（含未命中時的最近敵人輔助瞄準），等同於「碰撞判定」，
         # 沿用它可以維持跟原本一致的冷卻/瞄準輔助手感，不用另外重寫一份。
-        if self.game.phase == GamePhase.NIGHT and self.selected_action == "FLASHLIGHT":
+        if not is_drag and self.game.phase == GamePhase.NIGHT and self.selected_action == "FLASHLIGHT":
             success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
             if success:
                 self._spawn_particles(mx, my, (255, 255, 200), count=15)
@@ -861,13 +919,13 @@ class NightwatchFarmApp:
 
         # 2. 第二優先權：主動戰術工具 (指揮哨；手電筒的夜晚情境已在最上面
         # 處理掉了，走到這裡代表選了手電筒但現在是白天)
-        if self.selected_action == "FLASHLIGHT":
+        if not is_drag and self.selected_action == "FLASHLIGHT":
             self.log_messages.append("☀️ 白天無入侵敵人！已為您自動切換至農耕播種模式。")
             self.active_tab = "CROPS"
             self.selected_action = "PLANT_RADISH"
             return
 
-        if self.selected_action == "WHISTLE":
+        if not is_drag and self.selected_action == "WHISTLE":
             success, msg = self.game.use_dog_whistle(world_gx, world_gy)
             if not success:
                 self.log_messages.append(f"🔔 {msg}")
@@ -879,6 +937,11 @@ class NightwatchFarmApp:
         if self.hovered_grid:
             gx, gy = self.hovered_grid
             self._apply_grid_action(gx, gy, mx, my)
+
+    def _handle_mouse_up(self, event):
+        if event.button == 1:
+            self.is_dragging_action = False
+            self.last_action_grid = None
 
     def _apply_grid_action(self, gx: int, gy: int, mx: int = None, my: int = None):
         tile = self.game.get_tile(gx, gy)
