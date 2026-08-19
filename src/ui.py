@@ -377,7 +377,7 @@ def _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo):
             details = SHOP_ITEM_DETAILS[item_id]
             price = "FREE" if (item_id == "dog" and state.get("free_dog")) else details["price"]
             price_display = f"${price}" if isinstance(price, int) else str(price)
-            price_color = YELLOW if price != "FREE" else (50, 220, 50)
+            price_color = (200, 30, 30) if price != "FREE" else (50, 220, 50)
             hovered = card_rect.collidepoint(mouse_pos)
             _draw_shop_card(screen, card_rect, item_id, details["name"], details["desc"], price_display, price_color, hovered)
 

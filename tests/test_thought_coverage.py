@@ -191,7 +191,7 @@ class TestUIChromeCoverage(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         rect = ui_layout.tutorial_sidebar_rect()
-        lines = get_contemplation_lines(state, "farm", None, False, mouse_pos=rect.center)
+        lines = get_contemplation_lines(state, "farm", None, False, mouse_pos=(rect.right - 10, rect.bottom - 10))
         self.assertTrue(any("任務" in line for line in lines))
 
     def test_ui_hover_entries_require_mouse_pos_and_dont_leak_without_it(self):

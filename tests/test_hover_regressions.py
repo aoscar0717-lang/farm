@@ -184,7 +184,7 @@ class TestHoverThoughtRegressions19Scenarios(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         lines = get_contemplation_lines(
-            state, "farm", None, False, mouse_pos=ui_layout.tutorial_sidebar_rect().center
+            state, "farm", None, False, mouse_pos=(ui_layout.tutorial_sidebar_rect().right - 10, ui_layout.tutorial_sidebar_rect().bottom - 10)
         )
         self.assertTrue(any("任務" in l for l in lines))
 

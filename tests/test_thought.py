@@ -103,7 +103,7 @@ class TestThoughtScenarios(unittest.TestCase):
         state["money"] = 0  # otherwise "afford defenses" (Tier 1) outranks this Tier 3 info
         state["farm"]["fences"].append((20, 20, 3))
 
-        lines = get_contemplation_lines(state, "farm", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "farm", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["圍欄可以擋住敵人的行動路線，替作物或造景爭取時間。"])
 
 
@@ -159,7 +159,7 @@ class TestDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "stone_path", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這條石板路讓農場走起來更有規劃感。"])
 
     def test_flower_place_hint(self):
@@ -172,7 +172,7 @@ class TestDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "flower", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這盆花替周圍添了點生氣，也貢獻了一些繁榮度。"])
 
     def test_bench_place_hint(self):
@@ -185,7 +185,7 @@ class TestDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "bench", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這張長椅讓農場多了一處可以喘口氣的角落。"])
 
     def test_fountain_place_hint(self):
@@ -198,7 +198,7 @@ class TestDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "fountain", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這座風車讓農場多了一點悠閒的鄉村氣息。"])
 
     def test_fountain_thoughts_never_say_noquan(self):
@@ -213,7 +213,7 @@ class TestDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state2)
         state2["money"] = 0
         state2["decor"]["decorations"].append((20, 20, "fountain", 100))
-        nearby_lines = get_contemplation_lines(state2, "decor", None, False, hover_pos=(22, 22))
+        nearby_lines = get_contemplation_lines(state2, "decor", None, False, hover_pos=(20, 20))
         self.assertNotIn("噴泉", "".join(nearby_lines))
 
     def test_decor_thought_does_not_leak_into_farm_zone(self):
@@ -242,7 +242,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "scarecrow", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這個稻草人靜靜站在田邊，替農場增添了一點田園味。"])
 
     def test_crate_place_hint(self):
@@ -255,7 +255,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "crate", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這個木箱堆在角落，替農場添了點生活痕跡。"])
 
     def test_bush_place_hint(self):
@@ -268,7 +268,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "bush", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這叢灌木讓周圍多了一點自然的綠意。"])
 
     def test_rock_place_hint(self):
@@ -281,7 +281,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "rock", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這塊石頭安靜地待在這裡，替庭院增添了一點自然感。"])
 
     def test_sunflower_place_hint(self):
@@ -294,7 +294,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "sunflower", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這株向日葵迎著陽光綻放，讓農場看起來更有生氣。"])
 
     def test_pine_tree_place_hint(self):
@@ -307,7 +307,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "pine_tree", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這棵松樹替農場添了一片綠蔭，也讓景觀更有層次。"])
 
     def test_big_tree_place_hint(self):
@@ -320,7 +320,7 @@ class TestLandscapeExpansionThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "big_tree", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這棵大樹枝葉茂密，是農場裡相當醒目的核心景觀。"])
 
     def test_new_decor_thoughts_do_not_leak_into_farm_zone(self):
@@ -364,7 +364,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "stump", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這段樹墩透出一點原始自然的味道，也是農場裡小小的休憩點。"])
 
     def test_mushroom_place_hint(self):
@@ -377,7 +377,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "mushroom", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這朵蘑菇靜靜長在角落，替農場增添了一點野趣。"])
 
     def test_picnic_basket_place_hint(self):
@@ -390,7 +390,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "picnic_basket", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這個野餐籃擺在這裡，讓農場多了一點悠閒的生活氣息。"])
 
     def test_woodpile_place_hint(self):
@@ -403,7 +403,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "woodpile", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這疊柴薪堆在這裡，替農場添了點樸實的生活感。"])
 
     def test_picnic_blanket_place_hint(self):
@@ -416,7 +416,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "picnic_blanket", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這張野餐墊鋪在這裡，是農場裡一個適合休息放鬆的角落。"])
 
     def test_beehive_place_hint(self):
@@ -429,7 +429,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "beehive", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這個蜂箱安靜地放在這裡，替農場增添了一點養蜂的田園氣息。"])
 
     def test_garden_table_place_hint(self):
@@ -442,7 +442,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "garden_table", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這張庭院桌擺在這裡，是農場裡一個適合坐下來的角落。"])
 
     def test_fruit_tree_place_hint(self):
@@ -455,7 +455,7 @@ class TestLandscapeExpansionRound2Thoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["decor"]["decorations"].append((20, 20, "fruit_tree", 100))
-        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "decor", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["這棵果樹結實纍纍，是農場裡最有農家氣息的風景之一。"])
 
     def test_new_decor_thoughts_do_not_leak_into_farm_zone(self):
@@ -501,7 +501,7 @@ class TestRegressionAfterDecorThoughts(unittest.TestCase):
         _skip_beginner_intros(state)
         state["money"] = 0
         state["farm"]["traps"].append((20, 20))
-        lines = get_contemplation_lines(state, "farm", None, False, hover_pos=(22, 22))
+        lines = get_contemplation_lines(state, "farm", None, False, hover_pos=(20, 20))
         self.assertEqual(lines, ["地刺陷阱會對踩到的敵人造成傷害。"])
 
     def test_carrot_seed_hint_still_works(self):

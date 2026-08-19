@@ -155,7 +155,8 @@ def _handle_world_click(state, mx, my, current_tool, camera_x, camera_y, active_
         elif current_tool in ["dog", "cat", "goose", "sheep", "bull", "owl"]:
             state = apply_action(state, f"place_{current_tool}_{gx}_{gy}", active_zone)
     else:
-        gx, gy = world_x, world_y
+        gx = world_x / CELL_SIZE
+        gy = world_y / CELL_SIZE
         state = apply_action(state, f"click_{gx}_{gy}", active_zone)
 
 

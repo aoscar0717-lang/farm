@@ -257,17 +257,15 @@ def _hover_is_mature_crop(state, ctx):
     return hc["kind"] == "crop" and hc["crop_mature"]
 
 
-def _hovering_entity(state, ctx, kind, radius=25):
-    """True when the hover cell is within `radius` world units of any
-    existing entity of `kind` ("fences"/"traps"/"dogs") in the active zone.
+def _hovering_entity(state, ctx, kind):
+    """True when the hover cell is EXACTLY on an entity of `kind` ("fences"/"traps"/"dogs") in the active zone.
     Entities are stored as (x, y, ...) tuples -- only x/y are position."""
     pos = ctx.get("hover_pos")
     if pos is None:
         return False
     zone = state[ctx["active_zone"]]
     for entity in zone.get(kind, []):
-        ex, ey = entity[0], entity[1]
-        if math.hypot(pos[0] - ex, pos[1] - ey) <= radius:
+        if pos[0] == entity[0] and pos[1] == entity[1]:
             return True
     return False
 
@@ -500,7 +498,7 @@ def _hovering_rect(ctx, rect):
     return pos is not None and rect.collidepoint(pos)
 
 
-def _hovering_decor(state, ctx, decor_type, radius=25):
+def _hovering_decor(state, ctx, decor_type):
     """Like _hovering_entity, but for one specific decoration sub-type.
     Unlike fences/traps/dogs (each its own list), every placed decoration --
     regardless of sub-type -- lives together in zone["decorations"] as
@@ -512,7 +510,7 @@ def _hovering_decor(state, ctx, decor_type, radius=25):
     zone = state[ctx["active_zone"]]
     for d in zone.get("decorations", []):
         dx, dy, dtype, _hp = d
-        if dtype == decor_type and math.hypot(pos[0] - dx, pos[1] - dy) <= radius:
+        if dtype == decor_type and pos[0] == dx and pos[1] == dy:
             return True
     return False
 
@@ -585,10 +583,8 @@ THOUGHT_ENTRIES = [
             ctx.get("hover_pos") is not None
             and state["farm"].get("thief_ai_state") == "attacking_fence"
             and state["farm"].get("thief_attack_target_fence") is not None
-            and math.hypot(
-                ctx["hover_pos"][0] - state["farm"]["thief_attack_target_fence"][0],
-                ctx["hover_pos"][1] - state["farm"]["thief_attack_target_fence"][1],
-            ) <= 25
+            and ctx["hover_pos"][0] == state["farm"]["thief_attack_target_fence"][0]
+            and ctx["hover_pos"][1] == state["farm"]["thief_attack_target_fence"][1]
         ),
         "required_map": "farm",
         "required_phase": "night",
@@ -1152,7 +1148,7 @@ THOUGHT_ENTRIES = [
         "text": "這隻狗會主動攻擊靠近的敵人。",
         "priority": 31,
         "trigger": "hover",
-        "condition": lambda state, ctx: _hovering_entity(state, ctx, "dogs", radius=15),
+        "condition": lambda state, ctx: _hovering_entity(state, ctx, "dogs"),
     },
     {
         "id": "info_stone_path_nearby",
