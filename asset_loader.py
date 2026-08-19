@@ -60,6 +60,48 @@ MIX_ROW_CROPS = {"carrot": 0, "tomato": 1, "blueberry": 3}  # row 2 (potato) 略
 # 原本的 col (0, 1, 3, 4) 乘以 2 轉換為 16px 的新欄位索引，只取健康版本 (左半邊)
 MIX_STAGE_COLUMNS = {"seed": 0, "sprout": 2, "growing": 6, "mature": 8}
 
+# ---- 柵欄自動連接 (assets/Fences.png) 4-bit Bitmask 設定 -------------------
+# 實測 64x64，是 4 欄 x 4 列、每格 16x16 的網格，剛好 16 種狀態，背景本身
+# 就是真透明 (alpha=0)，沒有黑色像素混在裡面，直接 convert_alpha() 讀取
+# 即可，不需要 set_colorkey。
+FENCE_COLS = 4
+FENCE_ROWS = 4
+FENCE_FRAME_SIZE = 16
+
+# 權重設定：上=1, 右=2, 下=4, 左=8（跟需求文件裡的定義一致）。
+# 這張圖實際的排版不是單純 0~15 依序排列，而是「列決定上下連接狀態、
+# 欄決定左右連接狀態」的兩軸組合：
+#   row 0 = 只連下 (up=0, down=1)      row 2 = 只連上 (up=1, down=0)
+#   row 1 = 上下都連 (up=1, down=1)    row 3 = 上下都不連 (up=0, down=0)
+#   col 0 = 左右都不連 (left=0, right=0)   col 2 = 左右都連 (left=1, right=1)
+#   col 1 = 只連右 (left=0, right=1)       col 3 = 只連左 (left=0(見上), left=1, right=0)
+# 這個對應是用 PIL 實測每格四個邊緣是否有非透明像素延伸到邊界（有延伸=
+# 該方向有連接）反推出來的，不是憑空猜的——例如 mask=0（完全獨立）對應
+# 到 (col0, row3)，該格的不透明像素數量剛好是全表最少；mask=15（十字全
+# 連）對應到 (col2, row1)，該格的不透明像素數量剛好是全表最多，兩者都
+# 符合「連接越多、用到的畫面內容越多」的常識，可信度高。
+# 如果之後你發現遊戲裡畫出來對不上（例如某個轉角圖案接不起來），這裡就是
+# 要微調的地方：把對應 mask 的 (col, row) 改成正確的座標即可，不用動
+# 切圖或渲染邏輯。
+BITMASK_MAP = {
+    0: (0, 3),   # 獨立木樁 (無連接)
+    1: (0, 2),   # 只連上方
+    2: (1, 3),   # 只連右方
+    3: (1, 2),   # 連上+右
+    4: (0, 0),   # 只連下方
+    5: (0, 1),   # 連上+下 (垂直直線)
+    6: (1, 0),   # 連右+下
+    7: (1, 1),   # 連上+右+下 (缺左的 T 字)
+    8: (3, 3),   # 只連左方
+    9: (3, 2),   # 連上+左
+    10: (2, 3),  # 連右+左 (水平直線)
+    11: (2, 2),  # 連上+右+左 (缺下的 T 字)
+    12: (3, 0),  # 連下+左
+    13: (3, 1),  # 連上+下+左 (缺右的 T 字)
+    14: (2, 0),  # 連右+下+左 (缺上的 T 字)
+    15: (2, 1),  # 四面全連 (十字)
+}
+
 
 class AssetLoader:
     def __init__(self, cell_size: int = 50):
@@ -247,6 +289,43 @@ class AssetLoader:
 
         return frames
 
+    def _load_fence_tiles(self, size: Tuple[int, int]) -> Dict[int, pygame.Surface]:
+        """
+        切出 assets/Fences.png 的 16 種 4-bit bitmask 連接狀態，回傳
+        Dict[int, Surface]（key 是 0~15 的 mask 值），已縮放成格子大小
+        (size)。原始畫格是 16x16 正方形，縮放成 (cell_size, cell_size)
+        不會有長條作物那種壓扁問題，可以放心直接等比縮放成正方形。
+
+        找不到檔案 / 切不出畫格時回傳 {}，呼叫端要自己 fallback 回原本的
+        單一 wooden_fence 靜態圖，不要讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "Fences.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 assets/Fences.png，柵欄將使用單一靜態圖片，不會自動連接。")
+            return {}
+
+        try:
+            # 背景本身就是真透明 (alpha=0)，直接 convert_alpha() 讀取。
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 assets/Fences.png 失敗: {e}")
+            return {}
+
+        sheet_w, sheet_h = sheet.get_size()
+        expected_w = FENCE_FRAME_SIZE * FENCE_COLS
+        expected_h = FENCE_FRAME_SIZE * FENCE_ROWS
+        if sheet_w < expected_w or sheet_h < expected_h:
+            print(f"[AssetLoader] Fences.png 尺寸 {sheet.get_size()} 切不出 {FENCE_COLS}x{FENCE_ROWS} 的畫格。")
+            return {}
+
+        tiles = {}
+        for mask, (col, row) in BITMASK_MAP.items():
+            rect = pygame.Rect(col * FENCE_FRAME_SIZE, row * FENCE_FRAME_SIZE, FENCE_FRAME_SIZE, FENCE_FRAME_SIZE)
+            frame = sheet.subsurface(rect).copy()
+            tiles[mask] = pygame.transform.scale(frame, size)
+
+        return tiles
+
     def load_all(self):
         sz = (self.cell_size, self.cell_size)
 
@@ -356,6 +435,9 @@ class AssetLoader:
             # theif.png 還沒放進 assets/characters/，或切圖失敗時，
             # 空字典——渲染層要檢查並退回 enemy_thief 靜態圖，不會讓遊戲壞掉。
             self.thief_frames: Dict[str, list] = {}
+
+        # 7. 柵欄 (Fences.png) 的 16 種 4-bit bitmask 自動連接畫格。
+        self.fence_tiles: Dict[int, pygame.Surface] = self._load_fence_tiles(sz)
 
     def get(self, key: str) -> pygame.Surface:
         return self.images.get(key)

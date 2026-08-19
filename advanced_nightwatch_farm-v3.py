@@ -1348,8 +1348,31 @@ class NightwatchFarmApp:
 
                 if tile.defense:
                     df = tile.defense.defense_type
-                    k = DEFENSE_DATA[df].get("asset_key", "wooden_fence")
-                    img = self.loader.get(k)
+                    img = None
+                    if df == DefenseType.WOODEN_FENCE and self.loader.fence_tiles:
+                        # 柵欄自動連接 (Auto-tiling)：檢查上/右/下/左四個
+                        # 相鄰格是否也是圍籬，算出 4-bit bitmask
+                        # (上=1, 右=2, 下=4, 左=8)，換成對應的連接畫格。
+                        # get_tile() 對超出邊界的座標會回傳 None，天然當作
+                        #「該方向沒有圍籬」處理，不用另外判斷邊界。
+                        def _is_fence(nx, ny):
+                            ntile = self.game.get_tile(nx, ny)
+                            return bool(ntile and ntile.defense and ntile.defense.defense_type == DefenseType.WOODEN_FENCE)
+
+                        mask = (
+                            (1 if _is_fence(x, y - 1) else 0) +
+                            (2 if _is_fence(x + 1, y) else 0) +
+                            (4 if _is_fence(x, y + 1) else 0) +
+                            (8 if _is_fence(x - 1, y) else 0)
+                        )
+                        img = self.loader.fence_tiles.get(mask)
+
+                    if img is None:
+                        # Fences.png 還沒放進 assets/、切圖失敗，或這格不是
+                        # 圍籬時，退回原本的單一靜態圖片，不會讓遊戲壞掉。
+                        k = DEFENSE_DATA[df].get("asset_key", "wooden_fence")
+                        img = self.loader.get(k)
+
                     if img:
                         self.screen.blit(img, (px, py))
 
