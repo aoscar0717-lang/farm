@@ -14,9 +14,9 @@ from src.capstone_contract import new_game, apply_action, is_terminal
 from src.assets import screen, get_bg_surfs, night_filter
 from src.renderer import draw_board
 from src.input_handler import handle_mouse_click, handle_keyboard_events
-from src.tutorial import note_event
-from src.thought import get_contemplation_lines
-from src.ui import draw_contemplation
+from src.tutorial import note_event, update_unlocks
+from src.thought import get_contemplation_lines, reset_hold_session
+from src.ui import draw_contemplation, draw_tutorial_sidebar
 
 def log_action(msg):
     with open("log.txt", "a", encoding="utf-8") as f:
@@ -71,9 +71,19 @@ def play():
                 break
                 
             if event.type == TICK_EVENT:
-                # Holding F pauses the simulation -- see the f_held block below.
+                # Holding F pauses the simulation -- see the f_held block
+                # below. time_scale (0x/1x/2x/4x, via P/[/]) is the other
+                # pause/speed control: this engine has no continuous
+                # update(dt) -- "tick" is a discrete action fired once per
+                # fixed real-time interval -- so "run at Nx speed" means
+                # firing that same tick N times per interval instead of
+                # scaling a delta value. time_scale is always one of
+                # 0/1/2/4 (see capstone_contract.TIME_SCALE_STEPS), so
+                # int() here is always exact, never a truncated fraction.
+                ticks_this_interval = int(state.get("time_scale", 1.0))
                 if not is_terminal(state) and not f_held:
-                    state = apply_action(state, "tick")
+                    for _ in range(ticks_this_interval):
+                        state = apply_action(state, "tick")
 
             if event.type == pygame.MOUSEBUTTONDOWN and not f_held:
                 log_action(f"Click at {mouse_pos}, tool={current_tool}, zone={active_zone}, cam=({camera_x},{camera_y})")
@@ -116,6 +126,12 @@ def play():
         if f_held and f_held_since is None:
             f_held_since = time.time()
         elif not f_held:
+            if f_held_since is not None:
+                # F was just released -- clear "what was last shown" so the
+                # next press always counts as a fresh look (see thought.py's
+                # reset_hold_session docstring for why this matters for the
+                # seen_count tiered-text mechanism).
+                reset_hold_session(state)
             f_held_since = None
 
         keys_dict = {
@@ -166,39 +182,101 @@ def play():
         else:
             hover_pos = None
 
+        # Tutorial progress must update every frame, not just while F is
+        # held -- otherwise the Sidebar (which is meant to show live ✓
+        # marks the instant a task is really done) would only refresh when
+        # the player happens to hold F, which defeats "任務完成要即時更新".
+        # update_unlocks() is documented as cheap (dict lookups + list
+        # lengths), so doing it unconditionally every frame is fine.
+        # thought.py's own internal call inside get_contemplation_lines is
+        # left in place too -- update_unlocks is idempotent (an already-
+        # latched step just gets skipped), so calling it from both places
+        # has no duplicate side effect, just redundant safety.
+        update_unlocks(state)
+
         # Holding F pauses enemy/night ticking too, same reasoning as the
-        # TICK_EVENT gate above.
-        if state["phase"] == "night" and not is_terminal(state) and not f_held:
+        # TICK_EVENT gate above. night_tick's cadence is throttled by real
+        # elapsed milliseconds (not a fixed-interval timer event like
+        # TICK_EVENT), so it's the one place in this codebase that actually
+        # has a dt-like continuous value -- time_scale is applied here by
+        # multiplying that elapsed-ms measurement, which is the literal
+        # "dt * time_scale" the feature asked for, just at the one spot
+        # where a real "dt" exists. time_scale == 0 (paused) skips this
+        # block entirely, same as f_held already does.
+        time_scale = state.get("time_scale", 1.0)
+        if state["phase"] == "night" and not is_terminal(state) and not f_held and time_scale > 0:
             current_time = pygame.time.get_ticks()
-            if current_time - last_night_tick > night_tick_delay:
+            if (current_time - last_night_tick) * time_scale > night_tick_delay:
                 state = apply_action(state, "night_tick")
                 last_night_tick = current_time
 
         screen.fill((0, 0, 0))
-        from src.renderer import draw_board
-        draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone)
-        
+
+        # Night fade-in bookkeeping stays here (frame-loop-local, real
+        # wall-clock timing -- not simulation truth, so it doesn't belong
+        # in capstone_contract.py's state). The actual mask drawing
+        # (including light-source holes) now happens inside
+        # renderer.draw_board via _draw_night_overlay, replacing the old
+        # flat night_filter blit that used to happen here -- a flat,
+        # non-per-pixel-alpha Surface can't punch light holes, so it
+        # couldn't support the new day/night light-overlay feature.
+        # night_filter itself is left in assets.py, just no longer used
+        # here.
         if state["phase"] == "night":
-            # Smooth fade-in for night filter
             if night_start_time is None:
                 night_start_time = time.time()
             elapsed = time.time() - night_start_time
-            fade_ratio = min(1.0, elapsed / NIGHT_FADE_DURATION)
-            night_filter.set_alpha(int(150 * fade_ratio))
-            screen.blit(night_filter, (0, 0))
+            night_fade_ratio = min(1.0, elapsed / NIGHT_FADE_DURATION)
         else:
             night_start_time = None  # Reset when day begins
+            night_fade_ratio = 0.0
+
+        from src.renderer import draw_board
+        draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone, night_fade_ratio)
+
+        # Floating-text events are one-shot: renderer.draw_board's call to
+        # particle.ingest_events(state) has already consumed everything
+        # currently queued this frame, so clear it now to keep the queue
+        # from growing unbounded and to avoid re-spawning the same
+        # particle next frame.
+        state["events"] = []
 
         # 思索模式：dim the (still-visible, just paused) world and show a
-        # short, situational hint. Suppressed while the shop is open so the
-        # two overlays never fight for the same screen space.
-        if f_held and not shop_open:
-            elapsed = time.time() - f_held_since if f_held_since else 0.0
-            fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
-            contemplation_filter.set_alpha(int(120 * fade_ratio))
-            screen.blit(contemplation_filter, (0, 0))
-            lines = get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos)
+        # short, situational hint. F now also works while the shop is open
+        # (section 五/八 of the Hover Thought upgrade -- Buy/Sell
+        # tabs/item cards/prices are real, hoverable UI too, and get their
+        # own Thought entries in thought.py rather than a separate tooltip
+        # system). The screen-dimming filter is skipped while the shop is
+        # open -- the shop's own semi-transparent overlay already dims the
+        # world, so stacking a second dim filter on top would just double
+        # up for no visual benefit -- but the Thought panel itself still
+        # draws (on top of the shop, since draw_board -> draw_shop already
+        # ran by this point), appearing instantly rather than fading in.
+        if f_held:
+            if not shop_open:
+                elapsed = time.time() - f_held_since if f_held_since else 0.0
+                fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
+                contemplation_filter.set_alpha(int(120 * fade_ratio))
+                screen.blit(contemplation_filter, (0, 0))
+            else:
+                fade_ratio = 1.0
+            if fade_ratio >= 1.0:
+                # The fade-in fully completed (or the shop was already open,
+                # which counts as an instant genuine hold) -- the player
+                # genuinely held F long enough to read a line, not just
+                # tapped the key.
+                note_event(state, "f_thought_used")
+            lines = get_contemplation_lines(
+                state, active_zone, current_tool, shop_open, hover_pos, mouse_pos, active_tab,
+            )
             draw_contemplation(screen, lines, fade_ratio)
+
+        # 新手任務側欄：always visible (not gated on F), so progress is
+        # readable at a glance the same way the hotbar/top panel are.
+        # Suppressed while the shop is open -- its own overlay already
+        # covers this screen region, same rule draw_contemplation follows.
+        if not shop_open:
+            draw_tutorial_sidebar(screen, state)
 
         pygame.display.flip()
         clock.tick(30)

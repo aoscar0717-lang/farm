@@ -35,14 +35,63 @@ DECOR_INFO = {
     "stone_path": {"price": 20, "prosperity": 5},
     "flower": {"price": 50, "prosperity": 15},
     "bench": {"price": 100, "prosperity": 35},
-    "fountain": {"price": 300, "prosperity": 120}
+    "fountain": {"price": 300, "prosperity": 120},
+    # Landscape expansion: 7 new decor items, all sourced from real,
+    # visually-confirmed existing assets (see the analysis report). Price/
+    # prosperity extend the existing small/mid/large curve above rather than
+    # flattening everything to one number.
+    "scarecrow": {"price": 30, "prosperity": 10},
+    "crate": {"price": 25, "prosperity": 8},
+    "bush": {"price": 20, "prosperity": 8},
+    "rock": {"price": 60, "prosperity": 18},
+    "sunflower": {"price": 80, "prosperity": 25},
+    "pine_tree": {"price": 90, "prosperity": 28},
+    "big_tree": {"price": 260, "prosperity": 95},
+    # Landscape expansion round 2: 8 more decor items. Prices/prosperity
+    # picked so the FULL merged curve (all 19 items sorted by price) stays
+    # non-decreasing in prosperity -- see
+    # tests/test_landscape_consistency.py::TestDecorInfoAndNames::test_price_curve_is_non_decreasing_with_prosperity.
+    # A "leafy_tree" candidate was dropped during this round (see assets.py)
+    # -- it would have reused the same sprite already drawn for the farm
+    # zone's wild obstacle trees, making a paid decoration look identical
+    # to unplaced world clutter.
+    "stump": {"price": 12, "prosperity": 4},
+    "mushroom": {"price": 16, "prosperity": 5},
+    "picnic_basket": {"price": 22, "prosperity": 8},
+    "woodpile": {"price": 28, "prosperity": 9},
+    "picnic_blanket": {"price": 45, "prosperity": 13},
+    "beehive": {"price": 70, "prosperity": 22},
+    "garden_table": {"price": 105, "prosperity": 42},
+    "fruit_tree": {"price": 150, "prosperity": 55},
 }
 
 DECOR_NAMES = {
     "stone_path": "石板路",
     "flower": "鮮花盆栽",
     "bench": "木製長椅",
-    "fountain": "小型噴泉"
+    # Visual identity changed 小型噴泉 -> 風車 (windmill): the project has no
+    # dedicated fountain/well art anywhere in its asset packs (checked
+    # every pack), and the decoration's world sprite already reused the
+    # windmill animation (spr_deco_windmill_strip9.png, see renderer.py's
+    # _draw_decorations) -- renaming the label to match what's actually
+    # drawn, per user decision, rather than pretending a windmill icon is
+    # a fountain. price/prosperity in DECOR_INFO above are unchanged.
+    "fountain": "風車",
+    "scarecrow": "稻草人",
+    "crate": "木箱",
+    "bush": "灌木叢",
+    "rock": "庭院石",
+    "sunflower": "向日葵",
+    "pine_tree": "松樹",
+    "big_tree": "大樹",
+    "stump": "樹墩",
+    "mushroom": "蘑菇",
+    "picnic_basket": "野餐籃",
+    "woodpile": "柴堆",
+    "picnic_blanket": "野餐墊",
+    "beehive": "蜂箱",
+    "garden_table": "庭院桌",
+    "fruit_tree": "果樹",
 }
 
 # --- Fence combat tuning (goblin/thief vs. fence system) -------------------
@@ -63,6 +112,16 @@ FENCE_DAMAGE_PER_HIT = 8
 # fully deterministic for tests -- no real-time dependency in the contract
 # layer.
 FENCE_ATTACK_INTERVAL_TICKS = 30
+
+# Bug fix: thief permanently frozen after squeezing through a single-tile
+# gap in a fence wall (see thief_stuck_ticks' comment in _new_zone_state and
+# _night_tick_thief's STATE_MOVING branch for the full mechanism). 5 ticks
+# is a small fraction of FENCE_ATTACK_INTERVAL_TICKS (30) -- long enough
+# that a normal one-tick graze while rounding a corner elsewhere resolves
+# on its own well before this fires, short enough that a real geometric
+# deadlock (which never resolves on its own) gets corrected almost
+# immediately rather than leaving the thief visibly stuck for a while.
+THIEF_STUCK_TICKS_THRESHOLD = 5
 
 # --- V1.1 balance-fix additions -------------------------------------------
 # The boar's fence-attack used to have no cooldown at all (see the original
@@ -103,14 +162,18 @@ def _new_zone_state() -> dict:
         "fences": [],
         "traps": [],
         "dogs": [],
-        "cats": [],
-        "geese": [],
-        "sheeps": [],
-        "bulls": [],
-        "owls": [],
-        "sheep_hp": {},
-        "enemy_slow_ticks": 0,
-        "enemy_stun_ticks": 0,
+        # Parallel list to "dogs" -- dog_meta[i] describes dogs[i]. Kept as
+        # a same-length, same-order side list (not a dict keyed by id)
+        # specifically so renderer.py's existing `for dx, dy in
+        # zone["dogs"]` draw loop never needs to change: it keeps reading
+        # plain (x, y) tuples exactly as before, while this list carries
+        # the new day/night AI state (mode/target/harvest_cooldown) for
+        # thought.py's Hover text and _day_tick_farm_dogs/_process_zone_dogs
+        # below. Every dogs.append/.remove/.pop call in this file has a
+        # matching dog_meta.append/.pop at the same index -- see
+        # _tick_zone_building's "dog" branch and use_shovel_'s dog-removal
+        # branch.
+        "dog_meta": [],
         "trees": [],
         "rocks": [],
         "building_tasks": [],
@@ -131,6 +194,24 @@ def _new_zone_state() -> dict:
         "thief_ai_state": "moving",
         "thief_attack_cooldown": 0,
         "thief_attack_target_fence": None,
+        # Consecutive night_ticks the thief has been in "moving" state,
+        # detected a fence blocking its tentative next step, but NOT
+        # actually moved (see the fence_hit branch in _night_tick_thief).
+        # Normally zero -- a real detour resolves within a tick or two as
+        # the thief walks clear. It only climbs when the thief is wedged in
+        # a gap exactly as wide as its own hitbox (destroyed-fence gap
+        # between two still-standing posts on the same 10-unit grid the
+        # fence hitboxes use) -- BFS pathfinding (point-sampled, see
+        # _is_obstacle) reports the route as reachable, but the finer-
+        # grained box collision the continuous movement below uses can
+        # never actually complete that squeeze, so the same "found a
+        # detour" verdict repeats every tick with zero progress. Past
+        # THIEF_STUCK_TICKS_THRESHOLD, _night_tick_thief stops trusting the
+        # detour verdict and attacks whatever fence is actually touching
+        # it instead, guaranteeing forward progress (a destroyed fence
+        # always eventually widens the gap) without touching pathfinding,
+        # collision sizing, or fence HP.
+        "thief_stuck_ticks": 0,
         # Ticks remaining to render a hit-shake/flash on the fence just
         # struck -- renderer-only concern, decremented in night_tick.
         "thief_hit_flash": 0,
@@ -190,8 +271,27 @@ def new_game(seed: int = 0) -> GameState:
         "time_left": 120,
         "day_count": 1,
 
+        # Time-scale control (SetTimeScaleAction, i.e. action strings
+        # "set_time_scale_0"/"_1"/"_2"/"_4" -- see apply_action). 0.0 means
+        # fully paused; time_scale_before_pause remembers the last non-zero
+        # speed so an explicit "resume" (as opposed to stepping back up
+        # through 1x/2x/4x manually) restores the speed the player was
+        # actually at, not always 1x.
+        "time_scale": 1.0,
+        "time_scale_before_pause": 1.0,
+
         "free_dog": False,
         "status": "playing",
+
+        # One-shot presentation events (Floating Text Particles). This is a
+        # plain, drawing-agnostic queue -- each entry is just
+        # {"kind","pos","amount","zone"}, no color/text/animation info at
+        # all. The rendering layer (src/particle.py) decides what a given
+        # "kind" looks like; apply_action only ever appends data here via
+        # _emit_event, never draws anything. The renderer/main loop is
+        # expected to clear this once per frame after consuming it (see
+        # main.py), same lifecycle as a toast queue.
+        "events": [],
         "last_msg": "歡迎來到農場！按 [B] 打開商店，用鋤頭[1]開墾農田，種植作物賺錢！",
 
         # Uncapped lifetime progression stat -- never resets, never caps.
@@ -216,6 +316,18 @@ def new_game(seed: int = 0) -> GameState:
     _generate_rocks(state["decor"])
 
     return state
+
+
+def _emit_event(state, kind, pos, amount=0, zone="farm"):
+    """Appends a plain, presentation-agnostic event dict to
+    state["events"] for the drawing layer (src/particle.py) to consume.
+    Deliberately carries no color/text/font/animation info -- only raw
+    facts (what happened, where, how much, which zone) -- so that all
+    "what does this look like" decisions stay entirely inside the
+    rendering layer, never inside apply_action."""
+    state.setdefault("events", []).append({
+        "kind": kind, "pos": pos, "amount": amount, "zone": zone,
+    })
 
 
 def _rects_overlap(x1, y1, w1, h1, x2, y2, w2, h2):
@@ -289,7 +401,7 @@ def _can_build_fence(zone, pos):
 def _is_occupied(zone, x, y, size=ITEM_SIZE, include_crops=True):
     if _is_obstacle(zone, x, y): return True
 
-    all_entities = [(f[0], f[1]) for f in zone["fences"]] + zone.get("dogs", []) + zone.get("cats", []) + zone.get("geese", []) + zone.get("sheeps", []) + zone.get("bulls", []) + zone.get("owls", []) + zone.get("traps", [])
+    all_entities = [(f[0], f[1]) for f in zone["fences"]] + zone["dogs"] + zone.get("traps", [])
     all_entities += [(d[0], d[1]) for d in zone.get("decorations", [])]
     for task in zone["building_tasks"]:
         if task["type"] != "fence":
@@ -303,7 +415,6 @@ def _is_occupied(zone, x, y, size=ITEM_SIZE, include_crops=True):
             return True
 
     return False
-
 
 
 def _update_prosperity_and_level(state):
@@ -372,14 +483,9 @@ def _tick_zone_building(zone, on_decor_complete=None):
                 }
             elif t_type == "fence": zone["fences"].append((pos[0], pos[1], FENCE_MAX_HP))
             elif t_type == "farmland": zone["farmland"].append(pos)
-            elif t_type == "dog": zone["dogs"].append(pos)
-            elif t_type == "cat": zone.setdefault("cats", []).append(pos)
-            elif t_type == "goose": zone.setdefault("geese", []).append(pos)
-            elif t_type == "sheep":
-                zone.setdefault("sheeps", []).append(pos)
-                zone.setdefault("sheep_hp", {})[pos] = 10
-            elif t_type == "bull": zone.setdefault("bulls", []).append(pos)
-            elif t_type == "owl": zone.setdefault("owls", []).append(pos)
+            elif t_type == "dog":
+                zone["dogs"].append(pos)
+                zone.setdefault("dog_meta", []).append({"mode": "idle", "target": None, "harvest_cooldown": 0})
             elif t_type == "trap": zone["traps"].append(pos)
             elif t_type == "decor":
                 decor_type = task["decor_type"]
@@ -390,6 +496,21 @@ def _tick_zone_building(zone, on_decor_complete=None):
     zone["building_tasks"] = new_tasks
 
 
+# Time-scale control (pause / 1x / 2x / 4x). This engine has no continuous
+# update(dt) -- world time only ever advances via the discrete "tick" /
+# "night_tick" actions below, driven by main.py's fixed-interval timer and
+# a separate real-elapsed-ms AI throttle. time_scale doesn't get multiplied
+# into a dt parameter here because there isn't one; instead main.py applies
+# it at both of those real timing sources (running "tick" time_scale times
+# per its fixed real-time interval, and scaling the elapsed-ms comparison
+# night_tick's throttle uses) -- see main.py's TICK_EVENT / night_tick
+# blocks for exactly where. This list is the validation domain for
+# set_time_scale_* below; ui_layout.py keeps its own copy (as
+# TIME_SCALE_STEPS) for driving the [ / ] step UI -- the two are expected
+# to always match, same as this project's existing convention for other
+# small cross-module id/constant lists (e.g. SHOP_ITEM_IDS vs CROP_INFO).
+TIME_SCALE_STEPS = (0.0, 1.0, 2.0, 4.0)
+
 
 def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState:
     if state["status"] != "playing":
@@ -398,24 +519,32 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
     _working_copy = deepcopy(state)
     zstate = _working_copy.get(zone, _working_copy["farm"])
 
+    if action.startswith("set_time_scale_"):
+        # A plain state mutation, not a simulation step -- doesn't touch
+        # zstate/farm/decor/day_count/etc, just the time_scale knob itself.
+        try:
+            new_scale = float(action.rsplit("_", 1)[-1])
+        except ValueError:
+            return _working_copy
+        if new_scale not in TIME_SCALE_STEPS:
+            return _working_copy
+        _working_copy["time_scale"] = new_scale
+        if new_scale > 0:
+            # Remembered so a later "pause" (time_scale -> 0) has something
+            # real to resume to, instead of always snapping back to 1x
+            # regardless of what speed the player was actually at.
+            _working_copy["time_scale_before_pause"] = new_scale
+        return _working_copy
+
     if action == "tick":
         _tick_zone_building(_working_copy["farm"])
         _tick_zone_building(_working_copy["decor"], on_decor_complete=lambda: _update_prosperity_and_level(_working_copy))
 
         if _working_copy["phase"] == "day":
+            _day_tick_farm_dogs(_working_copy)
             _working_copy["time_left"] -= 1
-            # Cat bonus gold during daytime
-            _working_copy["cat_timer"] = _working_copy.get("cat_timer", 0) + 1
-            if _working_copy["cat_timer"] >= 25:
-                _working_copy["cat_timer"] = 0
-                num_cats = len(_working_copy["farm"].get("cats", [])) + len(_working_copy["decor"].get("cats", []))
-                if num_cats > 0:
-                    bonus = num_cats * 25
-                    _working_copy["money"] += bonus
-                    _working_copy["last_msg"] = f"🐱 招財小貓在農莊中摸索，為您找到了 ${bonus} 金幣！"
             if _working_copy["time_left"] <= 0:
                 return apply_action(_working_copy, "start_night")
-
         elif _working_copy["phase"] == "night":
             _working_copy["time_left"] -= 1
             if _working_copy["time_left"] <= 0:
@@ -584,7 +713,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
         if not _is_occupied(zstate, pos[0], pos[1], include_crops=False):
             zstate["building_tasks"].append({"type": "trap", "pos": pos, "progress": 0, "max_progress": 1})
             _working_copy["money"] -= 50
-            _working_copy["last_msg"] = "設置了捕獸夾！"
+            _working_copy["last_msg"] = "設置了地刺陷阱！"
 
     elif action.startswith("place_dog_"):
         if _working_copy.get("phase") != "day": return _working_copy
@@ -600,61 +729,6 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
             _working_copy["free_dog"] = False
             _working_copy["last_msg"] = "呼叫看門狗..."
 
-    elif action.startswith("place_cat_"):
-        if _working_copy.get("phase") != "day": return _working_copy
-        parts = action.split("_")
-        try: pos = (int(parts[2]), int(parts[3]))
-        except: return _working_copy
-        if _working_copy["money"] < 150: return _working_copy
-        if not _is_occupied(zstate, pos[0], pos[1]):
-            zstate["building_tasks"].append({"type": "cat", "pos": pos, "progress": 0, "max_progress": 2})
-            _working_copy["money"] -= 150
-            _working_copy["last_msg"] = "領養了招財小貓！"
-
-    elif action.startswith("place_goose_"):
-        if _working_copy.get("phase") != "day": return _working_copy
-        parts = action.split("_")
-        try: pos = (int(parts[2]), int(parts[3]))
-        except: return _working_copy
-        if _working_copy["money"] < 220: return _working_copy
-        if not _is_occupied(zstate, pos[0], pos[1]):
-            zstate["building_tasks"].append({"type": "goose", "pos": pos, "progress": 0, "max_progress": 2})
-            _working_copy["money"] -= 220
-            _working_copy["last_msg"] = "召喚了暴躁警戒鵝！"
-
-    elif action.startswith("place_sheep_"):
-        if _working_copy.get("phase") != "day": return _working_copy
-        parts = action.split("_")
-        try: pos = (int(parts[2]), int(parts[3]))
-        except: return _working_copy
-        if _working_copy["money"] < 260: return _working_copy
-        if not _is_occupied(zstate, pos[0], pos[1]):
-            zstate["building_tasks"].append({"type": "sheep", "pos": pos, "progress": 0, "max_progress": 2})
-            _working_copy["money"] -= 260
-            _working_copy["last_msg"] = "安置了棉花守護羊！"
-
-    elif action.startswith("place_bull_"):
-        if _working_copy.get("phase") != "day": return _working_copy
-        parts = action.split("_")
-        try: pos = (int(parts[2]), int(parts[3]))
-        except: return _working_copy
-        if _working_copy["money"] < 350: return _working_copy
-        if not _is_occupied(zstate, pos[0], pos[1]):
-            zstate["building_tasks"].append({"type": "bull", "pos": pos, "progress": 0, "max_progress": 2})
-            _working_copy["money"] -= 350
-            _working_copy["last_msg"] = "派出了鐵壁戰鬥牛！"
-
-    elif action.startswith("place_owl_"):
-        if _working_copy.get("phase") != "day": return _working_copy
-        parts = action.split("_")
-        try: pos = (int(parts[2]), int(parts[3]))
-        except: return _working_copy
-        if _working_copy["money"] < 280: return _working_copy
-        if not _is_occupied(zstate, pos[0], pos[1]):
-            zstate["building_tasks"].append({"type": "owl", "pos": pos, "progress": 0, "max_progress": 2})
-            _working_copy["money"] -= 280
-            _working_copy["last_msg"] = "放飛了夜行守護鳥！"
-
     elif action.startswith("click_"):
         parts = action.split("_")
         try: pos = (float(parts[1]), float(parts[2]))
@@ -668,6 +742,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
                         zstate["thief_hp"] -= 1
                         zstate["thief_iframes"] = 15
                         _working_copy["last_msg"] = "擊中小偷！"
+                        _emit_event(_working_copy, "damage", (tx, ty), amount=1, zone="farm")
             if zone == "decor" and zstate.get("boar_pos"):
                 bx, by = zstate["boar_pos"]
                 if math.hypot(bx - pos[0], by - pos[1]) < ITEM_SIZE:
@@ -675,6 +750,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
                         zstate["boar_hp"] -= 1
                         zstate["boar_iframes"] = 15
                         _working_copy["last_msg"] = "擊中野豬！"
+                        _emit_event(_working_copy, "damage", (bx, by), amount=1, zone="decor")
 
     elif action.startswith("use_fertilizer_"):
         if zone != "farm": return _working_copy
@@ -711,26 +787,14 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
             _working_copy["last_msg"] = "移除了景觀物！"
         elif pos in zstate.get("traps", []):
             zstate["traps"].remove(pos)
-            _working_copy["last_msg"] = "回收了捕獸夾！"
+            _working_copy["last_msg"] = "回收了地刺陷阱！"
         elif pos in zstate.get("dogs", []):
-            zstate["dogs"].remove(pos)
+            _idx = zstate["dogs"].index(pos)
+            zstate["dogs"].pop(_idx)
+            _meta = zstate.setdefault("dog_meta", [])
+            if _idx < len(_meta):
+                _meta.pop(_idx)
             _working_copy["last_msg"] = "收回了看門狗！"
-        elif pos in zstate.get("cats", []):
-            zstate["cats"].remove(pos)
-            _working_copy["last_msg"] = "收回了招財小貓！"
-        elif pos in zstate.get("geese", []):
-            zstate["geese"].remove(pos)
-            _working_copy["last_msg"] = "收回了警戒鵝！"
-        elif pos in zstate.get("sheeps", []):
-            zstate["sheeps"].remove(pos)
-            if pos in zstate.get("sheep_hp", {}): del zstate["sheep_hp"][pos]
-            _working_copy["last_msg"] = "收回了守護羊！"
-        elif pos in zstate.get("bulls", []):
-            zstate["bulls"].remove(pos)
-            _working_copy["last_msg"] = "收回了戰鬥牛！"
-        elif pos in zstate.get("owls", []):
-            zstate["owls"].remove(pos)
-            _working_copy["last_msg"] = "收回了守護鳥！"
         elif pos in zstate.get("trees", []):
             _working_copy["last_msg"] = "樹木是景觀，無法用鐵鏟移除！"
         elif pos in zstate.get("rocks", []):
@@ -741,8 +805,40 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
                 zstate["building_tasks"].remove(tasks[0])
                 _working_copy["last_msg"] = "取消了建造！"
 
-
     return _working_copy
+
+
+# ---------------------------------------------------------------------------
+# DRAFT -- drag-select batch actions (not yet wired into input_handler.py's
+# dispatch or main.py's event loop; see the accompanying report for what's
+# still pending review before that happens).
+#
+# Deliberately NOT a new Action *type* like TillAction/PlantAction/
+# HarvestAction, and deliberately does NOT touch any of their existing
+# elif branches above. Instead it just calls apply_action() once per
+# position, threading state through exactly the way a real player clicking
+# each cell in the selection, one at a time, would. This is enough on its
+# own to satisfy "資源不足時只執行部分操作": every cost-checking branch
+# above (use_hoe_/plant_crop_/build_fence_/etc.) already re-validates
+# money/level/occupancy against the CURRENT state at the moment it runs,
+# and is a silent no-op if that check fails -- so if a drag-select batch
+# runs out of money on position 6 of 9, positions 1-5 already happened
+# (money already spent, farmland/crops already placed) and positions 6-9
+# simply no-op, in order, exactly like a player who dragged out of money
+# partway through would experience it. No new validation logic needed in
+# any individual branch above for this to be correct.
+BATCH_MAX_CELLS = 9  # matches a 3x3 selection -- see input_handler.py's DRAG_MAX_SIZE
+
+
+def apply_batch_action(state: GameState, action_prefix: str, positions, zone: str = "farm") -> GameState:
+    """Applies "{action_prefix}_{x}_{y}" (e.g. "use_hoe", "plant_crop_radish",
+    "use_scythe") to each (x, y) in `positions`, in order. `positions` is
+    capped at BATCH_MAX_CELLS here too (defense in depth -- the drag-select
+    UI is expected to already cap its selection to DRAG_MAX_SIZE before
+    ever calling this, but this function doesn't trust that alone)."""
+    for (gx, gy) in positions[:BATCH_MAX_CELLS]:
+        state = apply_action(state, f"{action_prefix}_{gx}_{gy}", zone=zone)
+    return state
 
 
 def _spawn_thief(farm):
@@ -891,6 +987,7 @@ def _night_tick_thief(state):
                 farm["thief_ai_state"] = "moving"
                 farm["thief_attack_cooldown"] = 0
                 farm["thief_attack_target_fence"] = None
+                farm["thief_stuck_ticks"] = 0
                 targets = _thief_pick_targets(farm)
                 farm["thief_path"], farm["target_crop"] = _simulate_night_path(farm, farm["thief_pos"], targets)
                 enemies_active = True
@@ -907,18 +1004,20 @@ def _night_tick_thief(state):
         if trapped:
             farm["traps"].remove(trapped)
             farm["thief_hp"] = 0
-            state["last_msg"] = "小偷踩到了捕獸夾！陷阱損壞，小偷被擊敗！"
+            state["last_msg"] = "小偷踩到了地刺陷阱！陷阱損壞，小偷被擊敗！"
 
         if farm["thief_hp"] <= 0:
             if "小偷踩到" not in state.get("last_msg", ""):
                 state["last_msg"] = "小偷被擊退！"
             state["enemies_defeated"] = state.get("enemies_defeated", 0) + 1
+            _emit_event(state, "death", farm["thief_pos"], amount=0, zone="farm")
             farm["thief_pos"] = None
             farm["thief_path"] = []
             farm["target_crop"] = None
             farm["thief_ai_state"] = "moving"
             farm["thief_attack_cooldown"] = 0
             farm["thief_attack_target_fence"] = None
+            farm["thief_stuck_ticks"] = 0
             farm["thief_spawn_cooldown"] = 30 + random.randint(0, 30)
         elif farm.get("thief_iframes", 0) <= 0:
 
@@ -972,13 +1071,6 @@ def _night_tick_thief(state):
                     dist_y = target[1] - ty
                     length = math.hypot(dist_x, dist_y)
                     speed = 0.5
-                    if farm.get("enemy_slow_ticks", 0) > 0:
-                        speed *= 0.5
-                        farm["enemy_slow_ticks"] -= 1
-                    if farm.get("enemy_stun_ticks", 0) > 0:
-                        farm["enemy_stun_ticks"] -= 1
-                        speed = 0
-
 
                     next_x = tx + (dist_x / length) * speed if length > 0 else tx
                     next_y = ty + (dist_y / length) * speed if length > 0 else ty
@@ -1001,17 +1093,38 @@ def _night_tick_thief(state):
                         # at the moment of contact, when the thief is
                         # already touching the fence and almost *any*
                         # nearby waypoint would still graze its hitbox.
+                        #
+                        # Neither branch below moves the thief this tick --
+                        # that's fine normally (a fresh detour resolves on
+                        # its own within a tick or two as the thief steps
+                        # clear), but if the thief is wedged in a gap
+                        # exactly as wide as its own hitbox (see
+                        # thief_stuck_ticks' definition in _new_zone_state),
+                        # BFS keeps reporting the same "reachable" verdict
+                        # forever while the finer-grained box collision
+                        # never lets the actual step complete -- zero
+                        # progress, every tick, indefinitely. Bug fix:
+                        # count consecutive fence_hit ticks with no
+                        # movement, and once that streak is suspiciously
+                        # long, stop trusting the detour verdict and attack
+                        # whatever's actually touching the thief instead --
+                        # destroying it is guaranteed to eventually widen
+                        # the gap, unlike re-asking the same question.
+                        farm["thief_stuck_ticks"] = farm.get("thief_stuck_ticks", 0) + 1
                         detour_targets = [farm["target_crop"]] if farm.get("target_crop") else _thief_pick_targets(farm)
                         alt_path, alt_target, reachable = _simulate_night_path(
                             farm, farm["thief_pos"], detour_targets, return_reachable=True
                         )
-                        if reachable and alt_path:
+                        stuck = farm["thief_stuck_ticks"] >= THIEF_STUCK_TICKS_THRESHOLD
+                        if reachable and alt_path and not stuck:
                             # Found a clear alternate route -- take it
                             # instead of fighting through the fence.
                             farm["thief_path"], farm["target_crop"] = alt_path, alt_target
                         else:
-                            # No viable detour right now (a real wall, or
-                            # every alternate route is also blocked) --
+                            # No viable detour right now (a real wall, every
+                            # alternate route is also blocked, or we've been
+                            # "finding" the same non-progressing detour for
+                            # THIEF_STUCK_TICKS_THRESHOLD ticks straight) --
                             # stop and start wearing this fence down.
                             # Cooldown starts at 0 so the *next* night_tick
                             # (now in STATE_ATTACKING_FENCE) lands the first
@@ -1020,7 +1133,9 @@ def _night_tick_thief(state):
                             farm["thief_ai_state"] = "attacking_fence"
                             farm["thief_attack_target_fence"] = (fence_hit[0], fence_hit[1])
                             farm["thief_attack_cooldown"] = 0
+                            farm["thief_stuck_ticks"] = 0
                     else:
+                        farm["thief_stuck_ticks"] = 0
                         if length <= speed:
                             farm["thief_pos"] = farm["thief_path"].pop(0)
                         else:
@@ -1039,6 +1154,7 @@ def _night_tick_thief(state):
                     farm["thief_ai_state"] = "moving"
                     farm["thief_attack_cooldown"] = 0
                     farm["thief_attack_target_fence"] = None
+                    farm["thief_stuck_ticks"] = 0
                     farm["thief_spawn_cooldown"] = 30 + random.randint(0, 30)
 
     _process_zone_dogs(farm, "thief")
@@ -1089,12 +1205,13 @@ def _night_tick_boar(state):
         if trapped:
             decor["traps"].remove(trapped)
             decor["boar_hp"] -= 5  # Boar is tough, trap does 5 dmg
-            state["last_msg"] = "野豬踩到了捕獸夾！陷阱損壞，野豬受到重創！"
+            state["last_msg"] = "野豬踩到了地刺陷阱！陷阱損壞，野豬受到重創！"
 
         if decor["boar_hp"] <= 0:
             if "踩到" not in state.get("last_msg", ""):
                 state["last_msg"] = "野豬被擊退！"
             state["enemies_defeated"] = state.get("enemies_defeated", 0) + 1
+            _emit_event(state, "death", decor["boar_pos"], amount=0, zone="decor")
             decor["boar_pos"] = None
             decor["boar_path"] = []
             decor["target_decor"] = None
@@ -1108,13 +1225,6 @@ def _night_tick_boar(state):
                 dist_y = target[1] - by
                 length = math.hypot(dist_x, dist_y)
                 speed = 0.6  # Boars run faster
-                if decor.get("enemy_slow_ticks", 0) > 0:
-                    speed *= 0.5
-                    decor["enemy_slow_ticks"] -= 1
-                if decor.get("enemy_stun_ticks", 0) > 0:
-                    decor["enemy_stun_ticks"] -= 1
-                    speed = 0
-
 
                 fence_hit = None
                 for f in decor.get("fences", []):
@@ -1205,26 +1315,46 @@ def _night_tick_boar(state):
     return enemies_active
 
 
+def _sync_dog_meta(zone):
+    """Keeps zone["dog_meta"] the same length as zone["dogs"] -- defensive
+    resync for states saved before dog_meta existed, or any future call
+    site that appends to "dogs" without remembering the matching
+    dog_meta.append (existing call sites already keep them in lockstep;
+    this is a safety net, not the primary sync mechanism)."""
+    dogs = zone.setdefault("dogs", [])
+    meta = zone.setdefault("dog_meta", [])
+    while len(meta) < len(dogs):
+        meta.append({"mode": "idle", "target": None, "harvest_cooldown": 0})
+    del meta[len(dogs):]
+    return meta
+
+
 def _process_zone_dogs(zone, enemy_key):
     """enemy_key is 'thief' for the farm map, 'boar' for the decor map —
-    defenders only ever fight the threat that exists in their own zone."""
+    dogs only ever fight the threat that exists in their own zone. Night
+    behavior is unchanged from before dog_meta existed (same movement/
+    damage logic); this now also records each dog's mode ("fighting" while
+    landing hits, "chasing_enemy" while closing distance, "idle" when no
+    threat is present) into dog_meta so thought.py can describe it without
+    re-deriving proximity itself."""
     pos_key = f"{enemy_key}_pos"
     hp_key = f"{enemy_key}_hp"
     iframes_key = f"{enemy_key}_iframes"
+    meta = _sync_dog_meta(zone)
 
-    enemy_pos = zone.get(pos_key)
-    has_enemy = enemy_pos is not None and zone.get(hp_key, 0) > 0
-
-    # 1. 🐕 看門狗 (Guard Dogs): 均衡戰士, 速度 1.0, 傷害 1
     new_dogs = []
-    for dx, dy in zone.get("dogs", []):
-        if has_enemy:
+    for i, (dx, dy) in enumerate(zone["dogs"]):
+        m = meta[i]
+        enemy_pos = zone.get(pos_key)
+        if enemy_pos is not None and zone.get(hp_key, 0) > 0:
             tx, ty = enemy_pos
             if _rects_overlap(dx, dy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
                     zone[hp_key] -= 1
                     zone[iframes_key] = 20
                 new_dogs.append((dx, dy))
+                m["mode"] = "fighting"
+                m["target"] = enemy_pos
             else:
                 step = 1.0
                 dist_x = tx - dx
@@ -1234,139 +1364,114 @@ def _process_zone_dogs(zone, enemy_key):
                     new_dogs.append((dx + (dist_x / length) * step, dy + (dist_y / length) * step))
                 else:
                     new_dogs.append((dx, dy))
+                m["mode"] = "chasing_enemy"
+                m["target"] = enemy_pos
         else:
             new_dogs.append((dx, dy))
+            m["mode"] = "idle"
+            m["target"] = None
     zone["dogs"] = new_dogs
+    zone["dog_meta"] = meta
 
-    # 2. 🐱 招財小貓 (Agile Cats): 極速抓瞎減速, 速度 1.8, 傷害 1, 附加減速 50%
-    new_cats = []
-    for cx, cy in zone.get("cats", []):
-        if has_enemy:
-            tx, ty = enemy_pos
-            if _rects_overlap(cx, cy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
-                if zone.get(iframes_key, 0) <= 0:
-                    zone[hp_key] -= 1
-                    zone[iframes_key] = 20
-                    zone["enemy_slow_ticks"] = 90  # 減速 3 秒
-                new_cats.append((cx, cy))
-            else:
-                step = 1.8
-                dist_x = tx - cx
-                dist_y = ty - cy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_cats.append((cx + (dist_x / length) * step, cy + (dist_y / length) * step))
-                else:
-                    new_cats.append((cx, cy))
+
+# Pet automation (section 一/二 of the "自動化小幫手" request): how many
+# "tick" actions a dog rests for after harvesting one crop before it will
+# start walking toward the next. "tick" fires once per real-time interval
+# at 1x speed (see main.py's TICK_EVENT), so this is "2 seconds" at normal
+# speed, and scales down automatically at 2x/4x time_scale the same way
+# every other tick-driven system in this file already does (see
+# time_scale's own comment above apply_action) -- no separate handling
+# needed here for that.
+DOG_HARVEST_COOLDOWN_TICKS = 2
+
+
+def _day_tick_farm_dogs(state):
+    """Daytime dog AI: idle farm dogs scan farm["crop_data"] for the
+    nearest mature (stage >= max_stage), harvestable crop, walk to it,
+    harvest it the instant they arrive, and rest for
+    DOG_HARVEST_COOLDOWN_TICKS ticks before picking a new target -- so a
+    yard full of ripe crops empties out over a few seconds instead of
+    disappearing in one tick. A harvested crop's yield value is added to
+    state["money"] directly (no grade roll, unlike a player's scythe
+    harvest -- the request explicitly asked for a direct money conversion
+    for dog harvests, not a second inventory-grading system). Only ever
+    called for the farm zone (see apply_action's "tick" branch) -- the
+    decor zone has no crop_data, so there is nothing for this to do there
+    even if it were called."""
+    farm = state["farm"]
+    dogs = farm.get("dogs", [])
+    if not dogs:
+        return
+    meta = _sync_dog_meta(farm)
+
+    claimed = {m["target"] for m in meta if m.get("target")}
+    new_positions = []
+    harvested_crop_names = []
+
+    for i, (dx, dy) in enumerate(dogs):
+        m = meta[i]
+
+        if m.get("harvest_cooldown", 0) > 0:
+            m["harvest_cooldown"] -= 1
+            m["mode"] = "cooling_down"
+            new_positions.append((dx, dy))
+            continue
+
+        target = m.get("target")
+        data = farm["crop_data"].get(target) if target else None
+        target_still_valid = bool(target) and target in farm["crops"] and data and data["stage"] >= data["max_stage"]
+        if not target_still_valid:
+            if target in claimed:
+                claimed.discard(target)
+            best, best_dist = None, None
+            for pos in farm["crops"]:
+                if pos in claimed:
+                    continue
+                cdata = farm["crop_data"].get(pos)
+                if not cdata or cdata["stage"] < cdata["max_stage"]:
+                    continue
+                dist = math.hypot(pos[0] - dx, pos[1] - dy)
+                if best is None or dist < best_dist:
+                    best, best_dist = pos, dist
+            target = best
+            m["target"] = target
+            if target:
+                claimed.add(target)
+
+        if target is None:
+            m["mode"] = "idle"
+            new_positions.append((dx, dy))
+            continue
+
+        tx, ty = target
+        if _rects_overlap(dx, dy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
+            data = farm["crop_data"].get(target)
+            if data:
+                crop_type = data["type"]
+                value = CROP_INFO.get(crop_type, {}).get("yield", 0)
+                farm["crops"].remove(target)
+                del farm["crop_data"][target]
+                state["money"] = state.get("money", 0) + value
+                harvested_crop_names.append(CROP_NAMES.get(crop_type, crop_type))
+                _emit_event(state, "money_gain", target, amount=value, zone="farm")
+            m["mode"] = "cooling_down"
+            m["target"] = None
+            m["harvest_cooldown"] = DOG_HARVEST_COOLDOWN_TICKS
+            new_positions.append((dx, dy))
         else:
-            new_cats.append((cx, cy))
-    zone["cats"] = new_cats
-
-    # 3. 🪿 暴躁警戒鵝 (Battle Geese): 領域擊退, 速度 1.2, 傷害 1, 擊退 15 像素
-    new_geese = []
-    for gx, gy in zone.get("geese", []):
-        if has_enemy:
-            tx, ty = enemy_pos
-            if _rects_overlap(gx, gy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
-                if zone.get(iframes_key, 0) <= 0:
-                    zone[hp_key] -= 1
-                    zone[iframes_key] = 20
-                    # 擊退衝撞
-                    k_dx = tx - gx
-                    k_dy = ty - gy
-                    k_len = math.hypot(k_dx, k_dy) or 1.0
-                    zone[pos_key] = (tx + (k_dx / k_len) * 15, ty + (k_dy / k_len) * 15)
-                new_geese.append((gx, gy))
+            step = 1.0
+            ddx, ddy = tx - dx, ty - dy
+            length = math.hypot(ddx, ddy)
+            if length > 0:
+                new_positions.append((dx + (ddx / length) * step, dy + (ddy / length) * step))
             else:
-                step = 1.2
-                dist_x = tx - gx
-                dist_y = ty - gy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_geese.append((gx + (dist_x / length) * step, gy + (dist_y / length) * step))
-                else:
-                    new_geese.append((gx, gy))
-        else:
-            new_geese.append((gx, gy))
-    zone["geese"] = new_geese
+                new_positions.append((dx, dy))
+            m["mode"] = "chasing_crop"
 
-    # 4. 🐑 棉花守護羊 (Cotton Sheep): 羊毛護盾 + 嘲諷吸收傷害, 速度 0.6
-    new_sheeps = []
-    for sx, sy in zone.get("sheeps", []):
-        if has_enemy:
-            tx, ty = enemy_pos
-            dist_to_sheep = math.hypot(tx - sx, ty - sy)
-            if dist_to_sheep < 35 and zone.get(iframes_key, 0) <= 0:
-                # 吸引敵人仇恨與防禦
-                hp = zone.setdefault("sheep_hp", {}).get((sx, sy), 10) - 1
-                zone["sheep_hp"][(sx, sy)] = hp
-                zone[iframes_key] = 25
-                if hp > 0:
-                    new_sheeps.append((sx, sy))
-                else:
-                    if (sx, sy) in zone.get("sheep_hp", {}):
-                        del zone["sheep_hp"][(sx, sy)]
-            else:
-                step = 0.6
-                dist_x = tx - sx
-                dist_y = ty - sy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_sheeps.append((sx + (dist_x / length) * step, sy + (dist_y / length) * step))
-                else:
-                    new_sheeps.append((sx, sy))
-        else:
-            new_sheeps.append((sx, sy))
-    zone["sheeps"] = new_sheeps
-
-    # 5. 🐮 鐵壁戰鬥牛 (Iron Bulls): 巨角重擊, 速度 0.8, 雙倍傷害 (2 dmg)
-    new_bulls = []
-    for bx, by in zone.get("bulls", []):
-        if has_enemy:
-            tx, ty = enemy_pos
-            if _rects_overlap(bx, by, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
-                if zone.get(iframes_key, 0) <= 0:
-                    zone[hp_key] -= 2  # 雙倍重擊傷害！
-                    zone[iframes_key] = 25
-                new_bulls.append((bx, by))
-            else:
-                step = 0.8
-                dist_x = tx - bx
-                dist_y = ty - by
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_bulls.append((bx + (dist_x / length) * step, by + (dist_y / length) * step))
-                else:
-                    new_bulls.append((bx, by))
-        else:
-            new_bulls.append((bx, by))
-    zone["bulls"] = new_bulls
-
-    # 6. 🦉 夜行守護鳥 (Night Owls): 空中高速俯衝, 速度 2.2, 傷害 1, 30% 驚嚇暈眩
-    new_owls = []
-    for ox, oy in zone.get("owls", []):
-        if has_enemy:
-            tx, ty = enemy_pos
-            if _rects_overlap(ox, oy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
-                if zone.get(iframes_key, 0) <= 0:
-                    zone[hp_key] -= 1
-                    zone[iframes_key] = 20
-                    if random.random() < 0.30:
-                        zone["enemy_stun_ticks"] = 30  # 暈眩 1 秒
-                new_owls.append((ox, oy))
-            else:
-                step = 2.2
-                dist_x = tx - ox
-                dist_y = ty - oy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_owls.append((ox + (dist_x / length) * step, oy + (dist_y / length) * step))
-                else:
-                    new_owls.append((ox, oy))
-        else:
-            new_owls.append((ox, oy))
-    zone["owls"] = new_owls
-
+    farm["dogs"] = new_positions
+    farm["dog_meta"] = meta
+    if harvested_crop_names:
+        state["last_msg"] = f"狗狗自動收割了 {len(harvested_crop_names)} 株作物！"
 
 
 def is_terminal(state: GameState) -> bool:
