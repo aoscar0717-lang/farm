@@ -500,7 +500,7 @@ class NightwatchFarmApp:
                 self.action_cards.append(ActionCard(act_id, lbl, cost, tab_id, asset_key, r))
 
     def _create_display(self, fullscreen: bool):
-        flags = (pygame.FULLSCREEN | pygame.SCALED) if fullscreen else 0
+        flags = (pygame.FULLSCREEN | pygame.SCALED) if fullscreen else (pygame.RESIZABLE | pygame.SCALED)
         return pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
 
     def _toggle_fullscreen(self):
