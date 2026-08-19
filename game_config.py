@@ -139,6 +139,11 @@ class EventType(Enum):
     ORDERS_GENERATED = "ORDERS_GENERATED"
     ORDER_FULFILLED = "ORDER_FULFILLED"
 
+    BUILDING_PLACED = "BUILDING_PLACED"
+    BUILDING_STARTED = "BUILDING_STARTED"
+    BUILDING_READY = "BUILDING_READY"
+    BUILDING_COLLECTED = "BUILDING_COLLECTED"
+
     GAME_OVER = "GAME_OVER"
 
 
@@ -461,6 +466,56 @@ DEFENSE_DATA = {
     }
 }
 
+
+# ==========================================
+# 加工建築 (Phase 2：生產線機台)
+# ==========================================
+# 只實作 BuildingType 裡的 OVEN / FURNACE 兩種（HAMSTER_WHEEL 維持
+# Phase 1 就說明過的「留給下一階段」，這次仍然不動它）。
+#
+# recipe 的 key 沿用訂單系統已經在用的同一份物品命名空間：crop 用
+# ORDER_CROP_ALIASES 的簡短代稱（"wheat"）、原料/半成品用 RESOURCE_KEYS
+# 的名稱（"metal_ore"/"charcoal"/...），兩邊沒有重複的 key，可以直接
+# 共用 GameState._get_item_count()/_consume_item()（訂單系統 Phase 1
+# 就寫好的通用查詢/扣除工具），不用另外為建築寫一份查庫存邏輯。
+#
+# 【FURNACE 配方選擇說明】使用者給了兩個可選配方：① wood -> charcoal
+# (10s)，② metal_ore + charcoal -> metal_ingot (20s)，並說可以先只實作
+# 一種。選了②，理由是「熔爐 (FURNACE)」這個名字在中文語境裡本來就是
+# 「熔煉金屬」的機台，①的「把木頭燒成木炭」其實比較接近「炭窯」的
+# 功能；使用者原句「熔爐專門煉金屬」這個簡化提案也是指②。這個選擇
+# 目前會讓 metal_ore/charcoal 這兩個原料完全沒有任何取得管道（跟
+# Phase 1 就已經存在的限制一樣：inventory 裡的東西目前都沒有生產
+# 來源），熔爐機制本身可以正常運作，只是要等下一階段補上「怎麼採集
+# wood/metal_ore」之後才真的能連起來用，這裡不是本次改動漏做，是刻意
+# 沿用 Phase 1 就講清楚的分階段範圍。
+BUILDING_DATA = {
+    BuildingType.OVEN: {
+        "name": "烤箱",
+        "unlock_level": 3,     # 跟小麥 (WHEAT) 本身的解鎖等級一致，玩家能種小麥時剛好也能蓋烤箱
+        "build_cost_gold": 160,
+        "build_cost_tech": 12,  # 花費科技點數才能建造——讓 Phase 1.5 才開始能拿到的科技點數有地方花
+        "recipe": {"wheat": 2},
+        "output_key": "bread",
+        "output_qty": 1,
+        "process_time": 15.0,
+        "walkable": False,
+        "asset_key": "oven",
+    },
+    BuildingType.FURNACE: {
+        "name": "熔爐",
+        "unlock_level": 3,
+        "build_cost_gold": 200,
+        "build_cost_tech": 18,
+        "recipe": {"metal_ore": 1, "charcoal": 1},
+        "output_key": "metal_ingot",
+        "output_qty": 1,
+        "process_time": 20.0,
+        "walkable": False,
+        "asset_key": "furnace",
+    },
+}
+
 DOG_CONFIG = {
     "cost": 100,
     "speed": 1.8,  # 原本 3.0，調降為 0.6 倍 -- 追擊/指揮衝刺/返回崗位
@@ -624,6 +679,58 @@ class DefenseStructure:
 
 
 @dataclass
+class Building:
+    """加工機台實體（烤箱/熔爐）。跟 DefenseStructure 不同的地方是這裡
+    額外存了 x/y——防禦設施只透過 tile.defense 反向存取，因為更新/渲染
+    防禦時本來就是逐格掃 self.grid；但 Phase 2 的需求明確要求
+    GameState 要有一個 self.buildings 陣列可以直接遍歷做每幀狀態更新
+    (_update_buildings)，不用每幀重新掃一次整張地圖找機台，所以這裡
+    採用「tile.building 反向參照 + self.buildings 陣列直接持有」雙軌
+    並存的寫法：擺放/拆除時兩邊要同步增減，這件事全部封裝在
+    GameState.place_building()/demolish_tile() 裡，UI 層跟其他呼叫端
+    不用自己操心兩邊同步的問題。"""
+    building_type: BuildingType
+    x: int
+    y: int
+    is_processing: bool = False
+    processing_time_left: float = 0.0
+    ready_to_collect: bool = False
+
+    @property
+    def config(self) -> dict:
+        return BUILDING_DATA[self.building_type]
+
+    @property
+    def is_walkable(self) -> bool:
+        return self.config.get("walkable", False)
+
+    def start_processing(self):
+        self.is_processing = True
+        self.ready_to_collect = False
+        self.processing_time_left = float(self.config["process_time"])
+
+    def tick(self, dt: float) -> bool:
+        """回傳這一幀是否剛好完成（True）。只有真的從「還在跑」變成
+        「跑完了」的那一幀回傳 True，之後即使還沒被玩家點擊採收、
+        ready_to_collect 一直是 True，也不會重複回傳 True，呼叫端
+        (GameState._update_buildings()) 就能安全地只在這一幀 emit 一次
+        「完成」事件，不會每幀狂送重複事件。"""
+        if not self.is_processing:
+            return False
+        self.processing_time_left -= dt
+        if self.processing_time_left <= 0.0:
+            self.processing_time_left = 0.0
+            self.is_processing = False
+            self.ready_to_collect = True
+            return True
+        return False
+
+    def collect(self) -> None:
+        self.ready_to_collect = False
+        self.processing_time_left = 0.0
+
+
+@dataclass
 class Tile:
     x: int
     y: int
@@ -631,16 +738,20 @@ class Tile:
     crop: Optional[Crop] = None
     decoration: Optional[Decoration] = None
     defense: Optional[DefenseStructure] = None
-    
+    building: Optional[Building] = None
+
     @property
     def is_empty(self) -> bool:
-        return self.crop is None and self.decoration is None and self.defense is None
-    
+        return (self.crop is None and self.decoration is None
+                and self.defense is None and self.building is None)
+
     @property
     def is_walkable(self) -> bool:
         if self.defense is not None and not self.defense.is_walkable:
             return False
         if self.decoration is not None and not self.decoration.is_walkable:
+            return False
+        if self.building is not None and not self.building.is_walkable:
             return False
         return True
 

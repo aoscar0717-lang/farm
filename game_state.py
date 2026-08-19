@@ -13,8 +13,8 @@ from game_config import (
     DefenseType, BuildingType, EnemyType, EnemyState, DogState, EventType,
     MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA,
     DOG_CONFIG, CAT_CONFIG, ENEMY_DATA,
-    RESOURCE_KEYS, ORDER_CROP_ALIASES, ORDER_CONFIG,
-    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent, Order,
+    RESOURCE_KEYS, ORDER_CROP_ALIASES, ORDER_CONFIG, BUILDING_DATA,
+    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent, Order, Building,
     direction_from_delta
 )
 from pathfinding import GridBFS
@@ -55,6 +55,13 @@ class GameState:
         # 的舊訂單（見該方法內註解說明為何選擇「不跨日累積」）。
         self.active_orders: List[Order] = []
         self._next_order_id: int = 1
+
+        # 加工機台 (Phase 2)：跟防禦設施不同，這裡額外維護一個扁平陣列
+        # 方便每幀直接遍歷做狀態更新 (_update_buildings)，不用像防禦
+        # 設施那樣每幀重新掃一次整張地圖；tile.building 是反向參照，兩邊
+        # 由 place_building()/demolish_tile() 統一同步增減，見 Building
+        # 這個 dataclass 開頭的說明註解。
+        self.buildings: List[Building] = []
         
         self.phase: GamePhase = GamePhase.DAY
         self.time_in_phase: float = 0.0
@@ -187,6 +194,26 @@ class GameState:
         elif item_key in self.inventory:
             self.inventory[item_key] = max(0, self.inventory[item_key] - qty)
 
+    def _item_display_name(self, item_key: str) -> str:
+        """把訂單/建築配方裡的物品 key 轉成給玩家看的中文名稱：作物代稱
+        (ORDER_CROP_ALIASES 的 key) 轉成 CROP_DATA 裡的中文名稱；原料/
+        半成品 (RESOURCE_KEYS) 目前沒有中文名稱表，先照英文代稱原樣
+        顯示，以後要加中文名稱只要改這個函式，呼叫端不用動。"""
+        if item_key in ORDER_CROP_ALIASES:
+            return CROP_DATA[ORDER_CROP_ALIASES[item_key]]["name"]
+        return item_key
+
+    def _check_recipe_shortfall(self, requirements: Dict[str, int]) -> List[str]:
+        """回傳每一項數量不足的物品描述（例如「小麥 還差 2 個」）的
+        列表；全部足夠時回傳空列表。訂單交付 (fulfill_order) 跟建築
+        投料 (interact_building) 共用同一份檢查邏輯，不用各寫一份。"""
+        missing = []
+        for item_key, need_qty in requirements.items():
+            have_qty = self._get_item_count(item_key)
+            if have_qty < need_qty:
+                missing.append(f"{self._item_display_name(item_key)} 還差 {need_qty - have_qty} 個")
+        return missing
+
     def _generate_daily_orders(self) -> None:
         """每天早上（進入 GamePhase.DAY 時）呼叫，隨機產生 1~3 張新訂單。
 
@@ -244,7 +271,7 @@ class GameState:
         self.active_orders = generated
 
         req_summary = "；".join(
-            "、".join(f"{ORDER_CROP_ALIASES[a].value} x{q}" for a, q in o.requirements.items())
+            "、".join(f"{self._item_display_name(a)} x{q}" for a, q in o.requirements.items())
             for o in generated
         )
         self._emit_event(
@@ -264,12 +291,12 @@ class GameState:
         if order.is_fulfilled:
             return False, "這張訂單已經交付過了！"
 
-        missing = []
-        for item_key, need_qty in order.requirements.items():
-            have_qty = self._get_item_count(item_key)
-            if have_qty < need_qty:
-                display_name = ORDER_CROP_ALIASES[item_key].value if item_key in ORDER_CROP_ALIASES else item_key
-                missing.append(f"{display_name} 還差 {need_qty - have_qty} 個")
+        # 缺項檢查改呼叫共用的 _check_recipe_shortfall()（跟 Phase 2 新增
+        # 的建築投料共用同一份邏輯）；順便把提示文字從 enum 原始值（例如
+        # "WHEAT"）改成 _item_display_name() 查出來的中文名稱（"小麥"），
+        # 跟遊戲其餘介面的在地化文字風格一致——這是本次順手修正的小
+        # 瑕疵，不影響任何數值判定，只改錯誤訊息的顯示文字。
+        missing = self._check_recipe_shortfall(order.requirements)
 
         if missing:
             return False, f"物資不足，無法交付訂單！（{'、'.join(missing)}）"
@@ -289,6 +316,125 @@ class GameState:
              "total_gold": self.gold, "total_tech": self.tech_points}
         )
         return True, f"訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 科技點數。"
+
+    # =========================================================================
+    # 加工建築系統 (Building System) —— Phase 2
+    # =========================================================================
+
+    def place_building(self, x: int, y: int, building_type: BuildingType) -> Tuple[bool, str]:
+        """建造一座加工機台。跟 place_defense() 走同一套檢查順序（夜晚
+        禁建 -> 座標有效 -> 區域限制 -> 空地 -> 解鎖等級 -> 金幣），只是
+        多一道「科技點數」門檻，而且區域限制刻意跟防禦設施相反：防禦
+        設施 (place_defense) 只能蓋在中央「農田防衛區」(FARM_ZONE)，
+        加工機台則只能蓋在四周的「莊園景觀區」(DECORATION_ZONE)——中央
+        農田格子數量有限，要優先留給種作物跟防禦，機台更像是「莊園裡
+        的一間工坊」，跟景觀裝飾放在同一個區域競爭空間更合理。"""
+        if self.phase == GamePhase.NIGHT:
+            return False, "夜晚防守期間無法建造加工機台！"
+
+        tile = self.get_tile(x, y)
+        if not tile:
+            return False, "座標無效！"
+
+        if tile.zone != ZoneType.DECORATION_ZONE:
+            return False, "加工機台只能建造在「四周的莊園景觀區」！中央農田請保留給作物與防禦設施。"
+
+        if not tile.is_empty:
+            return False, "該位置已有物件，無法建造加工機台！"
+
+        config = BUILDING_DATA[building_type]
+        req_lvl = config["unlock_level"]
+        if self.farm_level < req_lvl:
+            return False, f"{config['name']} 需要莊園等級 Lv.{req_lvl} 才能建造！"
+
+        cost_gold = config["build_cost_gold"]
+        cost_tech = config["build_cost_tech"]
+        if self.gold < cost_gold:
+            return False, f"金幣不足！建造 {config['name']} 需要 {cost_gold} 金幣。"
+        if self.tech_points < cost_tech:
+            return False, f"科技點數不足！建造 {config['name']} 需要 {cost_tech} 科技點數（目前 {self.tech_points} 點）。"
+
+        self.gold -= cost_gold
+        self.tech_points -= cost_tech
+        building = Building(building_type=building_type, x=x, y=y)
+        tile.building = building
+        self.buildings.append(building)
+
+        self._emit_event(
+            EventType.BUILDING_PLACED,
+            f"🏭 已建造 {config['name']}，花費 {cost_gold} 金幣、{cost_tech} 科技點數。",
+            {"x": x, "y": y, "building_type": building_type.value, "cost_gold": cost_gold, "cost_tech": cost_tech}
+        )
+        return True, f"{config['name']} 建造成功！"
+
+    def interact_building(self, x: int, y: int) -> Tuple[bool, str]:
+        """玩家點擊地圖上的機台格子時呼叫，對應需求裡的狀況 A/B/C：
+        A. 閒置中：檢查配方原料是否足夠，足夠就扣除原料、開始運作
+           （對應 Building.start_processing()）。
+        B. 運作中：忽略，回傳失敗訊息（不會噴例外，UI 層可以直接把
+           回傳的 msg 拿去跳浮動文字）。
+        C. 已完成 (ready_to_collect)：把產出加進 self.inventory，機台
+           重置回閒置狀態（Building.collect()）。"""
+        tile = self.get_tile(x, y)
+        if not tile or tile.building is None:
+            return False, "此處沒有加工機台！"
+
+        building = tile.building
+        config = building.config
+
+        # 狀況 C：優先判斷完成，不管玩家目前選的是什麼工具，點下去就是採收
+        # ——跟「點成熟作物一律直接採收」的既有手感一致。
+        if building.ready_to_collect:
+            output_key = config["output_key"]
+            output_qty = config["output_qty"]
+            if output_key in self.crop_inventory:
+                self.crop_inventory[output_key] = self.crop_inventory.get(output_key, 0) + output_qty
+            else:
+                self.inventory[output_key] = self.inventory.get(output_key, 0) + output_qty
+            building.collect()
+
+            self._emit_event(
+                EventType.BUILDING_COLLECTED,
+                f"📦 {config['name']} 完成！獲得 {output_qty} 個 {self._item_display_name(output_key)}。",
+                {"x": x, "y": y, "building_type": building.building_type.value,
+                 "output_key": output_key, "output_qty": output_qty}
+            )
+            return True, f"獲得 {output_qty} 個 {self._item_display_name(output_key)}！"
+
+        # 狀況 B：運作中，忽略
+        if building.is_processing:
+            return False, f"{config['name']} 運作中，還要等 {building.processing_time_left:.1f} 秒！"
+
+        # 狀況 A：閒置中，檢查配方原料並開始運作
+        recipe = config["recipe"]
+        missing = self._check_recipe_shortfall(recipe)
+        if missing:
+            return False, f"原料不足，無法啟動 {config['name']}！（{'、'.join(missing)}）"
+
+        for item_key, need_qty in recipe.items():
+            self._consume_item(item_key, need_qty)
+        building.start_processing()
+
+        self._emit_event(
+            EventType.BUILDING_STARTED,
+            f"⚙️ {config['name']} 開始運作，預計 {config['process_time']:.0f} 秒後完成。",
+            {"x": x, "y": y, "building_type": building.building_type.value}
+        )
+        return True, f"{config['name']} 開始運作！"
+
+    def _update_buildings(self, dt: float) -> None:
+        """每幀扣減所有正在運作的機台的 processing_time_left；時間歸零
+        的那一幀（Building.tick() 回傳 True）才 emit 一次完成事件，不會
+        每幀重複送。跟作物生長 (_update_crops_growth) 一樣，日夜都會
+        持續運作——機台不是防禦設施，沒有「只在晚上生效」的理由。"""
+        for building in self.buildings:
+            if building.tick(dt):
+                config = building.config
+                self._emit_event(
+                    EventType.BUILDING_READY,
+                    f"✨ {config['name']} 已經完成，可以點擊採收 {self._item_display_name(config['output_key'])}！",
+                    {"x": building.x, "y": building.y, "building_type": building.building_type.value}
+                )
 
     # =========================================================================
     # 玩家操作行為 API
@@ -585,6 +731,27 @@ class GameState:
             )
             return True, f"已移除 {name}，退還 {refund} 金幣！", refund
 
+        # 4. 拆除加工機台 (退還 80% 建造金幣；已花費的科技點數不退還，
+        # 跟金幣一樣是「建造成本」，但科技點數代表的是已經投入的研發
+        # 進度，設計上不應該靠蓋了再拆來套利)。正在運作中被拆除的話，
+        # 已經投入配方的原料一律視為損耗，不會退還——這跟其他遊戲裡
+        # 「拆除生產中的建築會損失在製品」是一樣的取捨，避免玩家用
+        # 「蓋機台consume原料 -> 立刻拆除retrieve金幣」的套利路徑繞過
+        # 訂單系統原本要建立的資源消耗。
+        if tile.building is not None:
+            name = tile.building.config["name"]
+            cost = tile.building.config["build_cost_gold"]
+            refund = int(cost * 0.8)
+            self.gold += refund
+            self.buildings = [b for b in self.buildings if b is not tile.building]
+            tile.building = None
+            self._emit_event(
+                EventType.TILE_CLEARED,
+                f"🔨 已拆除 ({x}, {y}) 的 {name}，退還 {refund} 金幣！",
+                {"x": x, "y": y, "refund": refund, "gold": self.gold}
+            )
+            return True, f"已拆除 {name}，退還 {refund} 金幣！", refund
+
         return False, "無法剷除此處物品！", 0
 
     # =========================================================================
@@ -787,6 +954,7 @@ class GameState:
         self._update_crops_growth(dt)
         self._update_pets(dt)
         self._update_beehives(dt)
+        self._update_buildings(dt)
 
         if self.phase == GamePhase.DAY:
             if self.time_in_phase >= self.day_duration:

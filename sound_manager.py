@@ -182,6 +182,14 @@ class SoundManager:
             self.play("gold")
         elif t == EventType.ORDERS_GENERATED:
             self.play("ui_click")
+        elif t == EventType.BUILDING_PLACED:
+            self.play("build")
+        elif t == EventType.BUILDING_STARTED:
+            self.play("build")
+        elif t == EventType.BUILDING_READY:
+            self.play("water")
+        elif t == EventType.BUILDING_COLLECTED:
+            self.play("harvest")
         elif t == EventType.CROP_STOLEN:
             self.play("stolen")
         elif t == EventType.DAY_STARTED:

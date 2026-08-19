@@ -47,8 +47,8 @@ if sys.platform == "win32":
 
 from game_config import (
     GamePhase, ZoneType, CropType, CropStage, DecorationType,
-    DefenseType, EnemyType, EnemyState, DogState, EventType,
-    MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA,
+    DefenseType, BuildingType, EnemyType, EnemyState, DogState, EventType,
+    MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA, BUILDING_DATA,
     DOG_CONFIG, CAT_CONFIG, ENEMY_DATA, ORDER_CROP_ALIASES, GameEvent
 )
 from game_state import GameState
@@ -665,7 +665,7 @@ class NightwatchFarmApp:
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
             ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
-            ("DECO", "莊園景觀 (13)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (15)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
@@ -699,6 +699,15 @@ class NightwatchFarmApp:
                 ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110繁榮 | +33G/天", "fountain"),
                 ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160繁榮 | +48G/天", "sundial_tower"),
                 ("PLACE_WINDMILL", "莊園木屋", "$300 | +220繁榮 | +66G/天", "windmill"),
+                # 加工機台 (Phase 2)：跟其餘景觀裝飾一樣放在 DECO 分頁、
+                # 建在「四周莊園景觀區」——沒有另外開新分頁，是因為商店
+                # 的 2x2 分頁格版面 (_layout_shop_tabs) 是照剛好 4 個分頁
+                # 寫死的，硬塞第 5 個分頁要重新設計整塊版面配置，風險/
+                # 工程量都遠超過這次「加入生產線機台」的需求範圍；機台
+                # 本來就跟裝飾一樣蓋在同一個區域，歸在同一個分頁在邏輯
+                # 上也說得通。
+                ("PLACE_OVEN", "烤箱", "$160+12科技 | 烤小麥→麵包", "oven"),
+                ("PLACE_FURNACE", "熔爐", "$200+18科技 | 煉礦石→鋼錠", "furnace"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1147,6 +1156,28 @@ class NightwatchFarmApp:
                     self.log_messages.append(f"❌ {msg}")
                 return
 
+        # 1b. 若點擊格子上有「加工機台」，同樣無論目前選了什麼工具，一律
+        # 直接跟機台互動（啟動運作 / 採收成品 / 運作中提示），不用先切到
+        # 某個特定工具才能操作已經蓋好的機台——跟上面「成熟作物優先直接
+        # 採收」是同一種手感。crop 跟 building 不會同時存在同一格
+        # (Tile.is_empty 的定義)，兩個判斷不會互相搶著處理同一格。
+        if self.hovered_grid:
+            gx, gy = self.hovered_grid
+            tile = self.game.get_tile(gx, gy)
+            if tile and tile.building is not None:
+                success, msg = self.game.interact_building(gx, gy)
+                if not success:
+                    px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
+                    py = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
+                    self.log_messages.append(f"⚙️ {msg}")
+                    self.floating_texts.append(FloatingText(f"❌ {msg}", px - 60, py - 12, C_RED))
+                    self.sound.play("error")
+                # 成功（啟動運作 / 採收成品）的音效跟浮動文字交給
+                # BUILDING_STARTED / BUILDING_COLLECTED 事件在
+                # _process_events() 裡統一處理，這裡不重複播，跟訂單
+                # 交付、採收成功是同一套既有模式。
+                return
+
         # 2. 第二優先權：主動戰術工具 (指揮哨；手電筒的夜晚情境已在最上面
         # 處理掉了，走到這裡代表選了手電筒但現在是白天)
         if not is_drag and self.selected_action == "FLASHLIGHT":
@@ -1250,6 +1281,13 @@ class NightwatchFarmApp:
             success, msg = self.game.place_defense(gx, gy, DefenseType.SCARECROW)
         elif act == "PLACE_BEEHIVE":
             success, msg = self.game.place_defense(gx, gy, DefenseType.BEEHIVE)
+        # 加工機台 (Phase 2)：跟景觀裝飾一樣放在「四周莊園景觀區」，
+        # PLACE_ 開頭但沒有加進 _DEFENSE_ACTION_IDS，_grid_preview_is_invalid()
+        # 就會自動照景觀裝飾的規則檢查 DECORATION_ZONE，不用另外處理。
+        elif act == "PLACE_OVEN":
+            success, msg = self.game.place_building(gx, gy, BuildingType.OVEN)
+        elif act == "PLACE_FURNACE":
+            success, msg = self.game.place_building(gx, gy, BuildingType.FURNACE)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1382,6 +1420,25 @@ class NightwatchFarmApp:
                 self.floating_texts.append(
                     FloatingText(f"📋 今日新訂單 x{order_count}！按 O 查看", 460, 143, C_TECH_GREEN)
                 )
+            elif ev.event_type == EventType.BUILDING_STARTED:
+                px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_Y + ev.data["y"] * CELL_SIZE
+                self.floating_texts.append(FloatingText("⚙️ 開始運作...", px - 35, py - 14, (200, 190, 178)))
+            elif ev.event_type == EventType.BUILDING_READY:
+                # 被動完成通知（玩家不用點什麼就會觸發）：機台上方已經有
+                # _render_building_tile() 畫的跳動「❗」了，這裡再補一條
+                # 浮動文字加強提醒，音效交給 sound_manager 統一映射播放。
+                px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_Y + ev.data["y"] * CELL_SIZE
+                self.floating_texts.append(FloatingText("✨ 可以採收了！", px - 40, py - 14, C_TECH_GREEN))
+                self._spawn_particles(px, py, C_TECH_GREEN, count=10)
+            elif ev.event_type == EventType.BUILDING_COLLECTED:
+                px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_Y + ev.data["y"] * CELL_SIZE
+                self.floating_texts.append(FloatingText(
+                    f"+{ev.data['output_qty']} {ev.data['output_key']}", px - 20, py - 14, C_FLOATTEXT_GOLD
+                ))
+                self._spawn_particles(px, py, C_GOLD, count=12)
 
             # 夜晚降臨時（含血月）自動裝備強光手電筒，玩家不必再去商店手動點選。
             # 特意寫成獨立的 if（不是掛在上面的 elif 鏈上）：BLOOD_MOON_WARNING
@@ -1506,6 +1563,17 @@ class NightwatchFarmApp:
             elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
+            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE"):
+                # 烤箱/熔爐的 unlock_level 目前都是 3（跟 BUILDING_DATA
+                # 定義一致，這裡直接讀 self.game.farm_level 比對，不用
+                # 另外走 is_crop_unlocked 那套只吃 CropType 的介面）。
+                # 金幣/科技點數不足不會鎖卡——維持跟其餘商店卡片一致的
+                # 「可以點，點了會跳紅字說明缺什麼」既有手感，只有等級
+                # 這種「不管有沒有錢都做不到」的門檻才會直接鎖卡。
+                building_type = BuildingType.OVEN if card.action_id == "PLACE_OVEN" else BuildingType.FURNACE
+                req_lvl = BUILDING_DATA[building_type]["unlock_level"]
+                card.is_locked = self.game.farm_level < req_lvl
+                card.lock_reason = f"需莊園等級 Lv.{req_lvl}"
             elif card.action_id == "PLANT_GRAPE":
                 card.is_locked = not self.game.is_crop_unlocked(CropType.ROYAL_GRAPE)
                 card.lock_reason = "需莊園等級 Lv.4"
@@ -1978,6 +2046,15 @@ class NightwatchFarmApp:
                         img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
                         self.screen.blit(img, img_rect)
 
+                # 加工機台 (Phase 2)：需求裡提到可以畫在 _render_defenses
+                # 或新建的 _render_buildings，但這個專案裡防禦設施/景觀/
+                # 作物其實都是同一個逐格迴圈裡畫的（沒有獨立的
+                # _render_defenses 方法），這裡沿用同一個既有寫法、加在
+                # 同一個迴圈裡，而不是另外拆一個獨立的渲染 pass，跟其餘
+                # 格子物件的繪製順序/風格保持一致。
+                if tile.building:
+                    self._render_building_tile(tile.building, px, py)
+
                     if tile.crop.is_moonlight_boosted:
                         pygame.draw.circle(self.screen, (129, 212, 250), (px + 10, py + 10), 4)
 
@@ -2096,6 +2173,50 @@ class NightwatchFarmApp:
 
         self.screen.blit(overlay, (GRID_X, GRID_Y))
 
+    def _render_building_tile(self, building, px: int, py: int):
+        """畫一座加工機台（烤箱/熔爐），含運作中的進度條跟完成待採收的
+        跳動提示圖示。asset_loader 目前沒有載入 "oven"/"furnace" 這兩個
+        asset_key（assets/ 底下還沒有對應圖片），所以一律會走 else 分支
+        的退回色塊 + 圖示文字，等以後真的放圖片進去，loader.get() 就會
+        自動抓到、不用改這裡的邏輯（跟專案其他地方的貼圖後備模式一致）。
+        """
+        config = building.config
+        asset_key = config.get("asset_key")
+        img = self.loader.get(asset_key) if asset_key else None
+        if img:
+            img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
+            self.screen.blit(img, img_rect)
+        else:
+            # 貼圖缺失後備：木箱色塊 + 機台圖示文字，運作中時稍微變暗
+            # 表示「正在忙」，完成待採收時改用科技綠外框吸引注意力。
+            body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
+            base_col = (94, 66, 50) if not building.is_processing else (70, 50, 38)
+            draw_beveled_rect(self.screen, body_rect, base_col, border_radius=6, depth=2,
+                               pressed=building.is_processing)
+            icon = "🔥" if building.building_type == BuildingType.FURNACE else "🍞"
+            icon_surf = FONT_MD.render(icon, True, C_TEXT_ON_DARK)
+            self.screen.blit(icon_surf, icon_surf.get_rect(center=body_rect.center))
+            if building.ready_to_collect:
+                pygame.draw.rect(self.screen, C_TECH_GREEN, body_rect, width=2, border_radius=6)
+
+        # 運作中：機台上方畫一條小小的進度條。
+        if building.is_processing:
+            total = float(config["process_time"])
+            ratio = 0.0 if total <= 0 else max(0.0, min(1.0, 1.0 - building.processing_time_left / total))
+            bar_w = CELL_SIZE - 16
+            bar_rect = pygame.Rect(px + 8, py + 2, bar_w, 6)
+            draw_beveled_rect(self.screen, bar_rect, C_WOOD_BEVEL_DARK, border_radius=3, depth=1, pressed=True)
+            if ratio > 0:
+                pygame.draw.rect(self.screen, C_TECH_GREEN, (bar_rect.x, bar_rect.y, int(bar_w * ratio), bar_rect.height), border_radius=3)
+
+        # 完成待採收：一個跟著 sin 波跳動的驚嘆號，吸引玩家點擊——跟這個
+        # 專案既有的「懸停高光/範圍預覽」一樣用 self.anim_time 驅動動畫，
+        # 不用另外自己管一個計時器。
+        if building.ready_to_collect:
+            bounce = int(math.sin(self.anim_time * 6.0) * 4)
+            mark_surf = FONT_LG.render("❗", True, C_TECH_GREEN)
+            mark_pos = mark_surf.get_rect(center=(px + CELL_SIZE // 2, py - 6 + bounce))
+            self.screen.blit(mark_surf, mark_pos)
 
     def _render_entities(self):
         if self.game.guard_dog:
