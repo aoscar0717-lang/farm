@@ -369,6 +369,12 @@ class NightwatchFarmApp:
         self.TIME_SCALE_MIN = 0.0
         self.TIME_SCALE_MAX = 2.0
         self.TIME_SCALE_STEP = 0.1
+        # 滑鼠可點擊的倍速面板 [-]/[+] 按鈕 Rect，畫面每幀在
+        # _render_header_banner() 裡重新算好存起來，_handle_mouse_down()
+        # 讀這兩個值判斷有沒有點中。開場動畫還沒畫過第一幀時是 None，
+        # 點擊判斷要先檢查非 None 再 collidepoint，避免第一幀點擊噴例外。
+        self.btn_speed_down_rect = None
+        self.btn_speed_up_rect = None
 
         self.flash_vfx_timer = 0.0
         self._init_ui()
@@ -574,7 +580,22 @@ class NightwatchFarmApp:
         if event.button != 1:
             return
 
-
+        # 倍速調整面板 [-]/[+] 點擊 -- 邏輯跟鍵盤 [ / ] 完全一樣，
+        # 同一顆 self.time_scale，同樣的 round(...,1) + max/min 夾值。
+        if self.btn_speed_down_rect and self.btn_speed_down_rect.collidepoint(mx, my):
+            new_scale = round(self.time_scale - self.TIME_SCALE_STEP, 1)
+            self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
+            if self.time_scale > 0:
+                self.time_scale_before_pause = self.time_scale
+            self.sound.play("build")
+            return
+        if self.btn_speed_up_rect and self.btn_speed_up_rect.collidepoint(mx, my):
+            new_scale = round(self.time_scale + self.TIME_SCALE_STEP, 1)
+            self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
+            if self.time_scale > 0:
+                self.time_scale_before_pause = self.time_scale
+            self.sound.play("build")
+            return
 
         # 遊戲結束
         if self.game.game_over:
@@ -1023,17 +1044,46 @@ class NightwatchFarmApp:
         fill_col = C_GREEN if is_day else (C_BLOOD_RED if self.game.is_blood_moon else C_CYAN)
         if fill_w > 0:
             pygame.draw.rect(self.screen, fill_col, (bar_r.x, bar_r.y, fill_w, bar_r.height), border_radius=7)
-        self.screen.blit(FONT_XS.render(f"{rem_time:.1f}s", True, C_WHITE), (bar_r.right + 8, bar_r.y))
+        rem_surf = FONT_XS.render(f"{rem_time:.1f}s", True, C_WHITE)
+        self.screen.blit(rem_surf, (bar_r.right + 8, bar_r.y))
 
-        # 金幣卡
-        gold_rect = pygame.Rect(430, 12, 180, 44)
+        # 倍速調整面板 [-] 1.0x [+] -- 緊接在倒數計時 "7.1s" 右側，滑鼠
+        # 點擊 [-]/[+] 效果跟鍵盤 [ ] 完全一樣（同一顆 self.time_scale，
+        # 同樣的 round(...,1) + max/min 夾值邏輯），兩種操作方式並存。
+        panel_x = bar_r.right + 8 + rem_surf.get_width() + 14
+        btn_size = 20
+        btn_y = bar_r.y - 3
+        self.btn_speed_down_rect = pygame.Rect(panel_x, btn_y, btn_size, btn_size)
+
+        speed_txt_surf = FONT_SM.render(f"{self.time_scale:.1f}x", True, C_WHITE)
+        speed_box_w = speed_txt_surf.get_width() + 12
+        speed_box_rect = pygame.Rect(self.btn_speed_down_rect.right + 4, btn_y, speed_box_w, btn_size)
+
+        self.btn_speed_up_rect = pygame.Rect(speed_box_rect.right + 4, btn_y, btn_size, btn_size)
+
+        def _draw_speed_btn(rect, label):
+            hovered = rect.collidepoint(self.mouse_pos)
+            pygame.draw.rect(self.screen, (80, 100, 110) if hovered else (45, 58, 64), rect, border_radius=5)
+            pygame.draw.rect(self.screen, (150, 170, 180), rect, width=1, border_radius=5)
+            lbl_surf = FONT_SM.render(label, True, C_WHITE)
+            self.screen.blit(lbl_surf, lbl_surf.get_rect(center=rect.center))
+
+        _draw_speed_btn(self.btn_speed_down_rect, "-")
+        pygame.draw.rect(self.screen, (30, 40, 46), speed_box_rect, border_radius=5)
+        self.screen.blit(speed_txt_surf, speed_txt_surf.get_rect(center=speed_box_rect.center))
+        _draw_speed_btn(self.btn_speed_up_rect, "+")
+
+        # 金幣卡 (原本從 x=430 開始，讓給左邊新增的倍速面板一些空間，
+        # 跟等級卡一起整組往右挪，右邊界維持在原本的 1236 不變)
+        gold_rect = pygame.Rect(545, 12, 180, 44)
         pygame.draw.rect(self.screen, (55, 71, 79), gold_rect, border_radius=10)
         pygame.draw.circle(self.screen, C_GOLD, (gold_rect.x + 22, gold_rect.centery), 12)
         self.screen.blit(FONT_SM.render("G", True, (60, 40, 0)), (gold_rect.x + 17, gold_rect.centery - 8))
         self.screen.blit(FONT_LG.render(f"{self.game.gold} 金幣", True, C_GOLD), (gold_rect.x + 44, gold_rect.centery - 11))
 
-        # 等級與繁榮度
-        lvl_rect = pygame.Rect(630, 12, 606, 44)
+        # 等級與繁榮度 (原本從 x=630 開始，因為金幣卡右移，這裡也跟著右移，
+        # 寬度縮減，右邊界維持在原本的 1236 不變: 745 + 491 = 1236)
+        lvl_rect = pygame.Rect(745, 12, 491, 44)
         pygame.draw.rect(self.screen, (55, 71, 79), lvl_rect, border_radius=10)
         lvl_name = FARM_LEVELS[self.game.farm_level]["name"]
         self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_WHITE), (lvl_rect.x + 14, lvl_rect.y + 4))
@@ -1043,7 +1093,7 @@ class NightwatchFarmApp:
         curr_p = self.game.prosperity_score
         p_ratio = min(1.0, curr_p / next_goal)
 
-        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 430, 12)
+        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 300, 12)
         pygame.draw.rect(self.screen, (25, 30, 40), p_bar, border_radius=6)
         if p_ratio > 0:
             pygame.draw.rect(self.screen, C_PURPLE, (p_bar.x, p_bar.y, int(p_bar.width * p_ratio), p_bar.height), border_radius=6)
