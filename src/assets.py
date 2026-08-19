@@ -77,7 +77,7 @@ _register_sprite("fence", "Sprout Lands - Sprites - Basic pack/Sprout Lands - Sp
 _register_sprite("dog", "Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png", 4, 0, 32, 40, (60, 60))
 _register_sprite("cat", "Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png", 0, 0, 16, 16, (60, 60))
 _register_sprite("goose", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_duck_01_strip4.png", 0, 0, 16, 16, (60, 60))
-_register_sprite("sheep", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, 0, 16, 16, (60, 60))
+_register_sprite("sheep", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, 0, 32, 32, (60, 60))
 _register_sprite("bull", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png", 0, 0, 32, 32, (60, 60))
 _register_sprite("owl", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png", 0, 0, 16, 16, (60, 60))
 _register_sprite("scarecrow", "Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, 13, 16, 16, (60, 60))

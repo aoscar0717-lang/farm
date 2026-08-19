@@ -461,8 +461,9 @@ def _draw_dogs(screen, zstate, camera_x, camera_y):
             pygame.draw.circle(screen, (240, 240, 240), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
 
     # 4. 🐑 棉花守護羊
-    sheep_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, anim_frame, 16, 16, (int(ITEM_PX * SPRITE_SCALES["sheep"][0]), int(ITEM_PX * SPRITE_SCALES["sheep"][1])))
+    sheep_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, anim_frame, 32, 32, (int(ITEM_PX * SPRITE_SCALES["sheep"][0]), int(ITEM_PX * SPRITE_SCALES["sheep"][1])))
     for sx, sy in zstate.get("sheeps", []):
+
         screen_x, screen_y = _screen_coords(sx, sy, camera_x, camera_y)
         if screen_x is None: continue
         if sheep_img:
