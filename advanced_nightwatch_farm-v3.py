@@ -308,18 +308,7 @@ class NightwatchFarmApp:
                         self.log_messages.clear()
                         self.log_messages.append("🌾 遊戲已重新開始！")
                     elif event.key == pygame.K_SPACE:
-<<<<<<< HEAD:advanced_nightwatch_farm-v3.py
-                        if self.game.phase == GamePhase.NIGHT:
-                            mx, my = self.mouse_pos
-                            world_gx = (mx - GRID_X) / CELL_SIZE
-                            world_gy = (my - GRID_Y) / CELL_SIZE
-                            success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
-                            if success:
-                                self._spawn_particles(mx, my, (255, 255, 200), count=15)
-                            else:
-                                self.log_messages.append(f"🔦 {msg}")
-                        else:
-                            self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按空白鍵可發動手電筒強光擊暈！")
+                        self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
                     elif event.key == pygame.K_p:
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
@@ -340,10 +329,6 @@ class NightwatchFarmApp:
                         self.time_scale = self.TIME_SCALE_STEPS[idx]
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
-
-=======
-                        self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
->>>>>>> origin/main:nightwatch_farm/advanced_nightwatch_farm-v3.py
 
 
             if not self.show_intro:
