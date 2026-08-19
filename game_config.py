@@ -81,6 +81,9 @@ class BuildingType(Enum):
     # is_processing)，只是 recipe 是空字典（見 BUILDING_DATA 說明）。
     LUMBERYARD = "LUMBERYARD"            # 伐木場：無消耗，定期產出 wood
     MINE = "MINE"                        # 礦場：無消耗，定期產出 metal_ore
+    # Phase 4.75 新增：補齊木炭生產線，跟 OVEN/FURNACE 一樣走「有配方會
+    # 消耗原料」的一般路徑（不是 LUMBERYARD/MINE 那種空配方永動機）。
+    KILN = "KILN"                        # 炭窯：消耗 1 個 wood，產出 charcoal
 
 
 class EnemyType(Enum):
@@ -594,16 +597,14 @@ BUILDING_DATA = {
     # 烤箱/熔爐共用同一套已經測試過、正確處理「這一輪跑完才停工」的
     # 邏輯，不會有第二套邏輯路徑需要單獨維護/單獨測試。
     #
-    # 【如實揭露】這兩座建築打通了 wood 跟 metal_ore 這兩種原料的
-    # 上游來源，但熔爐 (FURNACE) 的配方是 metal_ore + charcoal，
-    # charcoal（木炭）目前依然完全沒有任何生產/採集管道——Phase 2 當初
-    # 選擇 FURNACE 配方時就說明過，「wood -> charcoal」是被捨棄的另一個
-    # 選項，沒有實作。也就是說，這次改動之後 metal_ore 可以無限產出了，
-    # 但熔爐依然無法真正運作（缺 charcoal），連帶 SPRINKLER/AUTO_HARVESTER
-    # 需要的 metal_ingot 也還是拿不到——熔爐與自動化科技「還沒有完全打通」，
-    # 只打通了一半。這不是這次改動漏做，這次的需求範圍明確只要求
-    # LUMBERYARD/MINE 兩座設施；補上 charcoal 的生產來源（例如用伐木場
-    # 產出的 wood 去燒炭）建議留給下一階段。
+    # 【Phase 4.5 當時如實揭露、Phase 4.75 已補上】這兩座建築打通了
+    # wood 跟 metal_ore 這兩種原料的上游來源，但熔爐 (FURNACE) 的配方
+    # 是 metal_ore + charcoal，charcoal（木炭）當時完全沒有任何生產/
+    # 採集管道——Phase 2 選擇 FURNACE 配方時就說明過，「wood -> charcoal」
+    # 是被捨棄的另一個選項，沒有實作。Phase 4.75 已經補上 KILN（炭窯：
+    # 消耗 1 個 wood -> 產出 1 個 charcoal，見下方定義），至此
+    # 「伐木場產 wood -> 炭窯燒成 charcoal / 礦場產 metal_ore -> 熔爐煉成
+    # metal_ingot -> 灑水器/自動採收機」這條完整生產鏈才算真正打通。
     BuildingType.LUMBERYARD: {
         "name": "伐木場",
         "unlock_level": 1,   # 最基礎的原料來源，刻意設成遊戲一開局就能蓋，不卡關
@@ -627,6 +628,27 @@ BUILDING_DATA = {
         "process_time": 15.0,
         "walkable": False,
         "asset_key": "mine",
+    },
+    # Phase 4.75：補齊木炭生產線。跟 LUMBERYARD/MINE 的「空配方永動機」
+    # 不同，炭窯是「消耗 1 個 wood -> 產出 1 個 charcoal」的一般配方型
+    # 機台，走的邏輯路徑完全等同 OVEN/FURNACE（recipe 非空字典，
+    # _update_buildings() 每次要開始新一輪前都會先檢查 wood 庫存夠不
+    # 夠、不夠就自動關閉並 emit BUILDING_STOPPED），不需要任何新程式碼，
+    # 純粹是 BUILDING_DATA 多一筆設定。unlock_level 訂在 2，跟 MINE
+    # 一致——蓋炭窯前提是玩家至少已經能蓋伐木場先囤一點 wood，但不用
+    # 等到熔爐本身解鎖 (Lv.3) 才能蓋，讓玩家在熔爐解鎖的當下，charcoal
+    # 已經有機會囤好一些存量。
+    BuildingType.KILN: {
+        "name": "炭窯",
+        "unlock_level": 2,
+        "build_cost_gold": 80,
+        "build_cost_tech": 0,
+        "recipe": {"wood": 1},
+        "output_key": "charcoal",
+        "output_qty": 1,
+        "process_time": 10.0,
+        "walkable": False,
+        "asset_key": "kiln",
     },
 }
 

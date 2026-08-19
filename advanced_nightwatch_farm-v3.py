@@ -343,7 +343,29 @@ _SAFE_TEXT_ALLOWED_RANGES = (
 def safe_text(text) -> str:
     """把字串裡任何落在允許範圍外的字元濾掉（主要是 Emoji、Dingbats、
     Misc Symbols 這些目前綁定字型沒有字形的字元），確保丟進 font.render
-    的字串一定乾淨，不會跑出缺字符方塊「☒」。"""
+    的字串一定乾淨，不會跑出缺字符方塊「☒」。
+
+    Phase 4.75 補充說明（沒有改這個函式本身，見下方調查結果）：這次修
+    「伐/礦變豆腐塊」時，用 fontTools 直接讀 assets/fonts/
+    NotoSansTC-GameSubset.otf 的 cmap 驗證發現，這個字型是「裁切過的
+    子集字型」，同一個 Unicode 區段裡（例如整個 CJK 統一表意文字
+    0x4E00-0x9FFF）只收錄一部分字，這個函式目前只按區段放行，抓不到
+    「區段合法但字型子集裡其實沒有這個字」的情況——這正是「伐」「礦」
+    變豆腐塊的根本原因。原本評估過在這裡加一層用 fontTools 讀取真實
+    cmap 的第二道過濾，但實測發現這個字型子集缺字的範圍遠比這次要修
+    的兩個機台圖示大得多（粗略掃過整份程式碼裡的顯示字串，「科」
+    「技」「訂」「關」「灑」等目前 UI 上大量使用的字，包括「科技點數」
+    「訂單」「開關」「自動灑水器」這些既有名稱本身用到的字，都同樣不
+    在這個字型子集的收錄範圍內），如果現在就加上這層過濾，會讓
+    safe_text() 一次性從很多既有、目前可能運作正常或至少「看起來還
+    好」的顯示文字裡拿掉大量字元，而這個環境沒辦法執行 pygame 實際看
+    畫面驗證會變成什麼樣子，貿然全面套用風險太高，可能把現有文字改
+    得更難讀甚至語意不通。這次保守處理：只針對這次明確要修的機台簡寫
+    字元，逐一用 fontTools 驗證後手動挑選字型真的有的替代字（見
+    _BUILDING_ICONS），這個函式本身維持原樣不擴大範圍；這個更大範圍
+    的字型子集缺字問題，已經另外完整揭露給使用者，建議另開一個階段
+    專門處理（重新產生涵蓋更完整的子集字型，或整份改用完整字集的中文
+    字型檔）。"""
     if not text:
         return text
     text = str(text)
@@ -665,7 +687,7 @@ class NightwatchFarmApp:
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
             ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
-            ("DECO", "莊園景觀 (19)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (20)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
@@ -722,6 +744,11 @@ class NightwatchFarmApp:
                 # 那樣特別標注「錠」。
                 ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木頭", "lumberyard"),
                 ("PLACE_MINE", "礦場", "$150 | 每15s產1礦石", "mine"),
+                # Phase 4.75：補齊木炭生產線最後一塊拼圖。跟烤箱/熔爐一樣
+                # 是「消耗原料」的一般機台（不是伐木場/礦場那種無消耗永
+                # 動機），說明文字用「耗1木」標示會消耗庫存木頭，跟其餘
+                # 「純資本」機台的說明風格做出區分。
+                ("PLACE_KILN", "炭窯", "$80 | 耗1木頭→炭 10s", "kiln"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1312,6 +1339,8 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
         elif act == "PLACE_MINE":
             success, msg = self.game.place_building(gx, gy, BuildingType.MINE)
+        elif act == "PLACE_KILN":
+            success, msg = self.game.place_building(gx, gy, BuildingType.KILN)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1610,17 +1639,18 @@ class NightwatchFarmApp:
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
             elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
-                                     "PLACE_LUMBERYARD", "PLACE_MINE"):
-                # 烤箱/熔爐/灑水器/自動採收機/伐木場/礦場的 unlock_level
-                # 都直接讀 BUILDING_DATA 定義比對 self.game.farm_level，
-                # 不用另外走 is_crop_unlocked 那套只吃 CropType 的介面。
-                # 金幣/科技點數/metal_ingot 材料不足都不會鎖卡——維持跟
-                # 其餘商店卡片一致的「可以點，點了會跳紅字說明缺什麼」
-                # 既有手感，只有等級這種「不管有沒有錢都做不到」的門檻
-                # 才會直接鎖卡。
+                                     "PLACE_LUMBERYARD", "PLACE_MINE", "PLACE_KILN"):
+                # 烤箱/熔爐/灑水器/自動採收機/伐木場/礦場/炭窯的
+                # unlock_level 都直接讀 BUILDING_DATA 定義比對
+                # self.game.farm_level，不用另外走 is_crop_unlocked 那套
+                # 只吃 CropType 的介面。金幣/科技點數/metal_ingot 材料
+                # 不足都不會鎖卡——維持跟其餘商店卡片一致的「可以點，
+                # 點了會跳紅字說明缺什麼」既有手感，只有等級這種「不管
+                # 有沒有錢都做不到」的門檻才會直接鎖卡。
                 _card_building_type = {
                     "PLACE_OVEN": BuildingType.OVEN,
                     "PLACE_FURNACE": BuildingType.FURNACE,
+                    "PLACE_KILN": BuildingType.KILN,
                     "PLACE_SPRINKLER": BuildingType.SPRINKLER,
                     "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
                     "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
@@ -2242,16 +2272,52 @@ class NightwatchFarmApp:
     # 灑水器/自動採收機沒有對應貼圖 asset_key 素材，走跟其他機台一致的
     # 退回色塊 + emoji 圖示。用字典而不是原本的 if/else 三元式，是因為
     # 現在種類變成 4 種，寫成字典比疊 elif 好讀。
+    # Phase 4.75：機台簡寫字元全面改成「字型真的有這個字形」的安全字元，
+    # 不再用 emoji。
+    #
+    # 【根本原因，跟使用者的描述有出入，如實說明】伐/礦會變成豆腐塊，
+    # 不是「字型檔字庫不全」這種模糊說法能完全解釋的——這個專案綁定的
+    # assets/fonts/NotoSansTC-GameSubset.otf 是一個「裁切過的子集字型」
+    # (GameSubset)，本來就只收錄一部分常用中文字，不是完整字集。用
+    # fontTools 直接讀這個 .otf 檔的 cmap 表逐字驗證後發現：不只
+    # 「伐」「礦」缺字形，使用者這次建議的替代字「炭」「烤」「熔」
+    # 「爐」也全部都不在這個字型的收錄範圍內——如果直接照字面建議改，
+    # 會把 2 個豆腐塊變成 4 個豆腐塊，問題更嚴重。這裡改用 fontTools
+    # 實際驗證過、確定字型裡真的有字形的替代字：
+    #   LUMBERYARD (伐木場) -> 木  （使用者原本的建議，字型裡有，維持）
+    #   MINE       (礦場)   -> 鐵  （使用者建議的兩個選項之一，字型裡有）
+    #   KILN       (炭窯)   -> 火  （使用者建議的「炭」缺字形，改用字型
+    #                                裡有、且同樣能表達「燃燒」意象的「火」）
+    #   OVEN       (烤箱)   -> 熟  （使用者建議的「烤」缺字形，改用字型
+    #                                裡有、能表達「烘烤完成」意象的「熟」）
+    #   FURNACE    (熔爐)   -> 鋼  （使用者建議的「熔」「爐」都缺字形，
+    #                                改用字型裡有、能對應熔爐產出物
+    #                                metal_ingot「金屬錠」意象的「鋼」，
+    #                                也剛好跟 MINE 的「鐵」形成「礦石 ->
+    #                                鋼」的原料/產物視覺對應）
+    #
+    # 另外順手修掉一個連帶發現、範圍相關的既有 bug：原本 SPRINKLER/
+    # AUTO_HARVESTER 用的 🔥🍞💧🤖 這些 emoji，其實從 Phase 2 開始就
+    # 從來沒有真的顯示出來過——advanced_nightwatch_farm-v3.py 頂部的
+    # safe_text()（防止字型沒有的字元變成缺字符方塊 ☒）只依照 Unicode
+    # 「區段」放行（ASCII/CJK 統一表意文字等），emoji 所在的
+    # U+1F300~U+1FAFF 這段完全不在允許範圍內，所以這些 emoji 字串進了
+    # FONT_MD.render() 之前就已經被 safe_text() 整個濾掉、變成空字串
+    # ——也就是說這幾座機台上原本應該顯示圖示的位置，這幾個階段以來
+    # 實際上什麼都沒畫出來，只是因為那個位置本來就有進度條/指示燈等其
+    # 他視覺元素，才沒有被注意到「圖示消失了」。這次既然要把 4 種機台
+    # 的簡寫都換成安全字元，乾脆把另外 2 種也一起換掉，全部 6 種機台
+    # 圖示統一使用同一套「fontTools 驗證過真的有字形」的中文字，不再
+    # 混用 emoji，徹底解決這一整類問題，不用逐一為每個 emoji 再想一次
+    # 替代字。
     _BUILDING_ICONS = {
-        BuildingType.FURNACE: "🔥",
-        BuildingType.OVEN: "🍞",
-        BuildingType.SPRINKLER: "💧",
-        BuildingType.AUTO_HARVESTER: "🤖",
-        # Phase 4.5：使用者這次明確建議用簡寫中文字（「伐」/「礦」）而不
-        # 是 emoji 圖示——FONT_MD.render() 對文字跟 emoji 是同一套呼叫，
-        # 不用另外處理，兩種風格混用在同一個字典裡完全沒問題。
-        BuildingType.LUMBERYARD: "伐",
-        BuildingType.MINE: "礦",
+        BuildingType.FURNACE: "鋼",
+        BuildingType.OVEN: "熟",
+        BuildingType.SPRINKLER: "水",
+        BuildingType.AUTO_HARVESTER: "採",
+        BuildingType.LUMBERYARD: "木",
+        BuildingType.MINE: "鐵",
+        BuildingType.KILN: "火",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
