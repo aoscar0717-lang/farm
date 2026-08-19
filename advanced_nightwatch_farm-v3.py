@@ -207,7 +207,17 @@ class NightwatchFarmApp:
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
-        
+
+        # Time-scale control (pause / 1x / 2x / 4x), ported over from the
+        # old src/capstone_contract.py game as one of its useful features.
+        # P toggles pause (remembers the speed you were at before pausing,
+        # same as the old game); [ and ] step down/up through the speed
+        # tiers. Applied by scaling dt before self.game.update(dt) in
+        # run(), so it doesn't need any changes inside GameState itself.
+        self.time_scale = 1.0
+        self.time_scale_before_pause = 1.0
+        self.TIME_SCALE_STEPS = (0.0, 1.0, 2.0, 4.0)
+
         self._init_ui()
 
     def _init_ui(self):
@@ -313,11 +323,31 @@ class NightwatchFarmApp:
                                 self.log_messages.append(f"🔦 {msg}")
                         else:
                             self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按空白鍵可發動手電筒強光擊暈！")
+                    elif event.key == pygame.K_p:
+                        if self.time_scale > 0:
+                            self.time_scale_before_pause = self.time_scale
+                            self.time_scale = 0.0
+                            self.log_messages.append("⏸ 已暫停")
+                        else:
+                            self.time_scale = self.time_scale_before_pause
+                            self.log_messages.append(f"▶ 恢復 {self.time_scale:g}x")
+                    elif event.key == pygame.K_LEFTBRACKET:
+                        idx = self.TIME_SCALE_STEPS.index(self.time_scale) if self.time_scale in self.TIME_SCALE_STEPS else 1
+                        idx = max(0, idx - 1)
+                        self.time_scale = self.TIME_SCALE_STEPS[idx]
+                        if self.time_scale > 0:
+                            self.time_scale_before_pause = self.time_scale
+                    elif event.key == pygame.K_RIGHTBRACKET:
+                        idx = self.TIME_SCALE_STEPS.index(self.time_scale) if self.time_scale in self.TIME_SCALE_STEPS else 1
+                        idx = min(len(self.TIME_SCALE_STEPS) - 1, idx + 1)
+                        self.time_scale = self.TIME_SCALE_STEPS[idx]
+                        if self.time_scale > 0:
+                            self.time_scale_before_pause = self.time_scale
 
 
 
             if not self.show_intro:
-                self.game.update(dt)
+                self.game.update(dt * self.time_scale)
 
             self._process_events()
             self._update_card_states()
@@ -799,6 +829,14 @@ class NightwatchFarmApp:
             phase_col = (255, 235, 59) if is_day else (129, 212, 250)
 
         self.screen.blit(FONT_MD.render(phase_txt, True, phase_col), (24, 40))
+
+        # Time-scale badge (P=pause, [/]=speed) -- small, top-right of the header.
+        if self.time_scale == 0:
+            speed_txt, speed_col = "⏸ 已暫停 (P)", (255, 100, 100)
+        else:
+            speed_txt, speed_col = f"{self.time_scale:g}x ([/]/P)", (200, 220, 255)
+        speed_surf = FONT_MD.render(speed_txt, True, speed_col)
+        self.screen.blit(speed_surf, (SCREEN_WIDTH - speed_surf.get_width() - 24, 24))
 
         max_dur = self.game.day_duration if is_day else self.game.night_duration
         rem_time = max(0.0, max_dur - self.game.time_in_phase)
