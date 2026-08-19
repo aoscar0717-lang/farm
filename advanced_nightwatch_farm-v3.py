@@ -375,8 +375,11 @@ class ActionCard:
         lbl_y = self.rect.y + (self.rect.height // 2 - 22 if self.cost_text else self.rect.height // 2 - 10)
         surface.blit(FONT_MD.render(self.label, True, lbl_col), (text_x, lbl_y))
 
-        if self.cost_text:
-            cost_col = C_RED if self.is_locked else (230, 81, 0)
+        # 鎖定的卡片不畫售價：下面的鎖定遮罩會在同一個位置改印解鎖條件
+        # 文字（例如「🔒 需莊園等級 Lv.2」），兩段文字疊在同一個座標會
+        # 透過半透明遮罩互相穿插變成看不懂的亂碼，售價本來就該讓位。
+        if self.cost_text and not self.is_locked:
+            cost_col = (230, 81, 0)
             if FONT_SM.render(self.cost_text, True, cost_col).get_width() <= avail_w:
                 surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
             else:
@@ -488,7 +491,7 @@ class NightwatchFarmApp:
                 ("PLANT_RADISH", "白蘿蔔", "$10 | 4s熟", "radish_mature"),
                 ("PLANT_STRAWBERRY", "鮮甜草莓", "$20 | 6s熟", "strawberry_mature"),
                 ("PLANT_TOMATO", "紅番茄", "$35 | 8s熟", "tomato_mature"),
-                ("PLANT_CARROT", "胡蘿蔔", "$55 | 12s熟", "carrot_mature"),
+                ("PLANT_CARROT", "紅蘿蔔", "$55 | 12s熟", "carrot_mature"),
                 ("PLANT_PUMPKIN", "巨型金南瓜", "$80 | 15s熟", "pumpkin_mature"),
                 ("PLANT_CORN", "香甜玉米", "$110 | 18s熟", "corn_mature"),
                 ("PLANT_WHEAT", "小麥", "$140 | 20s熟", "sunflower_mature"),

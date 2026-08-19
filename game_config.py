@@ -194,7 +194,7 @@ CROP_DATA = {
         "asset_key": "corn",
     },
     CropType.CARROT: {
-        "name": "胡蘿蔔",
+        "name": "紅蘿蔔",  # 原「胡蘿蔔」的「胡」不在精簡字型子集裡，會顯示成缺字方塊，改用同義的常見別名
         "unlock_level": 2,
         "seed_cost": 55,
         "grow_time": 12.0,
