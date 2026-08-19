@@ -14,9 +14,9 @@ from src.capstone_contract import new_game, apply_action, is_terminal
 from src.assets import screen, get_bg_surfs, night_filter
 from src.renderer import draw_board
 from src.input_handler import handle_mouse_click, handle_keyboard_events
-from src.tutorial import note_event
-from src.thought import get_contemplation_lines
-from src.ui import draw_contemplation
+from src.tutorial import note_event, update_unlocks
+from src.thought import get_contemplation_lines, reset_hold_session
+from src.ui import draw_contemplation, draw_tutorial_sidebar
 
 def log_action(msg):
     with open("log.txt", "a", encoding="utf-8") as f:
@@ -116,6 +116,12 @@ def play():
         if f_held and f_held_since is None:
             f_held_since = time.time()
         elif not f_held:
+            if f_held_since is not None:
+                # F was just released -- clear "what was last shown" so the
+                # next press always counts as a fresh look (see thought.py's
+                # reset_hold_session docstring for why this matters for the
+                # seen_count tiered-text mechanism).
+                reset_hold_session(state)
             f_held_since = None
 
         keys_dict = {
@@ -166,6 +172,18 @@ def play():
         else:
             hover_pos = None
 
+        # Tutorial progress must update every frame, not just while F is
+        # held -- otherwise the Sidebar (which is meant to show live ✓
+        # marks the instant a task is really done) would only refresh when
+        # the player happens to hold F, which defeats "任務完成要即時更新".
+        # update_unlocks() is documented as cheap (dict lookups + list
+        # lengths), so doing it unconditionally every frame is fine.
+        # thought.py's own internal call inside get_contemplation_lines is
+        # left in place too -- update_unlocks is idempotent (an already-
+        # latched step just gets skipped), so calling it from both places
+        # has no duplicate side effect, just redundant safety.
+        update_unlocks(state)
+
         # Holding F pauses enemy/night ticking too, same reasoning as the
         # TICK_EVENT gate above.
         if state["phase"] == "night" and not is_terminal(state) and not f_held:
@@ -197,8 +215,19 @@ def play():
             fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
             contemplation_filter.set_alpha(int(120 * fade_ratio))
             screen.blit(contemplation_filter, (0, 0))
-            lines = get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos)
+            if fade_ratio >= 1.0:
+                # The fade-in fully completed -- the player genuinely held
+                # F long enough to read a line, not just tapped the key.
+                note_event(state, "f_thought_used")
+            lines = get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos, mouse_pos)
             draw_contemplation(screen, lines, fade_ratio)
+
+        # 新手任務側欄：always visible (not gated on F), so progress is
+        # readable at a glance the same way the hotbar/top panel are.
+        # Suppressed while the shop is open -- its own overlay already
+        # covers this screen region, same rule draw_contemplation follows.
+        if not shop_open:
+            draw_tutorial_sidebar(screen, state)
 
         pygame.display.flip()
         clock.tick(30)

@@ -48,6 +48,28 @@ class SpriteLoader:
             return img
         return None
 
+    def get_sprite_region(self, filename, x, y, w, h, target_size=None):
+        """Extract an arbitrary pixel rect (x, y, w, h) from a sheet/image,
+        rather than a uniform row*sprite_w/row*sprite_h grid cell. Needed
+        when one sprite's artwork doesn't start at a multiple of the grid
+        size used for the rest of that sheet (e.g. a shorter/taller object
+        sitting partway down a sheet that's otherwise sliced at a fixed
+        cell size for its neighbors) -- forcing it through the row/col grid
+        math in that case reads the wrong pixels, or, if the resulting
+        offset falls outside the sheet entirely, silently returns None.
+        Reuses get_image()'s cache so the raw sheet is only loaded once no
+        matter how many regions are cut from it."""
+        img = self.get_image(filename)
+        if img is None:
+            return None
+        sheet_w, sheet_h = img.get_size()
+        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > sheet_w or y + h > sheet_h:
+            return None
+        region = img.subsurface(pygame.Rect(x, y, w, h))
+        if target_size:
+            region = pygame.transform.scale(region, target_size)
+        return region
+
     def get_image(self, filename, target_size=None):
         cache_key = f"image_{filename}"
         if cache_key not in self.cache:

@@ -7,6 +7,7 @@ from src.capstone_contract import (
     new_game, apply_action, fence_damage_state,
     FENCE_MAX_HP, FENCE_DAMAGE_PER_HIT, FENCE_ATTACK_INTERVAL_TICKS,
     BOAR_FENCE_DAMAGE_PER_HIT, BOAR_FENCE_ATTACK_INTERVAL_TICKS,
+    THIEF_STUCK_TICKS_THRESHOLD,
     _simulate_night_path, _thief_pick_targets,
 )
 
@@ -177,6 +178,124 @@ class TestThiefDetourBehavior(unittest.TestCase):
 
         self.assertEqual(state["farm"]["thief_ai_state"], "attacking_fence")
         self.assertIsNotNone(state["farm"]["thief_attack_target_fence"])
+
+
+class TestThiefStuckAfterFenceDestroyed(unittest.TestCase):
+    """Regression test for the "thief frozen in place forever after
+    destroying a fence" bug: destroying ONE segment of a sealed ring
+    (_build_sealed_room) opens a gap exactly as wide as the thief's own
+    hitbox -- BFS pathfinding (point-sampled) reports it as walkable, but
+    the finer box-collision movement code can never actually complete that
+    squeeze without grazing the still-standing neighboring post, so the
+    old code looped "found a detour" -> (never actually move) forever.
+    thief_stuck_ticks now detects the no-progress streak and forces the
+    thief to attack whatever's actually touching it instead, which
+    guarantees the gap eventually widens."""
+
+    def test_thief_resumes_moving_after_squeezing_through_a_destroyed_fence_gap(self):
+        state = new_game()
+        state = _build_sealed_room(state)
+        state = _spawn_thief_at(state, (65, 40))
+
+        # Drive the fight through to the first fence's destruction (mirrors
+        # test_1_and_2 above -- takes ~375 ticks at this file's damage/
+        # cooldown numbers). Generous cap so a regression here fails loudly
+        # instead of hanging the test suite.
+        destroyed = False
+        for _ in range(600):
+            state = apply_action(state, "night_tick")
+            if not any(f[0] == 60 and f[1] == 40 for f in state["farm"]["fences"]):
+                destroyed = True
+                break
+        self.assertTrue(destroyed, "setup failed: the targeted fence was never destroyed")
+
+        # The actual regression check: keep running well past the point
+        # the old bug would have frozen forever, and confirm the thief's
+        # position actually changes at least once -- the old bug kept
+        # thief_pos byte-for-byte identical across hundreds of ticks here.
+        positions_seen = {state["farm"]["thief_pos"]}
+        crop_stolen = False
+        for _ in range(1500):
+            state = apply_action(state, "night_tick")
+            if state["farm"]["thief_pos"] is not None:
+                positions_seen.add(state["farm"]["thief_pos"])
+            if (55, 55) not in state["farm"]["crops"]:
+                crop_stolen = True
+                break
+
+        self.assertGreater(
+            len(positions_seen), 1,
+            "thief_pos never changed after the fence was destroyed -- still stuck",
+        )
+        # End state must be real forward progress: either it got all the
+        # way in and took the crop, or it's now actively fighting a
+        # (possibly different, e.g. the neighboring post it had to clear
+        # to actually get through the gap) fence -- either is fine. What's
+        # NOT fine is "moving" state with a stale, never-consumed path,
+        # which is exactly what the bug looked like.
+        still_moving_but_frozen = (
+            state["farm"]["thief_ai_state"] == "moving"
+            and state["farm"]["thief_pos"] is not None
+            and len(positions_seen) <= 1
+        )
+        self.assertFalse(still_moving_but_frozen)
+        self.assertTrue(
+            crop_stolen or state["farm"]["thief_ai_state"] == "attacking_fence" or state["farm"]["thief_pos"] is None,
+            "thief neither reached the crop, nor is attacking a fence, nor despawned -- likely stuck again",
+        )
+
+        # The fence system's own invariant must still hold: the thief never
+        # goes after anything other than the crop it originally committed
+        # to (requirement carried over from TestThiefDetourBehavior).
+        if state["farm"]["thief_pos"] is not None:
+            self.assertEqual(state["farm"]["target_crop"], (55, 55))
+
+    def test_stuck_counter_only_forces_an_attack_after_the_threshold(self):
+        """Unit-level check on the fix's own mechanism, isolated from the
+        ~375-tick fence fight above: a single fence_hit tick (or a few,
+        below THIEF_STUCK_TICKS_THRESHOLD) must still prefer a real detour
+        when one exists -- only a streak AT the threshold should force
+        attacking_fence. Guards against the fix being too eager and
+        silently disabling the detour behavior TestThiefDetourBehavior
+        already covers.
+
+        Reuses test_4's exact scenario (single isolated fence, real side
+        route, thief spawned close enough that fence_hit fires on the very
+        first tentative step -- confirmed by test_4 itself already landing
+        in the detour branch, not the "clear path" branch, since it asserts
+        ai_state stays "moving" with the fence untouched rather than never
+        even entering this code path)."""
+
+        def _scenario():
+            state = new_game()
+            state["farm"]["fences"].append((10, 10, FENCE_MAX_HP))
+            state["farm"]["crops"].append((15, 15))
+            state = _spawn_thief_at(state, (9.5, 10))
+            state["farm"]["thief_path"] = [(15, 15)]
+            state["farm"]["target_crop"] = (15, 15)
+            return state
+
+        # Below threshold: pre-load the counter so this tick's +1 still
+        # lands strictly under THIEF_STUCK_TICKS_THRESHOLD -- must still
+        # prefer the real detour, exactly like test_4 with a fresh (zero)
+        # counter does.
+        state = _scenario()
+        state["farm"]["thief_stuck_ticks"] = THIEF_STUCK_TICKS_THRESHOLD - 2
+        state = apply_action(state, "night_tick")
+        self.assertEqual(state["farm"]["thief_ai_state"], "moving")
+        self.assertEqual(state["farm"]["fences"][0][2], FENCE_MAX_HP)  # untouched
+
+        # At threshold: pre-load so this tick's +1 reaches the threshold
+        # exactly -- now it must stop trusting the detour verdict and
+        # attack whatever's actually touching it, even though a real route
+        # still exists (this is the whole point of the fix: a "reachable"
+        # verdict alone isn't enough once it's stopped translating into
+        # actual progress).
+        state = _scenario()
+        state["farm"]["thief_stuck_ticks"] = THIEF_STUCK_TICKS_THRESHOLD - 1
+        state = apply_action(state, "night_tick")
+        self.assertEqual(state["farm"]["thief_ai_state"], "attacking_fence")
+        self.assertEqual(state["farm"]["thief_attack_target_fence"], (10, 10))
 
 
 class TestFenceCollapseAnimation(unittest.TestCase):

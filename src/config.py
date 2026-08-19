@@ -31,6 +31,49 @@ SPRITE_SCALES = {
     "boar": (1.5, 1.5)
 }
 
+# ASSET_FOOTPRINTS -- documentation metadata for section 十五 of the
+# Tutorial/Thought UX upgrade ("2x2 被壓成 1x1" investigation). This maps a
+# decor/world object's *visual* footprint, in grid tiles, to how many tiles
+# it actually occupies for collision/placement purposes -- default (1, 1)
+# for anything not listed here.
+#
+# After re-checking sprite_loader.py, renderer.py, assets.py, and every
+# SPRITE_SCALES entry against capstone_contract.py's _is_occupied() /
+# placement code, exactly ONE asset in the whole project has a visual size
+# that doesn't match its logical (collision/placement) footprint: the
+# "fountain" decor item (displayed name 風車) is drawn at
+# SPRITE_SCALES["windmill"] = (2.0, 2.0) -- i.e. it visually spans roughly a
+# 2x2 tile area, centered on its placement origin (see renderer.py's
+# _draw_decorations, the "fountain" special case) -- while build_decor_ /
+# _is_occupied() and every other piece of placement/collision code treats
+# it as exactly 1x1 (ITEM_SIZE), identical to every other decor type. No
+# other asset in the project (tree/rock/soil/crop/scarecrow/dog/goblin/
+# boar, nor any of the 18 other decor items) has this mismatch -- their
+# SPRITE_SCALES entries are all close to (1,1) and/or aren't tied to
+# grid-occupancy at all (goblin/boar/dog are mobile entities, not
+# placed-on-a-grid-cell objects).
+#
+# Deliberately NOT used to rearchitect _is_occupied()/collision into
+# reserving multiple grid cells -- that would be a much larger, riskier
+# change than what's actually broken (a single decor item's visuals
+# slightly overflowing its own 1x1 placement cell into neighboring tiles,
+# which is a cosmetic overlap, not a gameplay bug: nothing currently
+# prevents placing something in a tile the fountain visually overlaps).
+# This dict exists so the mismatch is explicit, documented, and testable
+# (see tests/test_sprite_footprints.py) rather than silently living only in
+# two people's heads across renderer.py and capstone_contract.py.
+ASSET_FOOTPRINTS = {
+    "fountain": (2, 2),
+}
+
+
+def get_asset_footprint(asset_id):
+    """(cols, rows) footprint for `asset_id`, defaulting to (1, 1) -- the
+    single lookup point tests/other modules should use instead of poking
+    ASSET_FOOTPRINTS.get(...) directly everywhere."""
+    return ASSET_FOOTPRINTS.get(asset_id, (1, 1))
+
+
 CELL_SIZE = 10
 ITEM_PX = CELL_SIZE * ITEM_SIZE
 WORLD_W = GRID_W * CELL_SIZE
@@ -50,9 +93,13 @@ except:
 
 TOOL_NAMES = {
     "radish": "白蘿蔔種子", "carrot": "胡蘿蔔種子", "pumpkin": "魔法南瓜種子",
-    "stone_path": "石板路", "flower": "鮮花盆栽", "bench": "木製長椅", "fountain": "小型噴泉",
-    "fence": "木圍欄", "trap": "捕獸夾",
-    "dog": "看門狗", 
+    "stone_path": "石板路", "flower": "鮮花盆栽", "bench": "木製長椅", "fountain": "風車",
+    "scarecrow": "稻草人", "crate": "木箱", "bush": "灌木叢", "rock": "庭院石",
+    "sunflower": "向日葵", "pine_tree": "松樹", "big_tree": "大樹",
+    "stump": "樹墩", "mushroom": "蘑菇", "picnic_basket": "野餐籃", "woodpile": "柴堆",
+    "picnic_blanket": "野餐墊", "beehive": "蜂箱", "garden_table": "庭院桌", "fruit_tree": "果樹",
+    "fence": "木圍欄", "trap": "地刺陷阱",
+    "dog": "看門狗",
     "fertilizer": "魔法肥料", "shovel": "鐵鏟 (免費)", "axe": "斧頭", "pickaxe": "十字鎬",
     "hoe": "鋤頭 (開墾)", "scythe": "鐮刀 (收割)"
 }

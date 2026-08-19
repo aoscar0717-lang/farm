@@ -35,14 +35,63 @@ DECOR_INFO = {
     "stone_path": {"price": 20, "prosperity": 5},
     "flower": {"price": 50, "prosperity": 15},
     "bench": {"price": 100, "prosperity": 35},
-    "fountain": {"price": 300, "prosperity": 120}
+    "fountain": {"price": 300, "prosperity": 120},
+    # Landscape expansion: 7 new decor items, all sourced from real,
+    # visually-confirmed existing assets (see the analysis report). Price/
+    # prosperity extend the existing small/mid/large curve above rather than
+    # flattening everything to one number.
+    "scarecrow": {"price": 30, "prosperity": 10},
+    "crate": {"price": 25, "prosperity": 8},
+    "bush": {"price": 20, "prosperity": 8},
+    "rock": {"price": 60, "prosperity": 18},
+    "sunflower": {"price": 80, "prosperity": 25},
+    "pine_tree": {"price": 90, "prosperity": 28},
+    "big_tree": {"price": 260, "prosperity": 95},
+    # Landscape expansion round 2: 8 more decor items. Prices/prosperity
+    # picked so the FULL merged curve (all 19 items sorted by price) stays
+    # non-decreasing in prosperity -- see
+    # tests/test_landscape_consistency.py::TestDecorInfoAndNames::test_price_curve_is_non_decreasing_with_prosperity.
+    # A "leafy_tree" candidate was dropped during this round (see assets.py)
+    # -- it would have reused the same sprite already drawn for the farm
+    # zone's wild obstacle trees, making a paid decoration look identical
+    # to unplaced world clutter.
+    "stump": {"price": 12, "prosperity": 4},
+    "mushroom": {"price": 16, "prosperity": 5},
+    "picnic_basket": {"price": 22, "prosperity": 8},
+    "woodpile": {"price": 28, "prosperity": 9},
+    "picnic_blanket": {"price": 45, "prosperity": 13},
+    "beehive": {"price": 70, "prosperity": 22},
+    "garden_table": {"price": 105, "prosperity": 42},
+    "fruit_tree": {"price": 150, "prosperity": 55},
 }
 
 DECOR_NAMES = {
     "stone_path": "石板路",
     "flower": "鮮花盆栽",
     "bench": "木製長椅",
-    "fountain": "小型噴泉"
+    # Visual identity changed 小型噴泉 -> 風車 (windmill): the project has no
+    # dedicated fountain/well art anywhere in its asset packs (checked
+    # every pack), and the decoration's world sprite already reused the
+    # windmill animation (spr_deco_windmill_strip9.png, see renderer.py's
+    # _draw_decorations) -- renaming the label to match what's actually
+    # drawn, per user decision, rather than pretending a windmill icon is
+    # a fountain. price/prosperity in DECOR_INFO above are unchanged.
+    "fountain": "風車",
+    "scarecrow": "稻草人",
+    "crate": "木箱",
+    "bush": "灌木叢",
+    "rock": "庭院石",
+    "sunflower": "向日葵",
+    "pine_tree": "松樹",
+    "big_tree": "大樹",
+    "stump": "樹墩",
+    "mushroom": "蘑菇",
+    "picnic_basket": "野餐籃",
+    "woodpile": "柴堆",
+    "picnic_blanket": "野餐墊",
+    "beehive": "蜂箱",
+    "garden_table": "庭院桌",
+    "fruit_tree": "果樹",
 }
 
 # --- Fence combat tuning (goblin/thief vs. fence system) -------------------
@@ -63,6 +112,16 @@ FENCE_DAMAGE_PER_HIT = 8
 # fully deterministic for tests -- no real-time dependency in the contract
 # layer.
 FENCE_ATTACK_INTERVAL_TICKS = 30
+
+# Bug fix: thief permanently frozen after squeezing through a single-tile
+# gap in a fence wall (see thief_stuck_ticks' comment in _new_zone_state and
+# _night_tick_thief's STATE_MOVING branch for the full mechanism). 5 ticks
+# is a small fraction of FENCE_ATTACK_INTERVAL_TICKS (30) -- long enough
+# that a normal one-tick graze while rounding a corner elsewhere resolves
+# on its own well before this fires, short enough that a real geometric
+# deadlock (which never resolves on its own) gets corrected almost
+# immediately rather than leaving the thief visibly stuck for a while.
+THIEF_STUCK_TICKS_THRESHOLD = 5
 
 # --- V1.1 balance-fix additions -------------------------------------------
 # The boar's fence-attack used to have no cooldown at all (see the original
@@ -123,6 +182,24 @@ def _new_zone_state() -> dict:
         "thief_ai_state": "moving",
         "thief_attack_cooldown": 0,
         "thief_attack_target_fence": None,
+        # Consecutive night_ticks the thief has been in "moving" state,
+        # detected a fence blocking its tentative next step, but NOT
+        # actually moved (see the fence_hit branch in _night_tick_thief).
+        # Normally zero -- a real detour resolves within a tick or two as
+        # the thief walks clear. It only climbs when the thief is wedged in
+        # a gap exactly as wide as its own hitbox (destroyed-fence gap
+        # between two still-standing posts on the same 10-unit grid the
+        # fence hitboxes use) -- BFS pathfinding (point-sampled, see
+        # _is_obstacle) reports the route as reachable, but the finer-
+        # grained box collision the continuous movement below uses can
+        # never actually complete that squeeze, so the same "found a
+        # detour" verdict repeats every tick with zero progress. Past
+        # THIEF_STUCK_TICKS_THRESHOLD, _night_tick_thief stops trusting the
+        # detour verdict and attacks whatever fence is actually touching
+        # it instead, guaranteeing forward progress (a destroyed fence
+        # always eventually widens the gap) without touching pathfinding,
+        # collision sizing, or fence HP.
+        "thief_stuck_ticks": 0,
         # Ticks remaining to render a hit-shake/flash on the fence just
         # struck -- renderer-only concern, decremented in night_tick.
         "thief_hit_flash": 0,
@@ -557,7 +634,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
         if not _is_occupied(zstate, pos[0], pos[1], include_crops=False):
             zstate["building_tasks"].append({"type": "trap", "pos": pos, "progress": 0, "max_progress": 1})
             _working_copy["money"] -= 50
-            _working_copy["last_msg"] = "設置了捕獸夾！"
+            _working_copy["last_msg"] = "設置了地刺陷阱！"
 
     elif action.startswith("place_dog_"):
         if _working_copy.get("phase") != "day": return _working_copy
@@ -629,7 +706,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
             _working_copy["last_msg"] = "移除了景觀物！"
         elif pos in zstate.get("traps", []):
             zstate["traps"].remove(pos)
-            _working_copy["last_msg"] = "回收了捕獸夾！"
+            _working_copy["last_msg"] = "回收了地刺陷阱！"
         elif pos in zstate.get("dogs", []):
             zstate["dogs"].remove(pos)
             _working_copy["last_msg"] = "收回了看門狗！"
@@ -792,6 +869,7 @@ def _night_tick_thief(state):
                 farm["thief_ai_state"] = "moving"
                 farm["thief_attack_cooldown"] = 0
                 farm["thief_attack_target_fence"] = None
+                farm["thief_stuck_ticks"] = 0
                 targets = _thief_pick_targets(farm)
                 farm["thief_path"], farm["target_crop"] = _simulate_night_path(farm, farm["thief_pos"], targets)
                 enemies_active = True
@@ -808,7 +886,7 @@ def _night_tick_thief(state):
         if trapped:
             farm["traps"].remove(trapped)
             farm["thief_hp"] = 0
-            state["last_msg"] = "小偷踩到了捕獸夾！陷阱損壞，小偷被擊敗！"
+            state["last_msg"] = "小偷踩到了地刺陷阱！陷阱損壞，小偷被擊敗！"
 
         if farm["thief_hp"] <= 0:
             if "小偷踩到" not in state.get("last_msg", ""):
@@ -820,6 +898,7 @@ def _night_tick_thief(state):
             farm["thief_ai_state"] = "moving"
             farm["thief_attack_cooldown"] = 0
             farm["thief_attack_target_fence"] = None
+            farm["thief_stuck_ticks"] = 0
             farm["thief_spawn_cooldown"] = 30 + random.randint(0, 30)
         elif farm.get("thief_iframes", 0) <= 0:
 
@@ -895,17 +974,38 @@ def _night_tick_thief(state):
                         # at the moment of contact, when the thief is
                         # already touching the fence and almost *any*
                         # nearby waypoint would still graze its hitbox.
+                        #
+                        # Neither branch below moves the thief this tick --
+                        # that's fine normally (a fresh detour resolves on
+                        # its own within a tick or two as the thief steps
+                        # clear), but if the thief is wedged in a gap
+                        # exactly as wide as its own hitbox (see
+                        # thief_stuck_ticks' definition in _new_zone_state),
+                        # BFS keeps reporting the same "reachable" verdict
+                        # forever while the finer-grained box collision
+                        # never lets the actual step complete -- zero
+                        # progress, every tick, indefinitely. Bug fix:
+                        # count consecutive fence_hit ticks with no
+                        # movement, and once that streak is suspiciously
+                        # long, stop trusting the detour verdict and attack
+                        # whatever's actually touching the thief instead --
+                        # destroying it is guaranteed to eventually widen
+                        # the gap, unlike re-asking the same question.
+                        farm["thief_stuck_ticks"] = farm.get("thief_stuck_ticks", 0) + 1
                         detour_targets = [farm["target_crop"]] if farm.get("target_crop") else _thief_pick_targets(farm)
                         alt_path, alt_target, reachable = _simulate_night_path(
                             farm, farm["thief_pos"], detour_targets, return_reachable=True
                         )
-                        if reachable and alt_path:
+                        stuck = farm["thief_stuck_ticks"] >= THIEF_STUCK_TICKS_THRESHOLD
+                        if reachable and alt_path and not stuck:
                             # Found a clear alternate route -- take it
                             # instead of fighting through the fence.
                             farm["thief_path"], farm["target_crop"] = alt_path, alt_target
                         else:
-                            # No viable detour right now (a real wall, or
-                            # every alternate route is also blocked) --
+                            # No viable detour right now (a real wall, every
+                            # alternate route is also blocked, or we've been
+                            # "finding" the same non-progressing detour for
+                            # THIEF_STUCK_TICKS_THRESHOLD ticks straight) --
                             # stop and start wearing this fence down.
                             # Cooldown starts at 0 so the *next* night_tick
                             # (now in STATE_ATTACKING_FENCE) lands the first
@@ -914,7 +1014,9 @@ def _night_tick_thief(state):
                             farm["thief_ai_state"] = "attacking_fence"
                             farm["thief_attack_target_fence"] = (fence_hit[0], fence_hit[1])
                             farm["thief_attack_cooldown"] = 0
+                            farm["thief_stuck_ticks"] = 0
                     else:
+                        farm["thief_stuck_ticks"] = 0
                         if length <= speed:
                             farm["thief_pos"] = farm["thief_path"].pop(0)
                         else:
@@ -933,6 +1035,7 @@ def _night_tick_thief(state):
                     farm["thief_ai_state"] = "moving"
                     farm["thief_attack_cooldown"] = 0
                     farm["thief_attack_target_fence"] = None
+                    farm["thief_stuck_ticks"] = 0
                     farm["thief_spawn_cooldown"] = 30 + random.randint(0, 30)
 
     _process_zone_dogs(farm, "thief")
@@ -983,7 +1086,7 @@ def _night_tick_boar(state):
         if trapped:
             decor["traps"].remove(trapped)
             decor["boar_hp"] -= 5  # Boar is tough, trap does 5 dmg
-            state["last_msg"] = "野豬踩到了捕獸夾！陷阱損壞，野豬受到重創！"
+            state["last_msg"] = "野豬踩到了地刺陷阱！陷阱損壞，野豬受到重創！"
 
         if decor["boar_hp"] <= 0:
             if "踩到" not in state.get("last_msg", ""):
