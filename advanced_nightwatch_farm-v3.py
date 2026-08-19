@@ -1109,6 +1109,19 @@ class NightwatchFarmApp:
     # 「這格能不能放」的視覺提示，不是權威判定——實際成功/失敗還是要
     # 靠點擊後呼叫對應的 game.xxx() 函式，那邊的失敗原因字串已經在
     # _apply_grid_action() 裡轉成紅色 FloatingText 顯示了，這裡不重複。
+    # UI 視覺優化（2x2 建造預覽修正）階段：這份「商店卡片 action_id ->
+    # BuildingType」對照表原本只寫死在 _update_card_states() 內部（本地
+    # 變數 _card_building_type），這次建造預覽框也需要同一份對照關係
+    # （從 selected_action 反查建築的 size，決定預覽框要畫多大），與其
+    # 複製一份幾乎一樣的字典、日後容易兩邊改一邊漏改，改成拉到 class
+    # 層級成為共用常數，_update_card_states() 跟預覽框繪製都讀這裡。
+    _CARD_BUILDING_TYPES = {
+        "PLACE_FURNACE": BuildingType.FURNACE,
+        "PLACE_SPRINKLER": BuildingType.SPRINKLER,
+        "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
+        "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
+    }
+
     _DEFENSE_ACTION_IDS = {"PLACE_FENCE", "PLACE_TRAP", "PLACE_SCARECROW", "PLACE_BEEHIVE"}
     # 各防禦設施的警戒/攻擊範圍（格數），只有真的有「範圍」概念的設施才會
     # 在放置預覽時畫光圈；捕獸夾/木柵沒有範圍屬性，維持原樣不畫圈。
@@ -1117,28 +1130,62 @@ class NightwatchFarmApp:
         "PLACE_BEEHIVE": DEFENSE_DATA.get(DefenseType.BEEHIVE, {}).get("attack_range"),
     }
 
+    def _selected_building_footprint(self) -> Tuple[int, int]:
+        """目前選中的工具如果是「蓋建築」的動作，回傳該建築的佔地格數
+        (size_w, size_h)（讀 BUILDING_DATA 的 "size"，沒有這個欄位的
+        建築預設 (1, 1)）；不是建築動作（種作物/景觀/防禦/工具）一律
+        回傳 (1, 1)。UI 視覺優化階段新增，建造預覽框跟 footprint 合法性
+        判定 (_grid_preview_is_invalid) 共用同一份查詢邏輯，避免兩處各
+        寫一次、日後容易兜不起來。"""
+        building_type = self._CARD_BUILDING_TYPES.get(self.selected_action)
+        if building_type is None:
+            return (1, 1)
+        return BUILDING_DATA[building_type].get("size", (1, 1))
+
     def _grid_preview_is_invalid(self, gx: int, gy: int) -> bool:
         """判斷目前選中的工具，放在 (gx, gy) 這格『大致上』會不會失敗，
         純粹用來畫格子高光的顏色（白色=可以／紅色=不行），不影響任何
-        實際遊戲邏輯。成熟作物一律可以直接採收，所以永遠視為有效。"""
-        tile = self.game.get_tile(gx, gy)
-        if not tile:
-            return True
-        if tile.crop and tile.crop.is_mature:
-            return False
+        實際遊戲邏輯。成熟作物一律可以直接採收，所以永遠視為有效。
 
-        act = self.selected_action
-        if act.startswith("PLANT_") or act in self._DEFENSE_ACTION_IDS:
-            return tile.zone != ZoneType.FARM_ZONE or not tile.is_empty
-        if act.startswith("PLACE_"):
-            # 其餘 PLACE_* 都是景觀裝飾，只能放在莊園景觀區。
-            return tile.zone != ZoneType.DECORATION_ZONE or not tile.is_empty
-        if act == "WATER_CROP":
-            return not (tile.crop and not tile.crop.is_mature)
-        if act == "SHOVEL":
-            return tile.is_empty
-        if act == "HARVEST":
-            return not (tile.crop and tile.crop.is_mature)
+        UI 視覺優化（2x2 建造預覽修正）階段：選中的是 FURNACE/LUMBERYARD
+        這種 2x2 建築時，只檢查 (gx, gy) 這一格「大致上」合不合法已經
+        不夠準——實際 place_building() 是四格（(gx,gy)/(gx+1,gy)/
+        (gx,gy+1)/(gx+1,gy+1)）全部合法才會成功，只看錨點那一格會出現
+        「預覽框顯示白色（可以蓋），實際點下去卻因為右邊或下面那格被
+        佔用而建造失敗」的誤導。這裡改成用 _selected_building_footprint()
+        展開完整 footprint，任何一格不合法就整體判定紅色；非建築動作
+        (size 恆為 (1, 1)) 的行為跟修改前完全相同。"""
+        size_w, size_h = self._selected_building_footprint()
+        footprint = [(gx + dx, gy + dy) for dy in range(size_h) for dx in range(size_w)]
+
+        for (fx, fy) in footprint:
+            tile = self.game.get_tile(fx, fy)
+            if not tile:
+                return True
+            if len(footprint) == 1 and tile.crop and tile.crop.is_mature:
+                # 成熟作物一律可以直接採收——這個特例只在 1x1（非建築）
+                # 動作下有意義，2x2 建築本來就不可能蓋在農田核心區的
+                # 作物格上（zone 檢查一定會先擋下來），不用重複判斷。
+                return False
+
+            act = self.selected_action
+            if act.startswith("PLANT_") or act in self._DEFENSE_ACTION_IDS:
+                if tile.zone != ZoneType.FARM_ZONE or not tile.is_empty:
+                    return True
+            elif act.startswith("PLACE_"):
+                # 其餘 PLACE_* 都是景觀裝飾/加工機台，只能放在莊園景觀區。
+                if tile.zone != ZoneType.DECORATION_ZONE or not tile.is_empty:
+                    return True
+            elif act == "WATER_CROP":
+                if not (tile.crop and not tile.crop.is_mature):
+                    return True
+            elif act == "SHOVEL":
+                if tile.is_empty:
+                    return True
+            elif act == "HARVEST":
+                if not (tile.crop and tile.crop.is_mature):
+                    return True
+
         return False
 
     def _handle_mouse_wheel(self, event):
@@ -1922,12 +1969,9 @@ class NightwatchFarmApp:
                 # 視覺升級（熔爐動畫）階段整批移除 OVEN/KILN 之後，這裡
                 # 同步拿掉 "PLACE_OVEN"/"PLACE_KILN" 兩個 key，避免對照表
                 # 裡留著已經不存在的 BuildingType 成員。
-                _card_building_type = {
-                    "PLACE_FURNACE": BuildingType.FURNACE,
-                    "PLACE_SPRINKLER": BuildingType.SPRINKLER,
-                    "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
-                    "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
-                }[card.action_id]
+                # UI 視覺優化階段：改讀 class 層級的 _CARD_BUILDING_TYPES
+                # 共用常數，不再是這裡的本地變數，見該常數定義處的說明。
+                _card_building_type = self._CARD_BUILDING_TYPES[card.action_id]
                 req_lvl = BUILDING_DATA[_card_building_type]["unlock_level"]
                 card.is_locked = self.game.farm_level < req_lvl
                 card.lock_reason = f"需莊園等級 Lv.{req_lvl}"
@@ -2562,14 +2606,28 @@ class NightwatchFarmApp:
             cx = hx + CELL_SIZE // 2
             cy = hy + CELL_SIZE // 2
 
+            # UI 視覺優化（修正 2x2 建造預覽）：選中的是 FURNACE/
+            # LUMBERYARD 這種 2x2 建築時，_selected_building_footprint()
+            # 回傳 (2, 2)，預覽框的寬高要跟著放大成兩倍格子大小
+            # （例如 CELL_SIZE=32 時變成 64x64），才能精準覆蓋住實際會
+            # 被佔用的四個格子；非建築動作（種作物/景觀/防禦/工具）一律
+            # 回傳 (1, 1)，預覽框維持原本的單格大小，行為完全不變。
+            # hovered_grid 記的 (gx, gy) 本來就是滑鼠所在格，同時也是
+            # place_building() 展開 footprint 時採用的左上角錨點座標，
+            # 兩邊的座標定義是一致的，預覽框跟實際佔地範圍不會對不齊。
+            size_w, size_h = self._selected_building_footprint()
+            preview_w = size_w * CELL_SIZE
+            preview_h = size_h * CELL_SIZE
+
             # 網格瞄準高光：淺白色半透明填色 + 亮白邊框；如果目前選中的
-            # 工具放在這一格「大致上」會失敗（例如在莊園景觀區選種子），
-            # 動態變成淺紅色，點擊前就先給玩家提示，不用等點下去失敗
-            # 才看到 FloatingText。
+            # 工具放在這一格（或 2x2 建築的整個佔地範圍）「大致上」會
+            # 失敗（例如在莊園景觀區選種子、或 2x2 建築的其中一格已被
+            # 佔用），動態變成淺紅色，點擊前就先給玩家提示，不用等點
+            # 下去失敗才看到 FloatingText。
             is_invalid = self._grid_preview_is_invalid(gx, gy)
             fill_col = (255, 90, 90, 90) if is_invalid else (255, 255, 255, 90)
             border_col = (255, 120, 120) if is_invalid else (255, 255, 255)
-            highlight_s = pygame.Surface((CELL_SIZE, CELL_SIZE), pygame.SRCALPHA)
+            highlight_s = pygame.Surface((preview_w, preview_h), pygame.SRCALPHA)
             pygame.draw.rect(highlight_s, fill_col, highlight_s.get_rect(), border_radius=4)
             pygame.draw.rect(highlight_s, border_col, highlight_s.get_rect(), width=2, border_radius=4)
             self.screen.blit(highlight_s, (hx, hy))

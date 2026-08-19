@@ -581,12 +581,30 @@ class AssetLoader:
         # 移除——BuildingType.MINE 已經從 game_config.py 整批刪除，這裡
         # 留著會去讀一個已經不存在於 BUILDING_DATA 的 key，且畫面上也
         # 沒有任何建築會再用到 "mine" 這個 asset_key，屬於死代碼。
+        # UI 視覺優化（2x2 建築圖片放大）階段：FURNACE/LUMBERYARD 在
+        # game_config.py 的 BUILDING_DATA 已經改成 "size": (2, 2)，貼圖
+        # 如果還是照舊縮放到單格 CELL_SIZE，畫在地圖上就只會佔滿 2x2
+        # 範圍裡的左上角那 1/4 面積（_render_building_tile() 用
+        # midbottom 置中對齊整個 2x2 範圍，圖片本身太小只是「置中飄在
+        # 一大塊空白裡」，不是真的把圖放大）。這裡刻意不匯入
+        # game_config.BUILDING_DATA 去查 size——asset_loader.py 目前完全
+        # 不依賴 game_config（只認得純字串 key/路徑），為了兩張圖的縮放
+        # 尺寸而新增一條模組間耦合不划算，改用一份只在載入層自己使用的
+        # 簡單對照表，跟 BUILDING_DATA["size"] 的值手動保持一致即可
+        # （目前只有這兩座建築是 2x2，沒有的 key 一律預設 (1, 1)，維持
+        # 原本單格大小）。
+        BUILDING_SPRITE_GRID_SPAN = {
+            "furnace": (2, 2),
+            "lumberyard": (2, 2),
+        }
         buildings = [
             ("furnace", "buildings/furnace.png", "furnace"),
             ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
         ]
         for key, path, category in buildings:
-            self.images[key] = self._load_image(path, sz, name=key, category=category)
+            span_w, span_h = BUILDING_SPRITE_GRID_SPAN.get(key, (1, 1))
+            building_sz = (self.cell_size * span_w, self.cell_size * span_h)
+            self.images[key] = self._load_image(path, building_sz, name=key, category=category)
 
         # 3c. 熔爐 Sprite Sheet 特定影格動畫 (assets/decorations/熔爐.png)。
         # 只切第一排 3 格，縮放到跟上面 buildings 清單一樣的 sz
@@ -603,7 +621,20 @@ class AssetLoader:
         # 到真圖，不用另外為卡片渲染寫一條專用邏輯；地圖上蓋好的熔爐
         # 建築本體則是靠 _render_building_tile() 優先檢查
         # get_anim_frames("furnace") 播放 3 幀動畫。
-        self._load_building_anim_frames("furnace", "decorations/熔爐.png", sz)
+        # UI 視覺優化（2x2 建築圖片放大）階段：熔爐動畫幀改傳
+        # building_sz（= 2 * cell_size，跟上面 3b. 靜態圖載入時同一份
+        # BUILDING_SPRITE_GRID_SPAN 對照表算出來的尺寸一致），畫格切出
+        # 來之後才不會比 3b. 那筆靜態備援圖小一半、兩者對齊不起來。
+        # pygame.transform.scale()（非 smoothscale）本身就是不做內插的
+        # 最近鄰縮放，放大 2 倍後像素邊緣依然銳利，不會糊掉——這也是
+        # _load_building_anim_frames() 內部畫格縮放一直在用的函式，不用
+        # 額外改成 pygame.transform.scale2x()（scale2x 是專門的邊緣感知
+        # 演算法，僅支援固定的整數倍放大，這裡的 span 是讀 BUILDING_DATA
+        # 算出來的一般化倍率，用泛用的 pygame.transform.scale() 更符合
+        # 「以後這兩張圖以外的建築也可能是不同尺寸」的彈性）。
+        furnace_span_w, furnace_span_h = BUILDING_SPRITE_GRID_SPAN.get("furnace", (1, 1))
+        furnace_sz = (self.cell_size * furnace_span_w, self.cell_size * furnace_span_h)
+        self._load_building_anim_frames("furnace", "decorations/熔爐.png", furnace_sz)
 
         # 3d. 伐木場 Sprite Sheet 特定影格動畫 (assets/decorations/伐木場.png)。
         # 跟熔爐同一張 3x3 網格規格，但這裡傳 frame_count=9 切出全部
@@ -615,7 +646,11 @@ class AssetLoader:
         # _load_building_anim_frames() 切出動畫幀成功時一樣會把
         # self.images["lumberyard"] 覆寫成 frame[0]，建造選單卡片跟地圖
         # 建築本體都能吃到真圖，寫法完全比照熔爐那份。
-        self._load_building_anim_frames("lumberyard", "decorations/伐木場.png", sz, frame_count=9)
+        # 同上，伐木場動畫幀也改傳 2x2 尺寸，跟 3b. 的靜態備援圖與
+        # FURNACE 的處理方式一致。
+        lumberyard_span_w, lumberyard_span_h = BUILDING_SPRITE_GRID_SPAN.get("lumberyard", (1, 1))
+        lumberyard_sz = (self.cell_size * lumberyard_span_w, self.cell_size * lumberyard_span_h)
+        self._load_building_anim_frames("lumberyard", "decorations/伐木場.png", lumberyard_sz, frame_count=9)
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
