@@ -760,11 +760,12 @@ class NightwatchFarmApp:
 
         # 暫停選單開啟中：只有選單內的按鈕能點，其餘全部攔下
         if self.show_pause_menu:
-            modal_w, modal_h = 420, 300
+            modal_w, modal_h = 420, 366
             mx0 = (SCREEN_WIDTH - modal_w) // 2
             my0 = (SCREEN_HEIGHT - modal_h) // 2
             btn_resume = pygame.Rect(mx0 + (modal_w - 220) // 2, my0 + 150, 220, 52)
             btn_restart2 = pygame.Rect(mx0 + (modal_w - 220) // 2, my0 + 216, 220, 52)
+            btn_mute = pygame.Rect(mx0 + (modal_w - 220) // 2, my0 + 282, 220, 52)
             if btn_resume.collidepoint(mx, my):
                 self.show_pause_menu = False
                 self.sound.play("build")
@@ -774,6 +775,13 @@ class NightwatchFarmApp:
                 self.log_messages.append("🌾 遊戲已重新開始！")
                 self.show_pause_menu = False
                 self.sound.play("harvest")
+            elif btn_mute.collidepoint(mx, my):
+                # 只切換靜音狀態，選單留著開（玩家可能還想調別的），
+                # 不像繼續/重新開始那樣直接關閉選單。播 ui_click 而不是
+                # 依賴音樂本身當回饋 -- 剛靜音那瞬間音樂沒了，玩家反而
+                # 需要一個音效當「有生效」的確認。
+                self.sound.toggle_music_mute()
+                self.sound.play("ui_click")
             return
 
         # 右上角選單按鈕（☰）：點擊暫停遊戲並開啟選單
@@ -1241,7 +1249,7 @@ class NightwatchFarmApp:
         overlay.fill((0, 0, 0, 190))
         self.screen.blit(overlay, (0, 0))
 
-        modal_w, modal_h = 420, 300
+        modal_w, modal_h = 420, 366
         mx = (SCREEN_WIDTH - modal_w) // 2
         my = (SCREEN_HEIGHT - modal_h) // 2
         modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
@@ -1268,6 +1276,15 @@ class NightwatchFarmApp:
         pygame.draw.rect(self.screen, C_ORANGE, btn_restart, border_radius=8)
         restart_txt = FONT_MD.render("🔄 重新開始", True, C_WHITE)
         self.screen.blit(restart_txt, (btn_restart.centerx - restart_txt.get_width() // 2, btn_restart.centery - restart_txt.get_height() // 2))
+
+        # 靜音只影響背景音樂，不影響採收/建造等音效；標籤跟按鈕顏色都會
+        # 依目前狀態切換，不用另外開對話框確認就能立刻看到生效與否。
+        # 用「靜音」而不加「音樂」二字：「樂」不在精簡字型子集裡。
+        btn_mute = pygame.Rect(mx + (modal_w - 220) // 2, my + 282, 220, 52)
+        muted = self.sound.music_muted
+        pygame.draw.rect(self.screen, (120, 130, 140) if muted else (69, 90, 100), btn_mute, border_radius=8)
+        mute_txt = FONT_MD.render("🔊 取消靜音" if muted else "🔇 靜音", True, C_WHITE)
+        self.screen.blit(mute_txt, (btn_mute.centerx - mute_txt.get_width() // 2, btn_mute.centery - mute_txt.get_height() // 2))
 
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)

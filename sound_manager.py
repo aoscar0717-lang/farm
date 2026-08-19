@@ -16,6 +16,10 @@ class SoundManager:
         self.sfx_enabled = sfx_enabled
         self.sounds: Dict[str, Optional[pygame.mixer.Sound]] = {}
         self.bgm_channel = None
+        # 只靜音背景音樂，音效 (採收/建造/UI 點擊等) 不受影響 -- 跟
+        # sfx_enabled 是兩個獨立開關：sfx_enabled 是音訊裝置整個初始化
+        # 失敗時的保護，music_muted 是玩家在暫停選單自己選的偏好。
+        self.music_muted = False
         
         try:
             if not pygame.mixer.get_init():
@@ -71,16 +75,32 @@ class SoundManager:
             try:
                 pygame.mixer.music.load(bgm_file)
                 pygame.mixer.music.play(loops=-1)
+                # 切換日夜音樂會重新 load()+play()，音量預設會回到 100%，
+                # 所以每次播放都要重新套用一次玩家的靜音偏好，不然靜音
+                # 狀態撐不過日夜切換。
+                pygame.mixer.music.set_volume(0.0 if self.music_muted else 1.0)
             except Exception as e:
                 print(f"[SoundManager] BGM Error: {e}")
         elif os.path.exists(fallback_file):
             try:
                 pygame.mixer.music.load(fallback_file)
                 pygame.mixer.music.play(loops=-1)
+                pygame.mixer.music.set_volume(0.0 if self.music_muted else 1.0)
             except Exception as e:
                 print(f"[SoundManager] BGM Error: {e}")
         else:
             pass
+
+    def toggle_music_mute(self) -> bool:
+        """切換背景音樂靜音狀態，回傳切換後的結果 (True=已靜音)。
+        用 set_volume 而不是暫停/停止播放，音樂會繼續在背景播放、
+        取消靜音時立刻接得回來，不會從頭重播或卡頓。"""
+        self.music_muted = not self.music_muted
+        try:
+            pygame.mixer.music.set_volume(0.0 if self.music_muted else 1.0)
+        except Exception:
+            pass
+        return self.music_muted
 
     def _init_sounds(self):
         try:
