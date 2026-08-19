@@ -69,20 +69,33 @@ CELL_SIZE = 60  # 原本 50，配合網格從 18x13 裁到 16x11 換來 +20% 放
 GRID_X = 24
 GRID_Y = 86
 
-# 扁平現代色彩
+# 扁平現代色彩（地圖/農田本身維持原本清爽的現代配色，這次改版只動
+# UI 外殼——頂部狀態列、右側商店面板、商品卡片這些「介面」，農田視覺
+# 不變，兩者風格刻意分開，農田才是玩家實際盯著看的主體）
 C_MEADOW_BG = (230, 235, 225)       # 純色柔和綠草地
 C_FARM_SOIL = (205, 195, 175)        # 純色溫暖農田底色
 C_FARM_SHADOW = (180, 142, 102)      # 農田投影
 C_FARM_BORDER = (156, 116, 78)       # 苗圃外框色
 
-C_NAVY_TOP = (38, 50, 56)           # 頂部導航底色
-C_WHITE = (255, 255, 255)
-C_CARD_BG = (255, 255, 255)
-C_CARD_BORDER = (224, 224, 224)
+# ---- 鄉村木質風格 (Rustic Wooden Style) UI 色票 ----------------------------
+# 這裡集中定義「UI 外殼」（頂部狀態列、右側商店大底框、商品卡片、按鈕）
+# 用的木頭色系，取代原本的深灰現代化配色，跟農場主題更搭。
+C_WOOD_DARK = (78, 52, 46)          # 深木頭色：狀態列/商店大底框/標題橫幅背景
+C_WOOD_MID = (109, 76, 65)          # 中層木板色：狀態列裡凸起的小面板（金幣卡/等級卡/按鈕）
+C_PARCHMENT = (215, 204, 200)       # 淺木板／羊皮紙色：商品卡片、面板內層底色
+C_WOOD_BEVEL_LIGHT = (168, 138, 122)  # 立體雕刻邊框的「高光」邊，見 draw_beveled_rect()
+C_WOOD_BEVEL_DARK = (46, 28, 25)      # 立體雕刻邊框的「陰影」邊，比邊框色更深、營造凹陷刻痕
+C_TEXT_ON_DARK = (245, 245, 220)    # 米白色文字：用在深木色背景上（狀態列文字）
+C_TEXT_ON_LIGHT = (62, 39, 35)      # 深褐色文字：用在淺木/羊皮紙背景上（卡片文字）
 
-C_TEXT_MAIN = (33, 33, 33)
-C_TEXT_MUTED = (117, 117, 117)
-C_GOLD = (255, 193, 7)
+C_NAVY_TOP = C_WOOD_DARK             # 頂部導航底色（原本是深藍灰，現在沿用木質風格的深木色）
+C_WHITE = (255, 255, 255)
+C_CARD_BG = C_PARCHMENT              # 卡片底色（原本是純白，現在是羊皮紙色）
+C_CARD_BORDER = C_WOOD_BEVEL_DARK    # 卡片邊框（原本是淺灰 1px，現在搭配立體雕刻效果用深褐色）
+
+C_TEXT_MAIN = C_TEXT_ON_LIGHT         # 淺色底（羊皮紙/木板）上的主要文字，原本是接近黑色
+C_TEXT_MUTED = (140, 112, 100)        # 次要/停用文字，原本是純灰，現在偏木質的淡褐灰
+C_GOLD = (255, 193, 7)                # 焦點/選取色，沿用不變——金色本來就很搭木頭
 C_GREEN = (76, 175, 80)
 C_RED = (239, 83, 80)
 C_BLUE = (33, 150, 243)
@@ -90,6 +103,51 @@ C_PURPLE = (156, 39, 176)
 C_CYAN = (0, 188, 212)
 C_ORANGE = (255, 152, 0)
 C_BLOOD_RED = (211, 47, 47)
+
+
+def draw_beveled_rect(surface, rect, base_color, border_radius=8, depth=2, pressed=False,
+                       light_color=None, dark_color=None):
+    """畫一個帶有「立體雕刻 (Beveled/Carved)」感的木頭色塊，取代單純的
+    1px 純色邊框：先填滿底色，再於矩形的「上邊、左邊」疊一條較亮的高光
+    線、「下邊、右邊」疊一條更深的陰影線，讓玩家感覺這塊木頭是刻出來、
+    凸起在畫面上的，而不是貼上去的平面色塊。
+
+    pressed=True 時把高光/陰影對調（下、右變亮，上、左變暗），做出
+    「按下去凹陷」的視覺錯覺——例如目前鎖定、點不了的商品卡片，或是
+    滑鼠正按著的按鈕，用這個參數就能重用同一個函式表達「凹進去」而不
+    是「凸出來」，不用另外寫一份繪製邏輯。
+
+    light_color / dark_color 預設吃 C_WOOD_BEVEL_LIGHT / C_WOOD_BEVEL_DARK，
+    需要跟特定底色更搭配的高光/陰影色時可以個別覆寫。
+
+    【貼圖彈性預留】：如果之後在 assets/ui/ 放了 wood_panel.png 這種
+    木紋貼圖，想直接貼圖取代純色底，改法是在下面這行
+        pygame.draw.rect(surface, base_color, rect, border_radius=border_radius)
+    前面插入類似：
+        wood_tex = loader.get("ui_wood_panel")  # 需要先在 asset_loader.py 建立對應的載入邏輯
+        if wood_tex:
+            scaled = pygame.transform.smoothscale(wood_tex, rect.size)
+            surface.blit(scaled, rect.topleft)
+        else:
+            pygame.draw.rect(surface, base_color, rect, border_radius=border_radius)
+    然後把原本的純色 pygame.draw.rect 包進 else 分支當作貼圖缺失時的
+    後備方案即可，下面疊加的高光/陰影刻痕線可以照樣保留在貼圖上，
+    紋理貼圖加上手繪立體邊框通常比純貼圖更有層次感。
+    """
+    light = light_color if light_color is not None else C_WOOD_BEVEL_LIGHT
+    dark = dark_color if dark_color is not None else C_WOOD_BEVEL_DARK
+    if pressed:
+        light, dark = dark, light
+
+    pygame.draw.rect(surface, base_color, rect, border_radius=border_radius)
+
+    inset = border_radius
+    pygame.draw.line(surface, light, (rect.left + inset, rect.top + 1), (rect.right - inset, rect.top + 1), depth)
+    pygame.draw.line(surface, light, (rect.left + 1, rect.top + inset), (rect.left + 1, rect.bottom - inset), depth)
+    pygame.draw.line(surface, dark, (rect.left + inset, rect.bottom - 2), (rect.right - inset, rect.bottom - 2), depth)
+    pygame.draw.line(surface, dark, (rect.right - 2, rect.top + inset), (rect.right - 2, rect.bottom - inset), depth)
+
+
 
 
 # ------------------------------------------------------------------
@@ -322,19 +380,23 @@ class ActionCard:
         pygame.draw.rect(shadow, (20, 25, 30, 35), shadow.get_rect(), border_radius=10)
         surface.blit(shadow, (self.rect.x + 2, self.rect.y + 3))
 
-        bg_col = (255, 255, 255)
+        bg_col = C_PARCHMENT
         if self.is_locked:
-            bg_col = (243, 243, 243)
+            bg_col = (196, 186, 180)
         elif is_selected:
-            bg_col = (255, 249, 230)
+            bg_col = (231, 210, 165)   # 選中時偏金褐色，跟金色選取狀態呼應
         elif self.is_hovered:
-            bg_col = (250, 250, 252)
+            bg_col = (225, 214, 208)
 
-        pygame.draw.rect(surface, bg_col, self.rect, border_radius=10)
+        # 立體雕刻邊框：平常是「凸起」的木牌質感；鎖定時改成 pressed=True
+        # 的「凹陷」效果，視覺上就像這塊木牌被壓下去、點不動了，跟遮罩
+        # 文字一起加強「目前不能點」的訊號。
+        draw_beveled_rect(surface, self.rect, bg_col, border_radius=10, pressed=self.is_locked)
 
-        border_col = C_ORANGE if is_selected else ((215, 215, 220) if not self.is_hovered else tint)
-        border_w = 2 if (is_selected or self.is_hovered) else 1
-        pygame.draw.rect(surface, border_col, self.rect, width=border_w, border_radius=10)
+        # 選中狀態額外疊一圈金色外框（焦點色沿用 C_GOLD，跟木頭色很搭），
+        # 蓋在立體雕刻邊框之上，比木頭本身的高光/陰影更顯眼。
+        if is_selected:
+            pygame.draw.rect(surface, C_GOLD, self.rect, width=2, border_radius=10)
 
         # 選中時左側加一條實色色條，跟分類色呼應，一眼就能認出裝備中的項目。
         if is_selected:
@@ -344,7 +406,7 @@ class ActionCard:
         # 圖示放進一塊淡色圓角底框裡，而不是直接貼在卡片背景上，質感更豐富。
         icon_bg = pygame.Rect(self.rect.x + 8, self.rect.y + (self.rect.height - 50) // 2, 50, 50)
         icon_tint = tuple(min(255, c + 165) for c in tint)
-        pygame.draw.rect(surface, icon_tint if not self.is_locked else (232, 232, 232), icon_bg, border_radius=10)
+        pygame.draw.rect(surface, icon_tint if not self.is_locked else (206, 198, 192), icon_bg, border_radius=10)
         icon_surf = loader.get(self.asset_key)
         if icon_surf:
             # 商店 UI 的圖示縮放邏輯要跟農田渲染完全獨立：農田那邊改成
@@ -1352,7 +1414,16 @@ class NightwatchFarmApp:
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)
         header_rect = pygame.Rect(0, 0, SCREEN_WIDTH, 70)
-        pygame.draw.rect(self.screen, C_NAVY_TOP, header_rect)
+        # 頂部狀態列的深木頭底色。這一整條是矩形貼齊畫面上緣，沒有圓角，
+        # 立體雕刻邊框只在下緣畫一條陰影線，做出「這塊木頭嵌板釘在畫面
+        # 頂端」的錯覺，不用整條套 draw_beveled_rect()（那是設計給四邊
+        # 都完整可見的獨立色塊用的，貼齊畫面邊緣的長條套上去四個角會很
+        # 奇怪）。
+        # 【貼圖彈性預留】：以後要換成 assets/ui/wood_panel.png 木紋
+        # 貼圖，就是把下面這行 pygame.draw.rect(...) 換成
+        # screen.blit(pygame.transform.scale(wood_tex, header_rect.size), (0, 0))。
+        pygame.draw.rect(self.screen, C_WOOD_DARK, header_rect)
+        pygame.draw.line(self.screen, C_WOOD_BEVEL_DARK, (0, header_rect.bottom - 1), (SCREEN_WIDTH, header_rect.bottom - 1), 2)
 
         self.screen.blit(FONT_TITLE.render("🌾 夜巡農場 (Harvest & Hordes)", True, C_GOLD), (24, 8))
 
@@ -1370,12 +1441,14 @@ class NightwatchFarmApp:
         prog = max(0.0, min(1.0, 1.0 - (self.game.time_in_phase / max_dur)))
 
         bar_r = pygame.Rect(230, 43, 140, 14)
-        pygame.draw.rect(self.screen, (20, 25, 30), bar_r, border_radius=7)
+        # 進度條軌道用「凹陷」的雕刻感：淺色刻痕在下/右、深色刻痕在上/左
+        # (pressed=True)，看起來像木頭上挖出來的凹槽，填色的部分再疊上去。
+        draw_beveled_rect(self.screen, bar_r, C_WOOD_BEVEL_DARK, border_radius=7, depth=1, pressed=True)
         fill_w = int(bar_r.width * prog)
         fill_col = C_GREEN if is_day else (C_BLOOD_RED if self.game.is_blood_moon else C_CYAN)
         if fill_w > 0:
             pygame.draw.rect(self.screen, fill_col, (bar_r.x, bar_r.y, fill_w, bar_r.height), border_radius=7)
-        rem_surf = FONT_XS.render(f"{rem_time:.1f}s", True, C_WHITE)
+        rem_surf = FONT_XS.render(f"{rem_time:.1f}s", True, C_TEXT_ON_DARK)
         self.screen.blit(rem_surf, (bar_r.right + 8, bar_r.y))
 
         # 倍速調整面板 [-] 1.0x [+] -- 緊接在倒數計時 "7.1s" 右側，滑鼠
@@ -1386,7 +1459,7 @@ class NightwatchFarmApp:
         btn_y = bar_r.y - 3
         self.btn_speed_down_rect = pygame.Rect(panel_x, btn_y, btn_size, btn_size)
 
-        speed_txt_surf = FONT_SM.render(f"{self.time_scale:.1f}x", True, C_WHITE)
+        speed_txt_surf = FONT_SM.render(f"{self.time_scale:.1f}x", True, C_TEXT_ON_DARK)
         speed_box_w = speed_txt_surf.get_width() + 12
         speed_box_rect = pygame.Rect(self.btn_speed_down_rect.right + 4, btn_y, speed_box_w, btn_size)
 
@@ -1394,20 +1467,26 @@ class NightwatchFarmApp:
 
         def _draw_speed_btn(rect, label):
             hovered = rect.collidepoint(self.mouse_pos)
-            pygame.draw.rect(self.screen, (80, 100, 110) if hovered else (45, 58, 64), rect, border_radius=5)
-            pygame.draw.rect(self.screen, (150, 170, 180), rect, width=1, border_radius=5)
-            lbl_surf = FONT_SM.render(label, True, C_WHITE)
+            # 按鈕平常是凸起的木牌，滑鼠按著/懸停時看起來像壓下去
+            # (pressed=True 對調高光/陰影)，給出清楚的「有反應」回饋。
+            btn_col = (130, 96, 82) if hovered else C_WOOD_MID
+            draw_beveled_rect(self.screen, rect, btn_col, border_radius=5, depth=1, pressed=hovered)
+            lbl_surf = FONT_SM.render(label, True, C_TEXT_ON_DARK)
             self.screen.blit(lbl_surf, lbl_surf.get_rect(center=rect.center))
 
         _draw_speed_btn(self.btn_speed_down_rect, "-")
-        pygame.draw.rect(self.screen, (30, 40, 46), speed_box_rect, border_radius=5)
+        draw_beveled_rect(self.screen, speed_box_rect, C_WOOD_BEVEL_DARK, border_radius=5, depth=1, pressed=True)
         self.screen.blit(speed_txt_surf, speed_txt_surf.get_rect(center=speed_box_rect.center))
         _draw_speed_btn(self.btn_speed_up_rect, "+")
 
         # 金幣卡 (原本從 x=430 開始，讓給左邊新增的倍速面板一些空間，
         # 跟等級卡一起整組往右挪，右邊界維持在原本的 1236 不變)
+        # 【貼圖彈性預留】：這幾張狀態列小面板 (金幣卡/等級卡) 如果之後
+        # 想換成 assets/ui/ 裡的木牌貼圖，就是把 draw_beveled_rect() 這行
+        # 換成 screen.blit(貼圖, rect.topleft)，見 draw_beveled_rect() 的
+        # docstring 有完整範例寫法。
         gold_rect = pygame.Rect(545, 12, 180, 44)
-        pygame.draw.rect(self.screen, (55, 71, 79), gold_rect, border_radius=10)
+        draw_beveled_rect(self.screen, gold_rect, C_WOOD_MID, border_radius=10)
         pygame.draw.circle(self.screen, C_GOLD, (gold_rect.x + 22, gold_rect.centery), 12)
         self.screen.blit(FONT_SM.render("G", True, (60, 40, 0)), (gold_rect.x + 17, gold_rect.centery - 8))
         self.screen.blit(FONT_LG.render(f"{self.game.gold} 金幣", True, C_GOLD), (gold_rect.x + 44, gold_rect.centery - 11))
@@ -1415,9 +1494,9 @@ class NightwatchFarmApp:
         # 等級與繁榮度 (x=745 為金幣卡右移後的座標；寬度從 491 再縮短到 447，
         # 右緣停在選單按鈕左側 [x=1204] 前留 12px 間距，避免被蓋住)
         lvl_rect = pygame.Rect(745, 12, 447, 44)
-        pygame.draw.rect(self.screen, (55, 71, 79), lvl_rect, border_radius=10)
+        draw_beveled_rect(self.screen, lvl_rect, C_WOOD_MID, border_radius=10)
         lvl_name = FARM_LEVELS[self.game.farm_level]["name"]
-        self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_WHITE), (lvl_rect.x + 14, lvl_rect.y + 4))
+        self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_TEXT_ON_DARK), (lvl_rect.x + 14, lvl_rect.y + 4))
 
         goals = {1: 40, 2: 100, 3: 200, 4: 350, 5: 500}
         next_goal = goals.get(self.game.farm_level, 500)
@@ -1425,7 +1504,7 @@ class NightwatchFarmApp:
         p_ratio = min(1.0, curr_p / next_goal)
 
         p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 270, 12)
-        pygame.draw.rect(self.screen, (25, 30, 40), p_bar, border_radius=6)
+        draw_beveled_rect(self.screen, p_bar, C_WOOD_BEVEL_DARK, border_radius=6, depth=1, pressed=True)
         if p_ratio > 0:
             pygame.draw.rect(self.screen, C_PURPLE, (p_bar.x, p_bar.y, int(p_bar.width * p_ratio), p_bar.height), border_radius=6)
         self.screen.blit(FONT_SM.render(f"繁榮度: {curr_p} / {next_goal}", True, C_CYAN), (p_bar.right + 12, p_bar.y - 3))
@@ -1434,10 +1513,11 @@ class NightwatchFarmApp:
         # 上方所有面板（金幣卡、莊園等級面板...）之上，不會被蓋住。
         menu_btn_rect = pygame.Rect(SCREEN_WIDTH - 56, 15, 40, 40)
         is_menu_hover = menu_btn_rect.collidepoint(self.mouse_pos)
-        pygame.draw.rect(self.screen, (68, 84, 92) if is_menu_hover else (54, 70, 78), menu_btn_rect, border_radius=8)
+        draw_beveled_rect(self.screen, menu_btn_rect, (130, 96, 82) if is_menu_hover else C_WOOD_MID,
+                           border_radius=8, pressed=is_menu_hover)
         for i in range(3):
             line_y = menu_btn_rect.y + 11 + i * 9
-            pygame.draw.line(self.screen, C_WHITE, (menu_btn_rect.x + 8, line_y), (menu_btn_rect.x + 32, line_y), 3)
+            pygame.draw.line(self.screen, C_TEXT_ON_DARK, (menu_btn_rect.x + 8, line_y), (menu_btn_rect.x + 32, line_y), 3)
 
     def _render_flat_meadow_and_farm(self):
         map_w = self.game.width * CELL_SIZE
@@ -1831,13 +1911,25 @@ class NightwatchFarmApp:
         pygame.draw.rect(shadow, (20, 25, 30, 30), shadow.get_rect(), border_radius=14)
         self.screen.blit(shadow, (panel.x + 3, panel.y + 4))
 
-        pygame.draw.rect(self.screen, (255, 255, 255), panel, border_radius=14)
-        pygame.draw.rect(self.screen, C_CARD_BORDER, panel, width=1, border_radius=14)
+        # 商店大底框：深木頭色，立體雕刻邊框讓整塊面板像是嵌在畫面右側的
+        # 木箱子，而不是一片貼上去的平面色塊。
+        # 【貼圖彈性預留】：以後要用 assets/ui/wood_panel.png 這種木紋
+        # 貼圖取代這片純色深木背景，改法是在下面這行 draw_beveled_rect(...)
+        # 前面插入類似：
+        #     wood_tex = self.loader.get("ui_wood_panel_large")
+        #     if wood_tex:
+        #         self.screen.blit(pygame.transform.smoothscale(wood_tex, panel.size), panel.topleft)
+        #     else:
+        #         draw_beveled_rect(self.screen, panel, C_WOOD_DARK, border_radius=14, depth=3)
+        # 貼圖版一樣可以保留 draw_beveled_rect() 疊加的高光/陰影刻痕，
+        # 讓平面貼圖也有立體感，不用整個重畫。
+        draw_beveled_rect(self.screen, panel, C_WOOD_DARK, border_radius=14, depth=3)
 
-        # 深色標題橫幅，跟頂部 HUD 同一套配色 (C_NAVY_TOP + C_GOLD)，
+        # 深色標題橫幅，跟頂部 HUD 同一套配色 (C_WOOD_DARK + C_GOLD)，
         # 讓商店面板一眼就能認出是同一套視覺語言，不是另外貼上去的東西。
+        # 這裡疊在剛剛的木頭底框上緣，用更深一階的褐色區隔出「標題區」。
         header_rect = pygame.Rect(panel.x, panel.y, panel.width, 44)
-        pygame.draw.rect(self.screen, C_NAVY_TOP, header_rect, border_top_left_radius=14, border_top_right_radius=14)
+        pygame.draw.rect(self.screen, C_WOOD_BEVEL_DARK, header_rect, border_top_left_radius=14, border_top_right_radius=14)
         title_surf = FONT_MD.render("莊園商店", True, C_GOLD)
         self.screen.blit(title_surf, (header_rect.centerx - title_surf.get_width() // 2, header_rect.centery - title_surf.get_height() // 2))
 
@@ -1852,21 +1944,24 @@ class NightwatchFarmApp:
             is_hover = (not is_active) and rect.collidepoint(self.mouse_pos)
             tint = SHOP_TAB_TINTS.get(tab_id, C_ORANGE)
             if is_active:
-                bg_col = (255, 255, 255)
+                bg_col = C_PARCHMENT
             elif is_hover:
-                bg_col = tuple(min(255, c + 25) for c in (240, 242, 245))
+                bg_col = (225, 214, 208)
             else:
-                bg_col = (240, 242, 245)
-            pygame.draw.rect(self.screen, bg_col, rect, border_radius=8)
-            border_col = tint if (is_active or is_hover) else (210, 212, 216)
-            pygame.draw.rect(self.screen, border_col, rect, width=2 if (is_active or is_hover) else 1, border_radius=8)
-            txt_col = C_TEXT_MAIN if (is_active or is_hover) else C_TEXT_MUTED
+                bg_col = C_WOOD_MID
+            # 分頁格也是木牌質感：目前選中的那格「凸起」表示正在使用，
+            # 其餘未選中的維持一般凸起（不用 pressed，選中/未選中的差異
+            # 已經靠底色深淺跟邊框顏色表達，不需要再疊一層凹陷語意）。
+            draw_beveled_rect(self.screen, rect, bg_col, border_radius=8, depth=1)
+            if is_active or is_hover:
+                pygame.draw.rect(self.screen, tint, rect, width=2, border_radius=8)
+            txt_col = C_TEXT_ON_LIGHT if is_active else (C_TEXT_ON_DARK if not is_hover else C_TEXT_ON_LIGHT)
             t_surf = FONT_XS.render(label, True, txt_col)
             self.screen.blit(t_surf, (rect.centerx - t_surf.get_width() // 2, rect.centery - t_surf.get_height() // 2))
 
         # 分頁格跟卡片清單之間的分隔線
         area = self._shop_list_area()
-        pygame.draw.line(self.screen, (230, 235, 240), (area.x, area.y - 8), (area.right, area.y - 8))
+        pygame.draw.line(self.screen, C_WOOD_BEVEL_DARK, (area.x, area.y - 8), (area.right, area.y - 8))
 
         # 可捲動的卡片清單：先用 set_clip 把畫面限制在清單可視範圍內，
         # 捲出範圍的卡片畫出來也不會溢出面板底部。
@@ -1879,16 +1974,19 @@ class NightwatchFarmApp:
             card.draw(self.screen, is_selected=(self.selected_action == card.action_id), loader=self.loader)
         self.screen.set_clip(prev_clip)
 
-        # 內容超出可視範圍才畫捲軸滑塊，提示「還能往下滑」。
+        # 內容超出可視範圍才畫捲軸滑塊，提示「還能往下滑」。捲軸軌道/
+        # 滑塊原本是淺灰色，是設計給白色面板背景用的對比色，現在面板底色
+        # 換成深木頭色，改用木頭色系的深淺對比 (軌道用陰影色、滑塊用
+        # 米白色) 才看得清楚，不會消失在深色背景裡。
         max_scroll = self._shop_scroll_bounds(len(items))
         if max_scroll > 0:
             track = pygame.Rect(area.right + 4, area.y, 4, area.height)
-            pygame.draw.rect(self.screen, (225, 228, 232), track, border_radius=2)
+            pygame.draw.rect(self.screen, C_WOOD_BEVEL_DARK, track, border_radius=2)
             scroll = self.shop_scroll.get(self.active_tab, 0)
             thumb_h = max(24, int(area.height * area.height / (area.height + max_scroll)))
             thumb_y = area.y + int((area.height - thumb_h) * (scroll / max_scroll))
             thumb = pygame.Rect(track.x, thumb_y, 4, thumb_h)
-            pygame.draw.rect(self.screen, (170, 176, 184), thumb, border_radius=2)
+            pygame.draw.rect(self.screen, C_TEXT_ON_DARK, thumb, border_radius=2)
 
     # ==========================================
     # 開場新手速成圖卡彈窗
