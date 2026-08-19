@@ -170,6 +170,14 @@ class AssetLoader:
         "furnace": ("furnace", "oven", "kiln", "熔", "爐", "窯", "烤", "焦"),
         "lumberyard": ("lumberyard", "伐木"),
         "tower": ("tesla", "turret", "防禦塔"),
+        # 視覺升級：32x32 富鐵花，新增一個作物專屬分類。這次是這個專案
+        # 第一個「作物」有自己的佔位圖分類——其餘 10 種既有作物完全沒有
+        # 對應的關鍵字，會繼續落到最後的通用半透明灰色方塊；只有這裡
+        # 特別加分類是因為使用者這次明確供了成熟階段的真實美術規格
+        # （綠色色鍵），值得順手讓「圖檔還沒放上去之前」的過渡期也有一個
+        # 看得出來是「礦物/金屬」的佔位圖，而不是跟其他作物一樣的灰色
+        # 方塊，之後真的放上 iron_flower.png 就會自動蓋掉這個佔位圖。
+        "iron_flower": ("iron_flower",),
     }
 
     def _infer_placeholder_category(self, name: str) -> Optional[str]:
@@ -192,6 +200,9 @@ class AssetLoader:
                       這個分類先實作起來，供未來新增防禦塔類建築時直接
                       使用，不用等到那時候才回頭補這個函式）：金屬銀色
                       底 + 頂部一個亮藍色小圓形（代表塔頂的感應器/砲台）。
+          iron_flower 富鐵花（成熟階段）：草綠色底 + 中央一顆灰色/銀白
+                      色同心圓（代表花蕊包著的鐵礦），只有這個佔位圖
+                      是給「作物」用的，其餘作物沒有專屬分類。
           其他/無法辨識 沿用專案原本的半透明灰色方塊風格，不強加不合適
                       的視覺，維持向下相容——原本能正常顯示（不管是真的
                       有 PNG，還是走這個 fallback）的東西，行為不變。
@@ -219,6 +230,14 @@ class AssetLoader:
             pygame.draw.rect(surf, (168, 172, 180), (0, 0, w, h))
             radius = max(3, w // 6)
             pygame.draw.circle(surf, (58, 150, 255), (w // 2, max(radius + 2, int(h * 0.28))), radius)
+        elif cat == "iron_flower":
+            # 富鐵花（成熟階段）：草綠色底代表花株本體，中央疊一顆偏灰
+            # 帶一點金屬光澤的圓點代表花蕊裡包著的鐵礦，跟其餘作物共用
+            # 的通用灰色方塊區分開，一眼能看出「這是會產礦物的作物」。
+            pygame.draw.rect(surf, (58, 120, 62), (0, 0, w, h))
+            core_r = max(4, int(min(w, h) * 0.28))
+            pygame.draw.circle(surf, (150, 150, 158), (w // 2, h // 2), core_r)
+            pygame.draw.circle(surf, (196, 196, 204), (w // 2, h // 2), max(2, core_r // 2))
         else:
             pygame.draw.rect(surf, (200, 200, 200, 150), (4, 4, w - 8, h - 8), border_radius=4)
 
@@ -249,6 +268,46 @@ class AssetLoader:
                 print(f"[AssetLoader] 載入 {rel_path} 失敗: {e}")
             placeholder_name = name or os.path.splitext(os.path.basename(rel_path))[0]
             return self.generate_placeholder(placeholder_name, size, category=category)
+
+    def _load_iron_flower_mature(self, size: Tuple[int, int]) -> None:
+        """視覺升級：32x32 富鐵花成熟階段素材 (crops/iron_flower.png)。
+
+        使用者這次提供的規格明確要求「載入圖片時，將亮綠色 (0, 255, 0)
+        設為透明色 set_colorkey」——這跟這個專案裡其餘所有 PNG 素材
+        （crops/decorations/characters 全部）一律用 convert_alpha()
+        保留原生 alpha 透明度的載入方式不一樣，不能沿用 _load_image()：
+        那個函式只呼叫 convert_alpha()、完全不會呼叫 set_colorkey()，
+        如果直接拿它來讀這張圖，綠色背景會被當成不透明的實色一起畫
+        出來，變成一塊完整的綠色方塊蓋住整格。這裡改用 convert()（保留
+        色深、不建立 per-pixel alpha 通道）+ set_colorkey((0, 255, 0))，
+        才會照字面需求把綠色背景挖成透明。
+
+        成功後直接寫進 self.images["iron_flower_mature"]，跟其餘作物
+        共用同一套 "{asset_key}_{stage}" 讀取慣例（asset_key="iron_flower"、
+        stage="mature"）——_render_flat_meadow_and_farm() 既有的通用作物
+        渲染邏輯（`img = self.loader.get(f"{base_key}_{st_key}")`）完全
+        不用改一行，會自動抓到這張圖；金色成熟浮動高光 (is_mature 那塊)
+        本來就畫在這張圖之後（Z 軸在上面），這裡不用另外處理疊放順序。
+
+        素材檔案 (crops/iron_flower.png) 目前還沒有實際放進 assets/，
+        找不到檔案或載入失敗時，改用 generate_placeholder() 生成一張
+        「iron_flower」分類的專屬佔位圖（草綠底 + 金屬礦石圓點，見該
+        方法說明），而不是讓 self.images 完全沒有這個 key——如果什麼都
+        不寫，_render_flat_meadow_and_farm() 裡 `if img:` 會直接跳過
+        繪製，富鐵花成熟後會整格「消失」變成看不到任何圖案，比起其他
+        作物都至少有個灰色方塊可看，體驗明顯更差，所以這裡刻意補上
+        跟其餘素材載入一致的「失敗必有佔位圖」保底。
+        """
+        full_path = os.path.join(ASSET_ROOT, "crops/iron_flower.png")
+        try:
+            img = pygame.image.load(full_path).convert()
+            img.set_colorkey((0, 255, 0))
+            self.images["iron_flower_mature"] = pygame.transform.scale(img, size)
+        except Exception as e:
+            if os.path.exists(full_path):
+                print(f"[AssetLoader] 載入 crops/iron_flower.png 失敗: {e}")
+            self.images["iron_flower_mature"] = self.generate_placeholder(
+                "iron_flower_mature", size, category="iron_flower")
 
     def _load_corn_spritesheet(self, size: Tuple[int, int]):
         """
@@ -507,18 +566,30 @@ class AssetLoader:
             ("grape", ["seed", "sprout", "growing", "mature"]),
             ("starlight", ["seed", "sprout", "growing", "mature"]),
             # 系統大重構 Phase 7：富鐵花 (CropType.IRON_FLOWER)，取代原本
-            # MINE 建築的 metal_ore 產出來源。使用者說明會在本地端自行
-            # 準備 16x16 Sprite Sheet 並對應好檔名，這裡先照跟其餘作物
-            # 完全一致的命名慣例（crops/iron_flower_{stage}.png）登記
-            # 四個階段的載入——檔案還沒放進 assets/ 之前，_load_image()
-            # 既有的 generate_placeholder() 後備機制會自動接手，不會讓
-            # 遊戲壞掉，這就是使用者要求的「安全圖檔路徑」。
-            ("iron_flower", ["seed", "sprout", "growing", "mature"]),
+            # MINE 建築的 metal_ore 產出來源。種子/幼苗/成長中這三個階段
+            # 目前還沒有真的美術，先照跟其餘作物完全一致的命名慣例
+            # （crops/iron_flower_{stage}.png）登記，檔案還沒放進 assets/
+            # 之前 _load_image() 既有的 generate_placeholder() 後備機制
+            # 會自動接手，不會讓遊戲壞掉。
+            # 【視覺升級：32x32 富鐵花成熟階段】"mature" 這個階段拿掉、
+            # 不放在這個清單裡——使用者這次提供的成熟階段美術
+            # (iron_flower.png) 檔名不是照 xxx_mature.png 這個慣例命名，
+            # 而且背景是純綠色 (0,255,0) 色鍵去背，不是其餘作物 PNG 那種
+            # 原生 alpha 透明度，不能沿用這個迴圈統一呼叫的 _load_image()
+            # （那個函式只會 convert_alpha()，不會呼叫 set_colorkey()，
+            # 綠色背景會被當成不透明色整塊畫出來）。改成下面
+            # _load_iron_flower_mature() 專門處理，最後一樣寫回
+            # self.images["iron_flower_mature"]，跟其餘作物共用同一套
+            # "{asset_key}_{stage}" 讀取慣例，渲染層完全不用改。
+            ("iron_flower", ["seed", "sprout", "growing"]),
         ]
         for cname, stages in crops:
             for st in stages:
                 key = f"{cname}_{st}"
                 self.images[key] = self._load_image(f"crops/{cname}_{st}.png", sz)
+
+        # 富鐵花成熟階段用專門的色鍵去背載入，見該方法的完整說明。
+        self._load_iron_flower_mature(sz)
 
         # 1b. 新版整合精靈圖：玉米 (corn) + 胡蘿蔔/番茄/藍莓 (potato 素材
         # 目前遊戲沒有用到，切圖時略過)。切好的畫格直接塞進

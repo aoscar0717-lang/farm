@@ -2797,20 +2797,31 @@ class NightwatchFarmApp:
             # 應該共用同一個判斷欄位。
             is_running = building.is_processing if building.building_type == BuildingType.FURNACE else building.is_active
             if not is_running:
+                # 關閉/閒置一律固定顯示 frame[0]，熔爐/伐木場共用同一條
+                # 規則不變。
                 frame_index = 0
+            elif building.building_type == BuildingType.LUMBERYARD:
+                # 【視覺升級後續調整】伐木場改成「frame[0] ~ frame[-1]
+                # 整組循環播放」，不再像熔爐那樣特地跳過 frame[0]。鋸木頭
+                # 是一個連續往復的循環動作，frame[0] 本來就同時是「循環
+                # 起始格」也是最自然的「閒置姿勢」，不需要為了區分開關
+                # 兩態而犧牲掉一幀只給閒置狀態專用——用 len(anim_frames)
+                # （9）直接對 anim_time 取模，讓運作中的動畫完整跑過全部
+                # 9 個影格 (0~8) 再回頭，跟閒置時固定停在 frame[0] 明確
+                # 區分開，不會有一幀被永遠跳過不播的情況。熔爐維持原本
+                # 「frame[1]~frame[len-1] 循環、frame[0] 只給關閉態」的
+                # 規則不變（見下面 else 分支），兩種機台的動畫語意本來
+                # 就不一樣，不用統一成同一套公式。
+                frame_index = int(self.anim_time / ANIMATION_SPEED) % len(anim_frames)
             else:
                 # frame[0] 保留給「關閉/閒置」狀態，運作中的時候在
                 # frame[1] ~ frame[len-1] 之間循環（熔爐只有 3 幀，等於
-                # 在 frame[1]/frame[2] 兩幀來回切換；伐木場有 9 幀，等於
-                # 在 frame[1]~frame[8] 共 8 幀之間循環播放，鋸木頭的動作
-                # 會比熔爐的火焰跳動更流暢）。用 len(anim_frames) - 1
-                # 算模數，同一套公式套用在不同影格數量的機台上都成立，
-                # 不用為每種機台各寫一份切幀邏輯。這裡沿用專案裡已經存
-                # 在、每一幀都會無條件累加的 self.anim_time（run() 主迴
-                # 圈裡 `self.anim_time += dt`，不受暫停/日夜切換影響），
-                # 而不是另外新增一個 self.animation_timer——兩者效果完
-                # 全一樣，但重用既有計時器可以避免專案裡多出一個語意重
-                # 複的計時器變數。
+                # 在 frame[1]/frame[2] 兩幀來回切換）。用 len(anim_frames) - 1
+                # 算模數，這裡沿用專案裡已經存在、每一幀都會無條件累加
+                # 的 self.anim_time（run() 主迴圈裡 `self.anim_time += dt`，
+                # 不受暫停/日夜切換影響），而不是另外新增一個
+                # self.animation_timer——兩者效果完全一樣，但重用既有
+                # 計時器可以避免專案裡多出一個語意重複的計時器變數。
                 cycle_len = max(1, len(anim_frames) - 1)
                 frame_index = 1 + int(self.anim_time / ANIMATION_SPEED) % cycle_len
             frame_img = anim_frames[frame_index]
