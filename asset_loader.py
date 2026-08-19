@@ -10,19 +10,24 @@ from typing import Dict, Tuple
 ASSET_ROOT = os.path.join(os.path.dirname(__file__), "assets")
 
 # ---- 血月首領 (pig_chroma.png) 精靈圖設定 --------------------------------
-# 假設是標準「N 個方向 (列) x 每個方向 N 幀動畫 (欄)」排版。
-# 如果實際的 pig_chroma.png 切法不是 3 欄 x 4 列，改這兩個數字就好，
-# 下面的切圖邏輯完全不用動。
-BOSS_FRAME_COLS = 3   # 每個方向有幾幀動畫（橫向、欄數）
-BOSS_FRAME_ROWS = 4   # 有幾個方向（縱向、列數）
-# 由上而下，每一「列」對應哪個方向——這是最常見的 RPG 素材排版慣例
-# (row0=下, row1=左, row2=右, row3=上)。如果你的圖實際順序不同
-# (例如 上/左/下/右)，改這個 list 的順序即可。
-BOSS_ROW_DIRECTIONS = ["down", "left", "right", "up"]
-# pig_chroma.png 這個檔名暗示背景是用純色去背（Chroma Key），不是真的
-# alpha 透明。設成 None 時，程式會自動抓「圖片左上角那個像素」的顏色
-# 當作要去除的背景色；如果自動抓色抓錯（例如左上角剛好被角色圖佔到），
-# 把這裡改成實際的背景色 RGB，例如 (255, 0, 255) 螢光洋紅或 (0, 255, 0) 綠幕。
+# 實測 assets/characters/pig_chroma.png 目前是 1024x1024、5 欄 x 5 列
+# (每格 204x204) 的網格圖，不是原本假設的「4方向 x 3~4幀」乾淨走路循環圖
+# ——25 格內容看起來都是同一隻豬皇的姿勢/表情小變化，沒辦法明確分出
+# 上下左右 4 個方向。如果之後重新輸出/裁切出方向差異明顯的版本，
+# 改下面這兩個數字 + BOSS_ROW_DIRECTIONS 就好，不用動切圖或渲染邏輯。
+BOSS_FRAME_COLS = 5   # 每列有幾幀動畫（橫向、欄數）
+BOSS_FRAME_ROWS = 5   # 有幾列（縱向、列數）
+# 由上而下，每一「列」對應哪個方向。目前設成 None，代表「不分方向」：
+# 25 格全部攤平成同一組動畫，走路時四個方向都播放同一份幀，先讓血月
+# 首領有移動動畫可看。之後如果有清楚的方向素材，改成類似
+# ["down", "left", "right", "up"] 這樣的 list（依你實際的列數與順序調整），
+# 下面 load_all() 裡會自動改成依方向查表。
+BOSS_ROW_DIRECTIONS = None
+# pig_chroma.png 實測本身就有真正的 PNG alpha 透明背景（角落像素
+# alpha=0），不是純色去背 (Chroma Key)，所以預設 None = 不做 Chroma Key，
+# 直接用 convert_alpha() 保留原本的半透明邊緣（畫質比去背更平滑）。
+# 如果之後換成背景是純色（例如螢光洋紅/綠幕）的圖，才把這裡改成該顏色
+# RGB，例如 (255, 0, 255)，程式會改用 set_colorkey 去背。
 BOSS_CHROMA_KEY = None
 
 
@@ -61,15 +66,21 @@ class AssetLoader:
             return None
 
         try:
-            # 用 .convert() 而不是 .convert_alpha()：Chroma Key 去背要先在
-            # 「無 alpha 通道」的圖上用 set_colorkey 指定去背色，之後才把
-            # 去背色轉成真正的 per-pixel alpha (見下面每一幀的處理)。
-            sheet = pygame.image.load(full_path).convert()
+            if chroma_key is not None:
+                # 明確指定了去背色：用 .convert() (無 alpha 通道) 載入，
+                # 指定 colorkey 之後再 convert_alpha() 把去背色烤成真正的
+                # per-pixel alpha，這樣切出來的每一幀才能正常半透明混合。
+                sheet = pygame.image.load(full_path).convert()
+                sheet.set_colorkey(chroma_key, pygame.RLEACCEL)
+                sheet = sheet.convert_alpha()
+            else:
+                # 沒指定去背色：假設來源圖本身已經有真正的 PNG alpha
+                # 透明背景（pig_chroma.png 實測就是這種），直接保留原本
+                # alpha，邊緣比 Chroma Key 去背更平滑、不會有鋸齒殘影。
+                sheet = pygame.image.load(full_path).convert_alpha()
         except Exception as e:
             print(f"[AssetLoader] 載入精靈圖 {rel_path} 失敗: {e}")
             return None
-
-        key_color = chroma_key if chroma_key is not None else sheet.get_at((0, 0))
 
         sheet_w, sheet_h = sheet.get_size()
         frame_w = sheet_w // cols
@@ -84,10 +95,6 @@ class AssetLoader:
             for col in range(cols):
                 rect = pygame.Rect(col * frame_w, row * frame_h, frame_w, frame_h)
                 frame = sheet.subsurface(rect).copy()
-                # 把去背色變成真正的透明 alpha，這樣之後才能用平滑縮放
-                # (smoothscale) 而不會在邊緣留下去背色的鋸齒殘影。
-                frame.set_colorkey(key_color, pygame.RLEACCEL)
-                frame = frame.convert_alpha()
                 frame = pygame.transform.scale(frame, frame_size)
                 row_frames.append(frame)
             frames_by_row.append(row_frames)
@@ -171,11 +178,19 @@ class AssetLoader:
             "characters/pig_chroma.png", BOSS_FRAME_COLS, BOSS_FRAME_ROWS, boss_size, BOSS_CHROMA_KEY
         )
         if boss_rows:
-            self.boss_frames: Dict[str, list] = {
-                direction: boss_rows[i]
-                for i, direction in enumerate(BOSS_ROW_DIRECTIONS)
-                if i < len(boss_rows)
-            }
+            if BOSS_ROW_DIRECTIONS:
+                self.boss_frames: Dict[str, list] = {
+                    direction: boss_rows[i]
+                    for i, direction in enumerate(BOSS_ROW_DIRECTIONS)
+                    if i < len(boss_rows)
+                }
+            else:
+                # BOSS_ROW_DIRECTIONS 是 None：素材目前沒有明確的方向差異，
+                # 把所有列攤平成同一組幀，四個方向都共用，先讓首領動起來。
+                all_frames = [frame for row in boss_rows for frame in row]
+                self.boss_frames: Dict[str, list] = {
+                    d: all_frames for d in ("down", "left", "right", "up")
+                }
         else:
             # pig_chroma.png 還沒放進 assets/characters/，或切圖失敗時，
             # boss_frames 就是空字典——渲染層要檢查這個並退回 boss_boar 靜態圖。
