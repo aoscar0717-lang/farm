@@ -473,6 +473,73 @@ def tutorial_sidebar_rect():
     return pygame.Rect(x, top, TUTORIAL_SIDEBAR_WIDTH, h)
 
 
+# Per-task row geometry inside the sidebar -- fixed row heights (not a
+# pixel-exact reproduction of the wrapped-hint text height) so this stays a
+# pure, state-cheap geometry function usable both by draw_tutorial_sidebar
+# (which positions each row here instead of hand-tracking a running y) and
+# by thought.py's Sidebar-hover resolution (section 九: "Hover 目前任務 ->
+# F 有對應思索"). A little vertical slack in TUTORIAL_SIDEBAR_CURRENT_ROW_H
+# for the current task's wrapped hint is good enough for "is the mouse
+# roughly over this task's row", which is all a hover target needs. The
+# HEADER height, unlike the rows, is NOT a guess -- see
+# tutorial_sidebar_header_height() below, which derives it from the real
+# font metrics so it can't silently drift out of sync with what
+# draw_tutorial_sidebar's title/chapter/subtitle block actually renders.
+TUTORIAL_SIDEBAR_ROW_H = 24
+TUTORIAL_SIDEBAR_CURRENT_ROW_H = 76
+TUTORIAL_SIDEBAR_ROW_GAP = 4
+
+
+def tutorial_sidebar_header_height(chapter):
+    """Height (in px) of the Sidebar's title + separator + chapter-name +
+    subtitle block, above where the first task row starts. Computed from
+    the real font metrics (not a hand-picked constant) so
+    draw_tutorial_sidebar (which draws this block) and
+    tutorial_sidebar_task_rects (which needs to know where it ends) can
+    never drift apart -- both call this same function."""
+    from src.config import font_small, font_tiny
+
+    pad_y = 12
+    y = pad_y
+    y += font_small.get_height() + 6   # title row
+    y += 8                              # separator line's own gap
+    if chapter is not None:
+        y += font_tiny.get_height() + 4   # chapter name + progress row
+        y += font_tiny.get_height() + (8 if chapter.subtitle else 4)  # subtitle row
+    return y - pad_y
+
+
+def tutorial_sidebar_task_rects(state):
+    """[(TutorialTask, Rect), ...] for every task in the Sidebar's
+    currently-shown chapter, in on-screen (absolute) coordinates -- single
+    source of truth for both draw_tutorial_sidebar's row positions and
+    thought.py's "which task is the mouse over" hit test, so the two can
+    never drift out of sync. Returns [] if there's no current chapter
+    (shouldn't happen with a non-empty TUTORIAL_CHAPTERS, but stay
+    defensive)."""
+    from src import tutorial_quests as _quests
+
+    panel = tutorial_sidebar_rect()
+    progress = _quests.get_quest_progress(state)
+    chapter = progress["current_chapter"]
+    current_task = progress["current_task"]
+    if chapter is None:
+        return []
+
+    pad_x, pad_y = 14, 12
+    y = panel.y + pad_y + tutorial_sidebar_header_height(chapter)
+    rects = []
+    for task in chapter.tasks:
+        is_current = current_task is not None and task.id == current_task.id
+        h = TUTORIAL_SIDEBAR_CURRENT_ROW_H if is_current else TUTORIAL_SIDEBAR_ROW_H
+        rect = pygame.Rect(panel.x + pad_x - 4, y, panel.w - (pad_x - 4) * 2, h)
+        rects.append((task, rect))
+        y += h + TUTORIAL_SIDEBAR_ROW_GAP
+        if y > panel.bottom - 20:
+            break
+    return rects
+
+
 def toolbar_side_label_pos(label_width, label_height):
     """Where to draw a label attached to the right side of the hotbar
     (the 'currently equipped tool' indicator). Previously this indicator

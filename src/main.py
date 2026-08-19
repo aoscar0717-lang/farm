@@ -208,18 +208,33 @@ def play():
             night_start_time = None  # Reset when day begins
 
         # 思索模式：dim the (still-visible, just paused) world and show a
-        # short, situational hint. Suppressed while the shop is open so the
-        # two overlays never fight for the same screen space.
-        if f_held and not shop_open:
-            elapsed = time.time() - f_held_since if f_held_since else 0.0
-            fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
-            contemplation_filter.set_alpha(int(120 * fade_ratio))
-            screen.blit(contemplation_filter, (0, 0))
+        # short, situational hint. F now also works while the shop is open
+        # (section 五/八 of the Hover Thought upgrade -- Buy/Sell
+        # tabs/item cards/prices are real, hoverable UI too, and get their
+        # own Thought entries in thought.py rather than a separate tooltip
+        # system). The screen-dimming filter is skipped while the shop is
+        # open -- the shop's own semi-transparent overlay already dims the
+        # world, so stacking a second dim filter on top would just double
+        # up for no visual benefit -- but the Thought panel itself still
+        # draws (on top of the shop, since draw_board -> draw_shop already
+        # ran by this point), appearing instantly rather than fading in.
+        if f_held:
+            if not shop_open:
+                elapsed = time.time() - f_held_since if f_held_since else 0.0
+                fade_ratio = min(1.0, elapsed / CONTEMPLATION_FADE_DURATION)
+                contemplation_filter.set_alpha(int(120 * fade_ratio))
+                screen.blit(contemplation_filter, (0, 0))
+            else:
+                fade_ratio = 1.0
             if fade_ratio >= 1.0:
-                # The fade-in fully completed -- the player genuinely held
-                # F long enough to read a line, not just tapped the key.
+                # The fade-in fully completed (or the shop was already open,
+                # which counts as an instant genuine hold) -- the player
+                # genuinely held F long enough to read a line, not just
+                # tapped the key.
                 note_event(state, "f_thought_used")
-            lines = get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos, mouse_pos)
+            lines = get_contemplation_lines(
+                state, active_zone, current_tool, shop_open, hover_pos, mouse_pos, active_tab,
+            )
             draw_contemplation(screen, lines, fade_ratio)
 
         # 新手任務側欄：always visible (not gated on F), so progress is

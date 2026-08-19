@@ -50,7 +50,10 @@ class TestThoughtScenarios(unittest.TestCase):
 
         state["money"] = 0  # otherwise "afford defenses" (Tier 1) outranks this Tier 3 info
         lines = get_contemplation_lines(state, "farm", None, False, hover_pos=(5, 5))
-        self.assertEqual(lines, ["作物正在生長，可能還需要一點時間才會成熟。"])
+        # Deliberate behavior change: hover text is now crop-name-specific
+        # instead of the old fully-generic line (see the Hover Thought
+        # upgrade -- "滑鼠 Hover 到什麼 -> F 就應該能理解玩家目前看到的東西").
+        self.assertEqual(lines, ["這裡種著白蘿蔔。再等一段時間，成熟後就可以用鐮刀收割。"])
 
     def test_B_hovering_a_mature_crop(self):
         state = new_game()

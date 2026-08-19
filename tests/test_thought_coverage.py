@@ -211,5 +211,263 @@ class TestQuestGuidanceEntryExists(unittest.TestCase):
         self.assertIn("quest_guidance", _entry_ids())
 
 
+# ---------------------------------------------------------------------------
+# Section 十一: explicit WORLD_THOUGHT_TARGETS / UI_THOUGHT_TARGETS coverage
+# registries + loop-based assertions. Each entry is name -> a zero-arg
+# builder returning (state, kwargs_for_get_contemplation_lines, check_fn).
+# The point is COVERAGE, not re-pinning exact strings (test_thought.py /
+# test_thought_tiers.py already do that for the handful of entries with a
+# stable pinned string) -- check_fn just has to confirm the line that came
+# back is actually about the thing being hovered, not the generic ambient
+# fallback.
+# ---------------------------------------------------------------------------
+
+def _hoe_state():
+    state = new_game()
+    _skip_beginner_intros(state)
+    state["money"] = 0
+    return state
+
+
+def _planted_state(crop, ticks_after_plant=3):
+    state = _hoe_state()
+    state["farm"]["farmland"].append((5, 5))
+    state["farm"]["crops"].append((5, 5))
+    from src.capstone_contract import CROP_INFO
+    state["farm"]["crop_data"][(5, 5)] = {
+        "type": crop, "stage": 0, "max_stage": CROP_INFO[crop]["growth_time"],
+        "fertilized": False, "growth_timer": 0,
+    }
+    return state
+
+
+def _mature_state(crop="radish", learned=False, tool=None):
+    state = _hoe_state() if learned else new_game()
+    from src.capstone_contract import CROP_INFO
+    state["farm"]["crops"].append((5, 5))
+    state["farm"]["crop_data"][(5, 5)] = {
+        "type": crop, "stage": CROP_INFO[crop]["growth_time"], "max_stage": CROP_INFO[crop]["growth_time"],
+        "fertilized": False, "growth_timer": 0,
+    }
+    if learned:
+        state["inventory"].setdefault(crop, {})["normal"] = 1
+        from src.tutorial import update_unlocks
+        update_unlocks(state)
+    return state
+
+
+WORLD_THOUGHT_TARGETS = {
+    "empty_tilled_farmland": lambda: (
+        (lambda s: (
+            s["farm"]["farmland"].append((5, 5)),
+            s
+        )[-1])(_hoe_state()),
+        {"active_zone": "farm", "current_tool": "hoe", "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("土地" in l for l in lines),
+    ),
+    "untilled_ground_with_hoe": lambda: (
+        new_game(),
+        {"active_zone": "farm", "current_tool": "hoe", "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("開墾" in l for l in lines),
+    ),
+    "growing_radish": lambda: (
+        _planted_state("radish"),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("白蘿蔔" in l for l in lines),
+    ),
+    "growing_carrot": lambda: (
+        _planted_state("carrot"),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("胡蘿蔔" in l for l in lines),
+    ),
+    "growing_pumpkin": lambda: (
+        _planted_state("pumpkin"),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("南瓜" in l for l in lines),
+    ),
+    "near_maturity_carrot": lambda: (
+        (lambda s: (
+            s["farm"]["crop_data"][(5, 5)].__setitem__("stage", 1),
+            s
+        )[-1])(_planted_state("carrot")),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("快要成熟" in l for l in lines),
+    ),
+    "mature_crop_not_learned": lambda: (
+        _mature_state("radish", learned=False),
+        {"active_zone": "farm", "current_tool": "scythe", "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("成熟" in l for l in lines),
+    ),
+    "mature_crop_learned_with_scythe": lambda: (
+        _mature_state("radish", learned=True),
+        {"active_zone": "farm", "current_tool": "scythe", "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("使用鐮刀收割" in l for l in lines),
+    ),
+    "mature_crop_learned_other_tool": lambda: (
+        _mature_state("radish", learned=True),
+        {"active_zone": "farm", "current_tool": "hoe", "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("換成鐮刀收割" in l for l in lines),
+    ),
+    "fence_nearby": lambda: (
+        (lambda s: (s["farm"]["fences"].append((5, 5)), s)[-1])(_hoe_state()),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("圍欄" in l for l in lines),
+    ),
+    "trap_nearby": lambda: (
+        (lambda s: (s["farm"]["traps"].append((5, 5)), s)[-1])(_hoe_state()),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("陷阱" in l for l in lines),
+    ),
+    "dog_nearby": lambda: (
+        (lambda s: (s["farm"]["dogs"].append((5, 5)), s)[-1])(_hoe_state()),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("狗" in l for l in lines),
+    ),
+    "fountain_decor_nearby": lambda: (
+        (lambda s: (s["decor"]["decorations"].append((5, 5, "fountain", 100)), s)[-1])(_hoe_state()),
+        {"active_zone": "decor", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("風車" in l for l in lines),
+    ),
+    "thief_present": lambda: (
+        (lambda s: (s.__setitem__("phase", "night"), s["farm"].__setitem__("thief_pos", (10, 10)), s)[-1])(new_game()),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": None},
+        lambda lines: any("小偷" in l for l in lines),
+    ),
+    "boar_present": lambda: (
+        (lambda s: (s.__setitem__("phase", "night"), s["decor"].__setitem__("boar_pos", (10, 10)), s)[-1])(new_game()),
+        {"active_zone": "decor", "current_tool": None, "shop_open": False, "hover_pos": None},
+        lambda lines: any("野豬" in l for l in lines),
+    ),
+    "thief_attacking_hovered_fence": lambda: (
+        (lambda s: (
+            s.__setitem__("phase", "night"),
+            s["farm"].__setitem__("thief_ai_state", "attacking_fence"),
+            s["farm"].__setitem__("thief_attack_target_fence", (5, 5)),
+            s
+        )[-1])(new_game()),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False, "hover_pos": (5, 5)},
+        lambda lines: any("正在攻擊這座柵欄" in l for l in lines),
+    ),
+}
+
+
+def _sidebar_state():
+    """A state where chapter 1's first task ("move") is already done and
+    the second ("f_thought") is current -- and every Tier-2 "haven't
+    learned this yet" beginner-intro entry that would otherwise outrank a
+    Tier-3 sidebar hover is pre-satisfied, same as _skip_beginner_intros."""
+    state = new_game()
+    state["tutorial"] = {
+        "unlocked": {"move": True, "shop_sell": True, "zone_switch": True},
+        "flags": {}, "seen_counts": {},
+    }
+    state["money"] = 0  # keep "afford defenses" (Tier 1) from outranking sidebar hover
+    return state
+
+
+UI_THOUGHT_TARGETS = {
+    "shop_button": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.shop_button_rect().center},
+        lambda lines: any("商店" in l for l in lines),
+    ),
+    "money_readout": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.money_readout_rect().center},
+        lambda lines: any("$0" in l for l in lines),
+    ),
+    "prosperity_stats_row": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.top_panel_stats_row_rect().center},
+        lambda lines: any("繁榮度" in l for l in lines),
+    ),
+    "daynight_bar": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.daynight_bar_rect().center},
+        lambda lines: any(("夜晚" in l or "白天" in l) for l in lines),
+    ),
+    "zone_toggle": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.zone_toggle_button_rects()["decor"].center},
+        lambda lines: any(("TAB" in l or "佈置區" in l) for l in lines),
+    ),
+    "hotbar": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.hotbar_layout()["panel_rect"].center},
+        lambda lines: any("快捷" in l for l in lines),
+    ),
+    "tutorial_sidebar_current_task": lambda: (
+        _sidebar_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.tutorial_sidebar_task_rects(_sidebar_state())[1][1].center},
+        lambda lines: any("你現在的目標" in l for l in lines),
+    ),
+    "tutorial_sidebar_completed_task": lambda: (
+        _sidebar_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": False,
+         "mouse_pos": ui_layout.tutorial_sidebar_task_rects(_sidebar_state())[0][1].center},
+        lambda lines: any("✓ 已完成" in l for l in lines),
+    ),
+    "shop_buy_tab": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": True, "active_tab": "seed",
+         "mouse_pos": ui_layout.shop_page_geometry()["tab_buy"].center},
+        lambda lines: any("種植或建造" in l for l in lines),
+    ),
+    "shop_sell_tab": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": True, "active_tab": "sell",
+         "mouse_pos": ui_layout.shop_page_geometry()["tab_sell"].center},
+        lambda lines: any("出售" in l for l in lines),
+    ),
+    "shop_subtab_seed": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": True, "active_tab": "seed",
+         "mouse_pos": ui_layout.shop_subtab_rects()["seed"].center},
+        lambda lines: any("種子" in l for l in lines),
+    ),
+    "shop_item_card_buy_radish": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": True, "active_tab": "seed",
+         "mouse_pos": ui_layout.shop_column_rects(2, is_sell=False, column="left")[0].center},
+        lambda lines: any("白蘿蔔" in l for l in lines),
+    ),
+    "shop_close_hint": lambda: (
+        _hoe_state(),
+        {"active_zone": "farm", "current_tool": None, "shop_open": True, "active_tab": "seed",
+         "mouse_pos": (5, 5)},
+        lambda lines: any("關閉商店" in l for l in lines),
+    ),
+}
+
+
+class TestWorldAndUIHoverTargetRegistries(unittest.TestCase):
+    """Section 十一: loop over the registries above and confirm every
+    listed target produces a Thought that's actually about the thing being
+    hovered (not just "some non-empty text")."""
+
+    def test_every_world_hover_target_produces_a_meaningful_thought(self):
+        for name, builder in WORLD_THOUGHT_TARGETS.items():
+            with self.subTest(target=name):
+                state, kwargs, check = builder()
+                lines = get_contemplation_lines(state, **kwargs)
+                self.assertTrue(lines, f"{name}: produced no Thought at all")
+                self.assertTrue(check(lines), f"{name}: unexpected Thought text: {lines}")
+
+    def test_every_ui_hover_target_produces_a_meaningful_thought(self):
+        for name, builder in UI_THOUGHT_TARGETS.items():
+            with self.subTest(target=name):
+                state, kwargs, check = builder()
+                lines = get_contemplation_lines(state, **kwargs)
+                self.assertTrue(lines, f"{name}: produced no Thought at all")
+                self.assertTrue(check(lines), f"{name}: unexpected Thought text: {lines}")
+
+
 if __name__ == "__main__":
     unittest.main()

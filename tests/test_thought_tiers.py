@@ -96,7 +96,10 @@ class TestTieredTextHarvest(unittest.TestCase):
         from src.tutorial import update_unlocks
         update_unlocks(state)
         lines = get_contemplation_lines(state, "farm", "scythe", False, hover_pos=pos)
-        self.assertEqual(lines, ["作物成熟了，用鐮刀可以收割。"])
+        # Deliberate behavior change (Hover Thought upgrade, section 一):
+        # once "harvest" is learned, the tiered text also becomes crop-name
+        # + tool-aware instead of fully generic.
+        self.assertEqual(lines, ["這株白蘿蔔已經成熟了，現在可以使用鐮刀收割。"])
 
 
 class TestSeenCountBookkeeping(unittest.TestCase):

@@ -69,7 +69,7 @@ import math
 from src import tutorial as _tutorial
 from src import tutorial_quests as _quests
 from src import ui_layout as _ui_layout
-from src.capstone_contract import DECOR_INFO, CROP_INFO
+from src.capstone_contract import DECOR_INFO, CROP_INFO, CROP_NAMES, DECOR_NAMES
 
 
 def _inventory_total(state):
@@ -153,49 +153,108 @@ def _dog_price(state, ctx):
 # ---------------------------------------------------------------------------
 # Hover helpers. ctx["hover_pos"] is the (gx, gy) grid cell the mouse is
 # over, in the same units as farmland/crops/fences/etc positions, or None.
+#
+# _get_hover_context() is the SINGLE authoritative read of "what is the
+# mouse cell actually pointing at" -- every farmland/crop-shaped condition
+# and text function below reads through it instead of independently
+# re-deriving state["farm"]["farmland"] / state["farm"]["crop_data"]
+# membership. This was the root cause of the "已種植農田/作物 hover 沒有
+# Thought" gap: individual conditions used to be gated on `required_item`
+# (a specific tool being equipped) rather than on what's actually under the
+# cursor, so a planted-but-not-mature crop hovered with no tool (or the
+# "wrong" tool) equipped fell through every entry and landed on the fully
+# generic ambient fallback. Hover Context now comes first; tool is just one
+# more fact a text function can consult, never a gate on whether the cell
+# gets described at all.
 # ---------------------------------------------------------------------------
+
+def _get_hover_context(state, ctx):
+    """Returns a dict describing the world cell ctx["hover_pos"] is over,
+    in the active zone:
+        kind            "crop" / "farmland_empty" / "tillable" / "decor" /
+                        None (nothing recognized here, or hover_pos is None)
+        crop_type       "radish"/"carrot"/"pumpkin" or None
+        crop_stage      int or None
+        crop_max_stage  int or None
+        crop_mature     bool
+        farmland        bool -- is this cell tilled farmland at all
+        decor_type      decor sub-type string or None (decor zone only)
+
+    Deliberately narrow (farm crops/farmland + decor-zone decorations) --
+    fences/traps/dogs/enemies already have their own radius-based "nearby"
+    helpers below (_hovering_entity / _hovering_entity's callers), which
+    check proximity rather than "is this the exact cell", so folding them
+    into this exact-cell context would change their matching behavior.
+    Nothing outside this function should read
+    state["farm"]["farmland"]/["crop_data"] or state["decor"]["decorations"]
+    to answer "what is the player looking at" -- extend this function
+    instead of adding another ad hoc reader."""
+    empty = {
+        "kind": None, "crop_type": None, "crop_stage": None,
+        "crop_max_stage": None, "crop_mature": False, "farmland": False,
+        "decor_type": None,
+    }
+    pos = ctx.get("hover_pos")
+    if pos is None:
+        return empty
+
+    if ctx.get("active_zone") == "farm":
+        farm = state["farm"]
+        data = farm.get("crop_data", {}).get(pos)
+        if data is not None:
+            stage = data.get("stage", 0)
+            max_stage = data.get("max_stage", 1)
+            return {
+                **empty,
+                "kind": "crop",
+                "crop_type": data.get("type"),
+                "crop_stage": stage,
+                "crop_max_stage": max_stage,
+                "crop_mature": stage >= max_stage,
+                "farmland": True,
+            }
+        if pos in farm.get("farmland", []):
+            return {**empty, "kind": "farmland_empty", "farmland": True}
+        if pos not in farm.get("trees", []) and pos not in farm.get("rocks", []):
+            return {**empty, "kind": "tillable"}
+        return empty
+
+    if ctx.get("active_zone") == "decor":
+        for d in state["decor"].get("decorations", []):
+            dx, dy, dtype, _hp = d
+            if (dx, dy) == pos:
+                return {**empty, "kind": "decor", "decor_type": dtype}
+        return empty
+
+    return empty
+
 
 def _hover_is_tillable(state, ctx):
     """Hovering plain ground in the farm zone: not farmland yet, not a
     tree/rock."""
-    pos = ctx.get("hover_pos")
-    if pos is None or ctx["active_zone"] != "farm":
-        return False
-    farm = state["farm"]
-    if pos in farm.get("farmland", []):
-        return False
-    if pos in farm.get("trees", []) or pos in farm.get("rocks", []):
-        return False
-    return True
+    return _get_hover_context(state, ctx)["kind"] == "tillable"
 
 
 def _hover_is_empty_farmland(state, ctx):
     """Hovering tilled soil with nothing planted on it yet."""
-    pos = ctx.get("hover_pos")
-    if pos is None or ctx["active_zone"] != "farm":
-        return False
-    farm = state["farm"]
-    return pos in farm.get("farmland", []) and pos not in farm.get("crops", [])
+    return _get_hover_context(state, ctx)["kind"] == "farmland_empty"
 
 
 def _hover_crop_stage(state, ctx):
-    pos = ctx.get("hover_pos")
-    if pos is None or ctx["active_zone"] != "farm":
+    hc = _get_hover_context(state, ctx)
+    if hc["kind"] != "crop":
         return None
-    data = state["farm"]["crop_data"].get(pos)
-    if not data:
-        return None
-    return data.get("stage", 0), data.get("max_stage", 1)
+    return hc["crop_stage"], hc["crop_max_stage"]
 
 
 def _hover_is_growing_crop(state, ctx):
-    info = _hover_crop_stage(state, ctx)
-    return info is not None and info[0] < info[1]
+    hc = _get_hover_context(state, ctx)
+    return hc["kind"] == "crop" and not hc["crop_mature"]
 
 
 def _hover_is_mature_crop(state, ctx):
-    info = _hover_crop_stage(state, ctx)
-    return info is not None and info[0] >= info[1]
+    hc = _get_hover_context(state, ctx)
+    return hc["kind"] == "crop" and hc["crop_mature"]
 
 
 def _hovering_entity(state, ctx, kind, radius=25):
@@ -226,6 +285,209 @@ def _hover_is_unfertilized_crop(state, ctx):
         return False
     data = farm["crop_data"].get(pos)
     return bool(data) and not data.get("fertilized")
+
+
+def _crop_display_name(crop_type):
+    return CROP_NAMES.get(crop_type, "作物")
+
+
+def _empty_farmland_text(state, ctx):
+    """Hovering tilled-but-unplanted farmland -- fires regardless of which
+    tool (if any) is equipped, unlike action_plant which only applies while
+    a seed is actually held. This is the entry that closes the original
+    bug report: "已開墾的農地 hover 卻沒有 Thought" whenever the player
+    wasn't holding a seed at the time."""
+    return "這塊土地已經整理好了，可以種下種子。"
+
+
+def _growing_crop_text(state, ctx):
+    """Crop-type-aware growing text (section 一): differs by which crop is
+    planted (so radish/carrot/pumpkin never share one generic sentence),
+    and switches to a "快要成熟" phrasing on the crop's last growth stage
+    before maturity -- skipped for 1-stage crops (radish's growth_time is
+    1, so stage 0 IS "one stage before mature" for it; treating that as
+    "near maturity" would make radish permanently near-mature and never
+    show the plain growing message, so the near-maturity phrasing only
+    kicks in for crops with at least 2 growth stages)."""
+    hc = _get_hover_context(state, ctx)
+    name = _crop_display_name(hc["crop_type"])
+    max_stage = hc["crop_max_stage"] or 1
+    stage = hc["crop_stage"] or 0
+    if max_stage >= 2 and stage == max_stage - 1:
+        return f"{name}快要成熟了，再等一下就可以收割。"
+    return f"這裡種著{name}。再等一段時間，成熟後就可以用鐮刀收割。"
+
+
+def _harvest_ready_text(state, ctx):
+    """Tool-aware mature-crop text (section 一's explicit "手持鐮刀" vs
+    "手持其他工具" distinction). Tier1 (not yet learned "harvest") keeps
+    the ORIGINAL static sentence byte-for-byte -- tests/test_thought.py's
+    test_B_hovering_a_mature_crop pins that exact string against a fresh,
+    not-yet-learned state, so only tier2/tier3 (already learned "harvest")
+    gain the crop-name + tool-aware phrasing; a brand new player sees the
+    same gentle "也許可以收割" nudge as before."""
+    hc = _get_hover_context(state, ctx)
+    name = _crop_display_name(hc["crop_type"])
+    if not _learned(state, "harvest"):
+        return "這株作物似乎已經成熟了，也許可以收割。"
+    if ctx.get("current_tool") == "scythe":
+        return f"這株{name}已經成熟了，現在可以使用鐮刀收割。"
+    return f"這株{name}已經成熟了，可以換成鐮刀收割。"
+
+
+def _mouse_over_ui_chrome(ctx):
+    """True when ctx["mouse_pos"] lands on any known interactive HUD chrome
+    rect (shop button/money/stats row/day-night bar/zone toggle/hotbar/
+    tutorial sidebar). Used to make the World Hover Context authoritatively
+    null the instant the mouse is actually over UI: hover_pos is computed
+    by main.py from the raw mouse position regardless of what's drawn on
+    top of that screen location, so without this check a world-grid cell
+    that happens to sit "behind" the shop button (say, a mature crop) could
+    outrank the UI hint the player is actually pointing at -- exactly the
+    bug section 十三 describes. get_contemplation_lines calls this once and
+    overrides ctx["hover_pos"] to None when true, which makes every
+    hover_pos-gated world entry naturally inapplicable without having to
+    touch each one's condition individually."""
+    if ctx.get("shop_open") or ctx.get("mouse_pos") is None:
+        return False
+    mp = ctx["mouse_pos"]
+    rects = (
+        _ui_layout.shop_button_rect(),
+        _ui_layout.money_readout_rect(),
+        _ui_layout.top_panel_stats_row_rect(),
+        _ui_layout.daynight_bar_rect(),
+        _ui_layout.zone_toggle_button_rects()["farm"],
+        _ui_layout.zone_toggle_button_rects()["decor"],
+        _ui_layout.hotbar_layout()["panel_rect"],
+        _ui_layout.tutorial_sidebar_rect(),
+    )
+    return any(r.collidepoint(mp) for r in rects)
+
+
+def _hovered_sidebar_task(state, ctx):
+    """Which TutorialTask (if any) in the Sidebar's currently-shown chapter
+    the mouse is over, using the exact same row rects
+    draw_tutorial_sidebar() renders from (ui_layout.tutorial_sidebar_task_rects
+    -- single source of truth for draw + hover, section 九)."""
+    if ctx.get("shop_open") or ctx.get("mouse_pos") is None:
+        return None
+    for task, rect in _ui_layout.tutorial_sidebar_task_rects(state):
+        if rect.collidepoint(ctx["mouse_pos"]):
+            return task
+    return None
+
+
+def _sidebar_task_text(state, ctx):
+    task = _hovered_sidebar_task(state, ctx)
+    if task is None:
+        return "這裡會顯示目前的新手任務進度，完成的項目會打勾。"
+    progress = _quests.get_quest_progress(state)
+    current_task = progress["current_task"]
+    if task.is_done(state):
+        return f"✓ 已完成：{task.title}。"
+    if current_task is not None and task.id == current_task.id:
+        return f"你現在的目標：{task.title}。{task.hint}"
+    return f"{task.title}。{task.hint}（還沒輪到，需要先完成前面的任務。）"
+
+
+# ---------------------------------------------------------------------------
+# Shop hover helpers (section 五) -- resolve exactly which shop widget the
+# mouse is over while the shop is open, mirroring input_handler.py's own
+# _handle_shop_click slicing (same id lists, same left/right column split)
+# so "what the player is hovering" and "what a click there would do" can
+# never disagree.
+# ---------------------------------------------------------------------------
+
+def _hovered_shop_buy_item(state, ctx):
+    if ctx.get("active_tab") == "sell":
+        return None
+    geo = _ui_layout.shop_page_geometry()
+    mp = ctx.get("mouse_pos")
+    if mp is None or not geo["shop_rect"].collidepoint(mp):
+        return None
+    active_tab = ctx.get("active_tab") or "seed"
+    ids = _ui_layout.SHOP_ITEM_IDS.get(active_tab, [])
+    left_ids = ids[:(len(ids) + 1) // 2]
+    right_ids = ids[(len(ids) + 1) // 2:]
+    for col_ids, column in [(left_ids, "left"), (right_ids, "right")]:
+        rects = _ui_layout.shop_column_rects(len(col_ids), is_sell=False, column=column)
+        for item_id, card_rect in zip(col_ids, rects):
+            if card_rect.collidepoint(mp):
+                return item_id
+    return None
+
+
+def _hovered_shop_sell_item(state, ctx):
+    if ctx.get("active_tab") != "sell":
+        return None
+    mp = ctx.get("mouse_pos")
+    if mp is None:
+        return None
+    sellable = _ui_layout.build_sellable_list(state, CROP_INFO)
+    left_items, right_items = sellable[:6], sellable[6:12]
+    for col_items, column in [(left_items, "left"), (right_items, "right")]:
+        rects = _ui_layout.shop_column_rects(len(col_items), is_sell=True, column=column)
+        for item, card_rect in zip(col_items, rects):
+            if card_rect.collidepoint(mp):
+                return item
+    return None
+
+
+def _shop_buy_item_text(state, ctx):
+    item_id = _hovered_shop_buy_item(state, ctx)
+    if item_id is None:
+        return "選擇這個項目可以裝備對應的工具。"
+    if item_id in CROP_INFO:
+        name = f"{CROP_NAMES.get(item_id, item_id)}種子"
+        price = CROP_INFO[item_id]["price"]
+        base = f"{name}。選擇後可以在已開墾的農田種植。"
+    elif item_id == "fence":
+        price = 20
+        base = "木圍欄。可以擋住敵人的行動路線，替作物或造景爭取時間。"
+    elif item_id == "trap":
+        price = 50
+        base = "地刺陷阱。敵人踩到會受到傷害，是一次性的。"
+    elif item_id == "dog":
+        price = 0 if state.get("free_dog") else 200
+        base = "看門狗。會主動攻擊靠近的敵人，且不會陣亡。"
+    elif item_id in DECOR_INFO:
+        name = DECOR_NAMES.get(item_id, item_id)
+        price = DECOR_INFO[item_id]["price"]
+        base = f"{name}。放置後可以提升農場的繁榮度。"
+    else:
+        return "選擇這個項目可以裝備對應的工具。"
+
+    money = state.get("money", 0)
+    if price and money < price:
+        return f"{base}目前資金不足，需要 ${price}。"
+    if price:
+        return f"{base}目前資金足夠，可以使用這個項目。"
+    return base
+
+
+def _shop_sell_item_text(state, ctx):
+    item = _hovered_shop_sell_item(state, ctx)
+    if item is None:
+        return "把收穫的作物出售，換取農場資金。"
+    return f"{item['name']}。點擊可以出售，獲得 ${item['price']}。"
+
+
+def _prosperity_text(state, ctx):
+    """Section 六: hovering the top-panel stats row must report the REAL
+    prosperity value / farm level / progress toward the next level, not
+    just a static description of what prosperity is -- and switch to
+    near-upgrade-specific phrasing once the player is close, mirroring the
+    real _update_prosperity_and_level thresholds (100 for level 2, 300 for
+    level 3, level 3 is the cap) instead of inventing separate numbers."""
+    score = state.get("prosperity_score", 0)
+    level = state.get("farm_level", 1)
+    if level >= 3:
+        return f"目前繁榮度 {score}，農場已經是最高的等級 {level}。"
+    next_threshold = 100 if level == 1 else 300
+    remaining = max(0, next_threshold - score)
+    if remaining <= 20:
+        return f"目前繁榮度 {score}，農場等級 {level}。再增加 {remaining} 點繁榮度就能升到等級 {level + 1} 了！"
+    return f"目前繁榮度 {score}，農場等級 {level}。累積到 {next_threshold} 點繁榮度就能升到下一級。"
 
 
 def _hovering_rect(ctx, rect):
@@ -305,6 +567,32 @@ THOUGHT_ENTRIES = [
         "required_map": "decor",
         "required_phase": "night",
     },
+    {
+        "id": "danger_hovered_fence_attack",
+        # More specific (and more urgent, priority -1) than the generic
+        # danger_fence_under_attack above: fires only while the mouse is
+        # actually over the exact fence currently being attacked, using the
+        # thief's own real AI state (thief_ai_state == "attacking_fence" +
+        # thief_attack_target_fence), not a last_msg keyword match. No boar
+        # equivalent -- the boar's fence-hit code (see
+        # capstone_contract.py's _night_tick_boar) never tracks a specific
+        # target fence position the way the thief does, so a hover-specific
+        # boar version would be describing a mechanic that doesn't exist.
+        "text": "小偷正在攻擊這座柵欄！如果柵欄被破壞，可以考慮增加防禦或使用陷阱。",
+        "priority": -1,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("hover_pos") is not None
+            and state["farm"].get("thief_ai_state") == "attacking_fence"
+            and state["farm"].get("thief_attack_target_fence") is not None
+            and math.hypot(
+                ctx["hover_pos"][0] - state["farm"]["thief_attack_target_fence"][0],
+                ctx["hover_pos"][1] - state["farm"]["thief_attack_target_fence"][1],
+            ) <= 25
+        ),
+        "required_map": "farm",
+        "required_phase": "night",
+    },
 
     # -----------------------------------------------------------------
     # Tier 1 -- actionable right now. Hover-aware where the action is
@@ -345,12 +633,7 @@ THOUGHT_ENTRIES = [
     },
     {
         "id": "action_harvest",
-        "text": _tiered_text(
-            "action_harvest", "harvest",
-            tier1="這株作物似乎已經成熟了，也許可以收割。",
-            tier2="作物成熟了，用鐮刀可以收割。",
-            tier3="可以收割。",
-        ),
+        "text": _harvest_ready_text,
         "priority": _demote_once_learned(11, 32, "harvest"),
         "trigger": "hover",
         "condition": lambda state, ctx: _hover_is_mature_crop(state, ctx),
@@ -773,10 +1056,33 @@ THOUGHT_ENTRIES = [
     # -----------------------------------------------------------------
     {
         "id": "info_growing_crop",
-        "text": "作物正在生長，可能還需要一點時間才會成熟。",
+        "text": _growing_crop_text,
         "priority": 30,
         "trigger": "hover",
         "condition": lambda state, ctx: _hover_is_growing_crop(state, ctx),
+        "required_map": "farm",
+    },
+    {
+        "id": "info_empty_farmland",
+        # Fires regardless of which tool (if any) is equipped -- unlike
+        # action_plant, which only applies while a seed is actually held.
+        # This is the entry that closes the original bug report: hovering
+        # already-tilled, unplanted farmland used to fall straight through
+        # to the generic ambient fallback whenever the player wasn't
+        # holding a seed at that exact moment.
+        "text": _empty_farmland_text,
+        "priority": 30,
+        "trigger": "hover",
+        # Deliberately excludes the case a seed is actually equipped --
+        # action_plant (above) already owns that combination at a lower
+        # (more urgent) priority band and stays authoritative for it at
+        # every tutorial tier, learned or not; this entry only needs to
+        # cover every OTHER tool (or no tool), which action_plant's own
+        # required_item never did.
+        "condition": lambda state, ctx: (
+            _hover_is_empty_farmland(state, ctx)
+            and ctx.get("current_tool") not in ("radish", "carrot", "pumpkin")
+        ),
         "required_map": "farm",
     },
     {
@@ -982,7 +1288,7 @@ THOUGHT_ENTRIES = [
     },
     {
         "id": "ui_stats_row",
-        "text": "繁榮度代表農場目前的發展程度，累積到一定門檻會讓農場升級。",
+        "text": _prosperity_text,
         "priority": 34,
         "trigger": "hover",
         "condition": lambda state, ctx: (
@@ -1027,6 +1333,103 @@ THOUGHT_ENTRIES = [
         "trigger": "hover",
         "condition": lambda state, ctx: (
             not ctx["shop_open"] and _hovering_rect(ctx, _ui_layout.tutorial_sidebar_rect())
+            and _hovered_sidebar_task(state, ctx) is None
+        ),
+    },
+    {
+        "id": "ui_tutorial_sidebar_task",
+        # More specific than ui_tutorial_sidebar above (priority 33 < 35):
+        # fires when the mouse is over one particular task ROW, not just
+        # the sidebar panel in general (section 九 -- "Sidebar 也要能被 F
+        # 思考", including "hover the current task" vs "hover a completed
+        # task" giving different text).
+        "text": _sidebar_task_text,
+        "priority": 33,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            not ctx["shop_open"] and _hovered_sidebar_task(state, ctx) is not None
+        ),
+        "detail_key": lambda state, ctx: getattr(_hovered_sidebar_task(state, ctx), "id", None),
+    },
+
+    # -----------------------------------------------------------------
+    # Tier 3d -- Shop hover coverage (section 五). Only reachable while the
+    # shop is actually open (ctx["shop_open"] is True) -- everything above
+    # this point that depends on hover_pos is already naturally silenced by
+    # main.py setting hover_pos to None whenever the shop covers the
+    # screen, but these entries need their own explicit shop_open check
+    # since they key off mouse_pos, which stays valid the whole time.
+    # -----------------------------------------------------------------
+    {
+        "id": "shop_buy_tab",
+        "text": "這裡可以選擇要種植或建造的項目。",
+        "priority": 32,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open")
+            and _hovering_rect(ctx, _ui_layout.shop_page_geometry()["tab_buy"])
+        ),
+    },
+    {
+        "id": "shop_sell_tab",
+        "text": "把收穫的作物出售，換取農場資金。",
+        "priority": 32,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open")
+            and _hovering_rect(ctx, _ui_layout.shop_page_geometry()["tab_sell"])
+        ),
+    },
+    {
+        "id": "shop_subtab",
+        "text": lambda state, ctx: {
+            "seed": "這裡可以選擇要種植的種子。",
+            "def": "這裡可以選擇防禦設施：圍欄、陷阱、看門狗。",
+            "pet": "這裡可以選擇農場的景觀裝飾。",
+        }.get(ctx.get("active_tab"), "這裡可以選擇要購買的項目分類。"),
+        "priority": 32,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open") and ctx.get("active_tab") != "sell"
+            and any(
+                _hovering_rect(ctx, r) for r in _ui_layout.shop_subtab_rects().values()
+            )
+        ),
+    },
+    {
+        "id": "shop_item_card_buy",
+        "text": _shop_buy_item_text,
+        "priority": 31,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open") and _hovered_shop_buy_item(state, ctx) is not None
+        ),
+        "detail_key": lambda state, ctx: _hovered_shop_buy_item(state, ctx),
+    },
+    {
+        "id": "shop_item_card_sell",
+        "text": _shop_sell_item_text,
+        "priority": 31,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open") and _hovered_shop_sell_item(state, ctx) is not None
+        ),
+        "detail_key": lambda state, ctx: (_hovered_shop_sell_item(state, ctx) or {}).get("id"),
+    },
+    {
+        "id": "shop_close_hint",
+        # There's no dedicated close button widget in this game -- clicking
+        # anywhere outside the shop panel closes it (see input_handler.py's
+        # _handle_shop_click: `if not shop_rect.collidepoint(...): shop_open
+        # = False`). This entry describes that real mechanic instead of
+        # inventing a close button that doesn't exist.
+        "text": "點擊商店外的區域可以關閉商店。",
+        "priority": 38,
+        "trigger": "hover",
+        "condition": lambda state, ctx: (
+            ctx.get("shop_open")
+            and ctx.get("mouse_pos") is not None
+            and not _ui_layout.shop_page_geometry()["shop_rect"].collidepoint(ctx["mouse_pos"])
         ),
     },
 
@@ -1091,13 +1494,18 @@ def _entry_matches_context(entry, state, ctx):
 def _thought_state(state):
     t = state.setdefault("thought", {})
     t.setdefault("cooldowns", {})
-    # _last_shown_id backs the seen_counts increment below: it's the id
-    # that was on screen last time get_contemplation_lines was called
-    # *this F-hold session* (reset_hold_session clears it back to None the
-    # moment F is released -- see main.py). Comparing against it is what
-    # makes note_seen fire once per genuinely new "look", not once per
-    # rendered frame the same line continues to sit on screen.
-    t.setdefault("_last_shown_id", None)
+    # _last_shown_key backs the seen_counts increment below: it's the
+    # (entry_id, detail) pair that was on screen last time
+    # get_contemplation_lines was called *this F-hold session*
+    # (reset_hold_session clears it back to None the moment F is released
+    # -- see main.py). `detail` disambiguates entries whose CONTENT can
+    # change without their id changing (e.g. info_growing_crop shows
+    # different text for a carrot vs a pumpkin) -- comparing the full pair
+    # is what makes note_seen fire once per genuinely new "look" (moving
+    # from one crop to a different one counts as fresh, section 十四's
+    # "胡蘿蔔 → 南瓜 → 商店，每次都是新的 context"), while holding F still
+    # over the exact same cell/widget never fires more than once.
+    t.setdefault("_last_shown_key", None)
     return t
 
 
@@ -1107,11 +1515,13 @@ def reset_hold_session(state):
     pressed, whatever entry comes up first is counted as a fresh look (and
     therefore increments its seen_count) even if it's the exact same entry
     that was showing at the end of the previous hold."""
-    _thought_state(state)["_last_shown_id"] = None
+    _thought_state(state)["_last_shown_key"] = None
     return state
 
 
-def get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_pos=None, mouse_pos=None):
+def get_contemplation_lines(
+    state, active_zone, current_tool, shop_open, hover_pos=None, mouse_pos=None, active_tab=None,
+):
     """The single entry point main.py needs: figure out what to show while
     F is held. Also nudges Tutorial's bookkeeping forward (update_unlocks)
     since several entries here need current unlock status.
@@ -1119,11 +1529,13 @@ def get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_p
     hover_pos is the (gx, gy) grid cell the mouse is currently over (same
     units/snap as farmland/crops/fences/etc), or None -- main.py computes
     this every frame from the mouse position + camera offset. mouse_pos is
-    the raw (screen-pixel) mouse position, used only by the UI-chrome hover
+    the raw (screen-pixel) mouse position, used by the UI-chrome hover
     entries (shop button/money/stats row/day-night bar/zone toggle/hotbar/
-    sidebar -- see ui_layout.py), which live in fixed screen space rather
-    than the scrolling world. Callers that don't care about spatial hints
-    (e.g. tests) can omit either or both."""
+    sidebar -- see ui_layout.py) and, while the shop is open, by the shop's
+    own internal hover entries (tabs/item cards). active_tab is the shop's
+    current buy/sell sub-tab ("seed"/"def"/"pet"/"sell"), only consulted
+    while shop_open -- needed to resolve which item card is under the
+    mouse. Callers that don't care about any of these can omit them."""
     _tutorial.update_unlocks(state)
     ctx = {
         "active_zone": active_zone,
@@ -1131,7 +1543,17 @@ def get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_p
         "shop_open": shop_open,
         "hover_pos": hover_pos,
         "mouse_pos": mouse_pos,
+        "active_tab": active_tab,
     }
+
+    # Hit-test UI chrome FIRST (section 八's "Mouse Position -> Hit Test ->
+    # Hover Context -> Thought Resolver" flow): if the mouse is actually
+    # over a known HUD element, the World Hover Context is authoritatively
+    # nulled out so nothing sitting "behind" that UI element in world-grid
+    # coordinates can outrank the UI hint the player is actually pointing
+    # at (section 十三).
+    if _mouse_over_ui_chrome(ctx):
+        ctx["hover_pos"] = None
 
     ts = _thought_state(state)
     cooldowns = ts["cooldowns"]
@@ -1153,14 +1575,25 @@ def get_contemplation_lines(state, active_zone, current_tool, shop_open, hover_p
     if best.get("cooldown"):
         cooldowns[best["id"]] = best["cooldown"]
 
-    # Seen-count bookkeeping (section 九): only increment when this entry
-    # is newly the one being shown, not every frame it continues to be
-    # shown while F stays held on the same spot -- otherwise a single
-    # multi-second F-hold would rack up dozens of "seen" counts for one
-    # glance instead of one.
-    if best["id"] != ts.get("_last_shown_id"):
+    # Seen-count bookkeeping (section 九/十四): only increment when this
+    # entry -- or, for entries whose text varies by sub-target, this exact
+    # sub-target -- is newly the one being shown. World-hover entries key
+    # naturally off hover_pos (moving to a different cell is always a fresh
+    # look); UI-ish entries that share one id across several possible
+    # widgets (shop item cards, sidebar task rows) declare their own
+    # "detail_key" function to disambiguate. Anything else falls back to
+    # just the entry id, so holding F over the exact same spot/widget for
+    # several seconds still counts as exactly one look, never once a frame.
+    if ctx.get("hover_pos") is not None:
+        detail = ctx["hover_pos"]
+    elif "detail_key" in best:
+        detail = _resolve(best["detail_key"], state, ctx)
+    else:
+        detail = None
+    shown_key = (best["id"], detail)
+    if shown_key != ts.get("_last_shown_key"):
         _tutorial.note_seen(state, best["id"])
-        ts["_last_shown_id"] = best["id"]
+        ts["_last_shown_key"] = shown_key
 
     text = _resolve(best["text"], state, ctx)
     return text if isinstance(text, list) else [text]

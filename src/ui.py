@@ -573,8 +573,22 @@ def draw_tutorial_sidebar(screen, state):
         else:
             y += 4
 
+        # Recompute from the shared geometry function rather than trusting
+        # the hand-drawn arithmetic above to stay in sync forever -- this
+        # is what ui_layout.tutorial_sidebar_task_rects() uses to place the
+        # first task row, so overriding y here guarantees draw and hover
+        # hit-test can never drift apart even if one of the two is edited
+        # later without the other.
+        y = pad_y + ui_layout.tutorial_sidebar_header_height(current_chapter)
+
         max_w = panel_rect.w - pad_x * 2 - 24
-        for task in current_chapter.tasks:
+        # Row positions come from ui_layout.tutorial_sidebar_task_rects --
+        # the same function thought.py's Sidebar-hover resolution uses to
+        # figure out which task row the mouse is over (section 九), so the
+        # two can never disagree about where a given task's row actually
+        # is on screen.
+        for task, abs_row_rect in ui_layout.tutorial_sidebar_task_rects(state):
+            row_y = abs_row_rect.y - panel_rect.y  # panel-local
             done = task.is_done(state)
             is_current = current_task is not None and task.id == current_task.id
             mark = "✓" if done else "○"  # checkmark / open circle
@@ -582,29 +596,27 @@ def draw_tutorial_sidebar(screen, state):
             title_color = (150, 145, 130) if done else ((255, 240, 150) if is_current else (225, 220, 205))
 
             if is_current:
-                highlight_h = font_tiny.get_height() + 4
                 pygame.draw.rect(
                     panel, (70, 55, 25, 180),
-                    pygame.Rect(pad_x - 4, y - 2, panel_rect.w - (pad_x - 4) * 2, highlight_h),
+                    pygame.Rect(pad_x - 4, row_y - 2, panel_rect.w - (pad_x - 4) * 2, abs_row_rect.h),
                     border_radius=5,
                 )
 
+            row_y_cursor = row_y
             mark_surf = font_tiny.render(mark, True, mark_color)
-            panel.blit(mark_surf, (pad_x, y))
+            panel.blit(mark_surf, (pad_x, row_y_cursor))
             title_lines = _wrap_text_to_width(task.title, max_w, font_tiny)
             title_surf2 = font_tiny.render(title_lines[0], True, title_color)
-            panel.blit(title_surf2, (pad_x + 22, y))
-            y += font_tiny.get_height() + 4
+            panel.blit(title_surf2, (pad_x + 22, row_y_cursor))
+            row_y_cursor += font_tiny.get_height() + 4
 
             if is_current and task.hint:
                 for hint_line in _wrap_text_to_width(task.hint, max_w, font_tiny):
                     hint_surf = font_tiny.render(hint_line, True, (190, 210, 235))
-                    panel.blit(hint_surf, (pad_x + 22, y))
-                    y += hint_surf.get_height() + 2
-                y += 4
+                    panel.blit(hint_surf, (pad_x + 22, row_y_cursor))
+                    row_y_cursor += hint_surf.get_height() + 2
 
-            if y > panel_rect.h - pad_y - 20:
-                break
+            y = row_y + abs_row_rect.h + ui_layout.TUTORIAL_SIDEBAR_ROW_GAP
 
     else:
         empty_surf = font_tiny.render("目前沒有進行中的任務。", True, (170, 160, 140))
