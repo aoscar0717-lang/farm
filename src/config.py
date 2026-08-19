@@ -27,6 +27,11 @@ SPRITE_SCALES = {
     "scarecrow": (1.0, 1.0),
     "windmill": (2.0, 2.0),
     "dog": (1.2, 1.5),
+    "cat": (1.0, 1.0),
+    "goose": (1.1, 1.1),
+    "sheep": (1.3, 1.3),
+    "bull": (1.6, 1.6),
+    "owl": (1.0, 1.0),
     "goblin": (2.5, 1.7),
     "boar": (1.5, 1.5)
 }
@@ -98,11 +103,22 @@ TOOL_NAMES = {
     "sunflower": "向日葵", "pine_tree": "松樹", "big_tree": "大樹",
     "stump": "樹墩", "mushroom": "蘑菇", "picnic_basket": "野餐籃", "woodpile": "柴堆",
     "picnic_blanket": "野餐墊", "beehive": "蜂箱", "garden_table": "庭院桌", "fruit_tree": "果樹",
-    "fence": "木圍欄", "trap": "地刺陷阱",
-    "dog": "看門狗",
+    "fence": "木圍欄", "trap": "捕獸夾",
+    "dog": "看門狗", "cat": "招財小貓", "goose": "暴躁警戒鵝", "sheep": "棉花守護羊", "bull": "鐵壁戰鬥牛", "owl": "夜行守護鳥",
     "fertilizer": "魔法肥料", "shovel": "鐵鏟 (免費)", "axe": "斧頭", "pickaxe": "十字鎬",
     "hoe": "鋤頭 (開墾)", "scythe": "鐮刀 (收割)"
 }
+
+
+ANIMAL_INFO = {
+    "dog": {"name": "看門狗", "price": 200, "speed": 1.0, "damage": 1, "desc": "自動攻擊靠近敵人，不會陣亡"},
+    "cat": {"name": "招財小貓", "price": 150, "speed": 1.8, "damage": 1, "desc": "極速抓瞎減速敵人，白天定期摸出金幣"},
+    "goose": {"name": "暴躁警戒鵝", "price": 220, "speed": 1.2, "damage": 1, "desc": "領域意識極強，憤怒衝撞將敵人擊退"},
+    "sheep": {"name": "棉花守護羊", "price": 260, "speed": 0.6, "hp": 10, "desc": "厚實羊毛護盾，主動吸引敵人仇恨"},
+    "bull": {"name": "鐵壁戰鬥牛", "price": 350, "speed": 0.8, "damage": 2, "desc": "體型巨大威嚴，巨角挑擊造成雙倍重傷"},
+    "owl": {"name": "夜行守護鳥", "price": 280, "speed": 2.2, "damage": 1, "desc": "空中高速俯衝，有機會嚇停敵人"},
+}
+
 
 # Message notification system
 MSG_DURATION = 3.0          # seconds a message stays fully visible

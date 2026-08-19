@@ -162,6 +162,14 @@ def _new_zone_state() -> dict:
         "fences": [],
         "traps": [],
         "dogs": [],
+        "cats": [],
+        "geese": [],
+        "sheeps": [],
+        "bulls": [],
+        "owls": [],
+        "sheep_hp": {},
+        "enemy_slow_ticks": 0,
+        "enemy_stun_ticks": 0,
         "trees": [],
         "rocks": [],
         "building_tasks": [],
@@ -358,7 +366,7 @@ def _can_build_fence(zone, pos):
 def _is_occupied(zone, x, y, size=ITEM_SIZE, include_crops=True):
     if _is_obstacle(zone, x, y): return True
 
-    all_entities = [(f[0], f[1]) for f in zone["fences"]] + zone["dogs"] + zone.get("traps", [])
+    all_entities = [(f[0], f[1]) for f in zone["fences"]] + zone.get("dogs", []) + zone.get("cats", []) + zone.get("geese", []) + zone.get("sheeps", []) + zone.get("bulls", []) + zone.get("owls", []) + zone.get("traps", [])
     all_entities += [(d[0], d[1]) for d in zone.get("decorations", [])]
     for task in zone["building_tasks"]:
         if task["type"] != "fence":
@@ -372,6 +380,7 @@ def _is_occupied(zone, x, y, size=ITEM_SIZE, include_crops=True):
             return True
 
     return False
+
 
 
 def _update_prosperity_and_level(state):
@@ -441,6 +450,13 @@ def _tick_zone_building(zone, on_decor_complete=None):
             elif t_type == "fence": zone["fences"].append((pos[0], pos[1], FENCE_MAX_HP))
             elif t_type == "farmland": zone["farmland"].append(pos)
             elif t_type == "dog": zone["dogs"].append(pos)
+            elif t_type == "cat": zone.setdefault("cats", []).append(pos)
+            elif t_type == "goose": zone.setdefault("geese", []).append(pos)
+            elif t_type == "sheep":
+                zone.setdefault("sheeps", []).append(pos)
+                zone.setdefault("sheep_hp", {})[pos] = 10
+            elif t_type == "bull": zone.setdefault("bulls", []).append(pos)
+            elif t_type == "owl": zone.setdefault("owls", []).append(pos)
             elif t_type == "trap": zone["traps"].append(pos)
             elif t_type == "decor":
                 decor_type = task["decor_type"]
@@ -449,6 +465,7 @@ def _tick_zone_building(zone, on_decor_complete=None):
         else:
             new_tasks.append(task)
     zone["building_tasks"] = new_tasks
+
 
 
 def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState:
@@ -464,8 +481,18 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
 
         if _working_copy["phase"] == "day":
             _working_copy["time_left"] -= 1
+            # Cat bonus gold during daytime
+            _working_copy["cat_timer"] = _working_copy.get("cat_timer", 0) + 1
+            if _working_copy["cat_timer"] >= 25:
+                _working_copy["cat_timer"] = 0
+                num_cats = len(_working_copy["farm"].get("cats", [])) + len(_working_copy["decor"].get("cats", []))
+                if num_cats > 0:
+                    bonus = num_cats * 25
+                    _working_copy["money"] += bonus
+                    _working_copy["last_msg"] = f"🐱 招財小貓在農莊中摸索，為您找到了 ${bonus} 金幣！"
             if _working_copy["time_left"] <= 0:
                 return apply_action(_working_copy, "start_night")
+
         elif _working_copy["phase"] == "night":
             _working_copy["time_left"] -= 1
             if _working_copy["time_left"] <= 0:
@@ -650,6 +677,61 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
             _working_copy["free_dog"] = False
             _working_copy["last_msg"] = "呼叫看門狗..."
 
+    elif action.startswith("place_cat_"):
+        if _working_copy.get("phase") != "day": return _working_copy
+        parts = action.split("_")
+        try: pos = (int(parts[2]), int(parts[3]))
+        except: return _working_copy
+        if _working_copy["money"] < 150: return _working_copy
+        if not _is_occupied(zstate, pos[0], pos[1]):
+            zstate["building_tasks"].append({"type": "cat", "pos": pos, "progress": 0, "max_progress": 2})
+            _working_copy["money"] -= 150
+            _working_copy["last_msg"] = "領養了招財小貓！"
+
+    elif action.startswith("place_goose_"):
+        if _working_copy.get("phase") != "day": return _working_copy
+        parts = action.split("_")
+        try: pos = (int(parts[2]), int(parts[3]))
+        except: return _working_copy
+        if _working_copy["money"] < 220: return _working_copy
+        if not _is_occupied(zstate, pos[0], pos[1]):
+            zstate["building_tasks"].append({"type": "goose", "pos": pos, "progress": 0, "max_progress": 2})
+            _working_copy["money"] -= 220
+            _working_copy["last_msg"] = "召喚了暴躁警戒鵝！"
+
+    elif action.startswith("place_sheep_"):
+        if _working_copy.get("phase") != "day": return _working_copy
+        parts = action.split("_")
+        try: pos = (int(parts[2]), int(parts[3]))
+        except: return _working_copy
+        if _working_copy["money"] < 260: return _working_copy
+        if not _is_occupied(zstate, pos[0], pos[1]):
+            zstate["building_tasks"].append({"type": "sheep", "pos": pos, "progress": 0, "max_progress": 2})
+            _working_copy["money"] -= 260
+            _working_copy["last_msg"] = "安置了棉花守護羊！"
+
+    elif action.startswith("place_bull_"):
+        if _working_copy.get("phase") != "day": return _working_copy
+        parts = action.split("_")
+        try: pos = (int(parts[2]), int(parts[3]))
+        except: return _working_copy
+        if _working_copy["money"] < 350: return _working_copy
+        if not _is_occupied(zstate, pos[0], pos[1]):
+            zstate["building_tasks"].append({"type": "bull", "pos": pos, "progress": 0, "max_progress": 2})
+            _working_copy["money"] -= 350
+            _working_copy["last_msg"] = "派出了鐵壁戰鬥牛！"
+
+    elif action.startswith("place_owl_"):
+        if _working_copy.get("phase") != "day": return _working_copy
+        parts = action.split("_")
+        try: pos = (int(parts[2]), int(parts[3]))
+        except: return _working_copy
+        if _working_copy["money"] < 280: return _working_copy
+        if not _is_occupied(zstate, pos[0], pos[1]):
+            zstate["building_tasks"].append({"type": "owl", "pos": pos, "progress": 0, "max_progress": 2})
+            _working_copy["money"] -= 280
+            _working_copy["last_msg"] = "放飛了夜行守護鳥！"
+
     elif action.startswith("click_"):
         parts = action.split("_")
         try: pos = (float(parts[1]), float(parts[2]))
@@ -710,6 +792,22 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
         elif pos in zstate.get("dogs", []):
             zstate["dogs"].remove(pos)
             _working_copy["last_msg"] = "收回了看門狗！"
+        elif pos in zstate.get("cats", []):
+            zstate["cats"].remove(pos)
+            _working_copy["last_msg"] = "收回了招財小貓！"
+        elif pos in zstate.get("geese", []):
+            zstate["geese"].remove(pos)
+            _working_copy["last_msg"] = "收回了警戒鵝！"
+        elif pos in zstate.get("sheeps", []):
+            zstate["sheeps"].remove(pos)
+            if pos in zstate.get("sheep_hp", {}): del zstate["sheep_hp"][pos]
+            _working_copy["last_msg"] = "收回了守護羊！"
+        elif pos in zstate.get("bulls", []):
+            zstate["bulls"].remove(pos)
+            _working_copy["last_msg"] = "收回了戰鬥牛！"
+        elif pos in zstate.get("owls", []):
+            zstate["owls"].remove(pos)
+            _working_copy["last_msg"] = "收回了守護鳥！"
         elif pos in zstate.get("trees", []):
             _working_copy["last_msg"] = "樹木是景觀，無法用鐵鏟移除！"
         elif pos in zstate.get("rocks", []):
@@ -719,6 +817,7 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
             if tasks:
                 zstate["building_tasks"].remove(tasks[0])
                 _working_copy["last_msg"] = "取消了建造！"
+
 
     return _working_copy
 
@@ -952,6 +1051,13 @@ def _night_tick_thief(state):
                     dist_y = target[1] - ty
                     length = math.hypot(dist_x, dist_y)
                     speed = 0.5
+                    if farm.get("enemy_slow_ticks", 0) > 0:
+                        speed *= 0.5
+                        farm["enemy_slow_ticks"] -= 1
+                    if farm.get("enemy_stun_ticks", 0) > 0:
+                        farm["enemy_stun_ticks"] -= 1
+                        speed = 0
+
 
                     next_x = tx + (dist_x / length) * speed if length > 0 else tx
                     next_y = ty + (dist_y / length) * speed if length > 0 else ty
@@ -1105,6 +1211,13 @@ def _night_tick_boar(state):
                 dist_y = target[1] - by
                 length = math.hypot(dist_x, dist_y)
                 speed = 0.6  # Boars run faster
+                if decor.get("enemy_slow_ticks", 0) > 0:
+                    speed *= 0.5
+                    decor["enemy_slow_ticks"] -= 1
+                if decor.get("enemy_stun_ticks", 0) > 0:
+                    decor["enemy_stun_ticks"] -= 1
+                    speed = 0
+
 
                 fence_hit = None
                 for f in decor.get("fences", []):
@@ -1197,15 +1310,18 @@ def _night_tick_boar(state):
 
 def _process_zone_dogs(zone, enemy_key):
     """enemy_key is 'thief' for the farm map, 'boar' for the decor map —
-    dogs only ever fight the threat that exists in their own zone."""
+    defenders only ever fight the threat that exists in their own zone."""
     pos_key = f"{enemy_key}_pos"
     hp_key = f"{enemy_key}_hp"
     iframes_key = f"{enemy_key}_iframes"
 
+    enemy_pos = zone.get(pos_key)
+    has_enemy = enemy_pos is not None and zone.get(hp_key, 0) > 0
+
+    # 1. 🐕 看門狗 (Guard Dogs): 均衡戰士, 速度 1.0, 傷害 1
     new_dogs = []
-    for dx, dy in zone["dogs"]:
-        enemy_pos = zone.get(pos_key)
-        if enemy_pos is not None and zone.get(hp_key, 0) > 0:
+    for dx, dy in zone.get("dogs", []):
+        if has_enemy:
             tx, ty = enemy_pos
             if _rects_overlap(dx, dy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
@@ -1224,6 +1340,136 @@ def _process_zone_dogs(zone, enemy_key):
         else:
             new_dogs.append((dx, dy))
     zone["dogs"] = new_dogs
+
+    # 2. 🐱 招財小貓 (Agile Cats): 極速抓瞎減速, 速度 1.8, 傷害 1, 附加減速 50%
+    new_cats = []
+    for cx, cy in zone.get("cats", []):
+        if has_enemy:
+            tx, ty = enemy_pos
+            if _rects_overlap(cx, cy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
+                if zone.get(iframes_key, 0) <= 0:
+                    zone[hp_key] -= 1
+                    zone[iframes_key] = 20
+                    zone["enemy_slow_ticks"] = 90  # 減速 3 秒
+                new_cats.append((cx, cy))
+            else:
+                step = 1.8
+                dist_x = tx - cx
+                dist_y = ty - cy
+                length = math.hypot(dist_x, dist_y)
+                if length > 0:
+                    new_cats.append((cx + (dist_x / length) * step, cy + (dist_y / length) * step))
+                else:
+                    new_cats.append((cx, cy))
+        else:
+            new_cats.append((cx, cy))
+    zone["cats"] = new_cats
+
+    # 3. 🪿 暴躁警戒鵝 (Battle Geese): 領域擊退, 速度 1.2, 傷害 1, 擊退 15 像素
+    new_geese = []
+    for gx, gy in zone.get("geese", []):
+        if has_enemy:
+            tx, ty = enemy_pos
+            if _rects_overlap(gx, gy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
+                if zone.get(iframes_key, 0) <= 0:
+                    zone[hp_key] -= 1
+                    zone[iframes_key] = 20
+                    # 擊退衝撞
+                    k_dx = tx - gx
+                    k_dy = ty - gy
+                    k_len = math.hypot(k_dx, k_dy) or 1.0
+                    zone[pos_key] = (tx + (k_dx / k_len) * 15, ty + (k_dy / k_len) * 15)
+                new_geese.append((gx, gy))
+            else:
+                step = 1.2
+                dist_x = tx - gx
+                dist_y = ty - gy
+                length = math.hypot(dist_x, dist_y)
+                if length > 0:
+                    new_geese.append((gx + (dist_x / length) * step, gy + (dist_y / length) * step))
+                else:
+                    new_geese.append((gx, gy))
+        else:
+            new_geese.append((gx, gy))
+    zone["geese"] = new_geese
+
+    # 4. 🐑 棉花守護羊 (Cotton Sheep): 羊毛護盾 + 嘲諷吸收傷害, 速度 0.6
+    new_sheeps = []
+    for sx, sy in zone.get("sheeps", []):
+        if has_enemy:
+            tx, ty = enemy_pos
+            dist_to_sheep = math.hypot(tx - sx, ty - sy)
+            if dist_to_sheep < 35 and zone.get(iframes_key, 0) <= 0:
+                # 吸引敵人仇恨與防禦
+                hp = zone.setdefault("sheep_hp", {}).get((sx, sy), 10) - 1
+                zone["sheep_hp"][(sx, sy)] = hp
+                zone[iframes_key] = 25
+                if hp > 0:
+                    new_sheeps.append((sx, sy))
+                else:
+                    if (sx, sy) in zone.get("sheep_hp", {}):
+                        del zone["sheep_hp"][(sx, sy)]
+            else:
+                step = 0.6
+                dist_x = tx - sx
+                dist_y = ty - sy
+                length = math.hypot(dist_x, dist_y)
+                if length > 0:
+                    new_sheeps.append((sx + (dist_x / length) * step, sy + (dist_y / length) * step))
+                else:
+                    new_sheeps.append((sx, sy))
+        else:
+            new_sheeps.append((sx, sy))
+    zone["sheeps"] = new_sheeps
+
+    # 5. 🐮 鐵壁戰鬥牛 (Iron Bulls): 巨角重擊, 速度 0.8, 雙倍傷害 (2 dmg)
+    new_bulls = []
+    for bx, by in zone.get("bulls", []):
+        if has_enemy:
+            tx, ty = enemy_pos
+            if _rects_overlap(bx, by, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
+                if zone.get(iframes_key, 0) <= 0:
+                    zone[hp_key] -= 2  # 雙倍重擊傷害！
+                    zone[iframes_key] = 25
+                new_bulls.append((bx, by))
+            else:
+                step = 0.8
+                dist_x = tx - bx
+                dist_y = ty - by
+                length = math.hypot(dist_x, dist_y)
+                if length > 0:
+                    new_bulls.append((bx + (dist_x / length) * step, by + (dist_y / length) * step))
+                else:
+                    new_bulls.append((bx, by))
+        else:
+            new_bulls.append((bx, by))
+    zone["bulls"] = new_bulls
+
+    # 6. 🦉 夜行守護鳥 (Night Owls): 空中高速俯衝, 速度 2.2, 傷害 1, 30% 驚嚇暈眩
+    new_owls = []
+    for ox, oy in zone.get("owls", []):
+        if has_enemy:
+            tx, ty = enemy_pos
+            if _rects_overlap(ox, oy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
+                if zone.get(iframes_key, 0) <= 0:
+                    zone[hp_key] -= 1
+                    zone[iframes_key] = 20
+                    if random.random() < 0.30:
+                        zone["enemy_stun_ticks"] = 30  # 暈眩 1 秒
+                new_owls.append((ox, oy))
+            else:
+                step = 2.2
+                dist_x = tx - ox
+                dist_y = ty - oy
+                length = math.hypot(dist_x, dist_y)
+                if length > 0:
+                    new_owls.append((ox + (dist_x / length) * step, oy + (dist_y / length) * step))
+                else:
+                    new_owls.append((ox, oy))
+        else:
+            new_owls.append((ox, oy))
+    zone["owls"] = new_owls
+
 
 
 def is_terminal(state: GameState) -> bool:

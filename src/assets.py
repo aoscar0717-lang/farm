@@ -74,18 +74,12 @@ def load_image(filename, target_size=(ITEM_PX, ITEM_PX)):
 
 _register_sprite("thief", "Farm RPG FREE 16x16 - Tiny Asset Pack/Character/Walk.png", 0, 0, 32, 32, (60, 60))
 _register_sprite("fence", "Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png", 3, 0, 16, 16, (ITEM_PX, ITEM_PX))
-
-# dog: Farm Animals/Male Cow Brown.png is -- despite the folder name --
-# visually a cow (horns, brown/white spotted coat), not a dog; confirmed by
-# rendering the full sheet. The world map already draws an actual dog for
-# "dogs" (Goldie pack), so the shop icon is repointed to that same sheet/
-# frame instead of a new asset, per "同一個遊戲物件在不同 UI/Gameplay 場景
-# 中看起來是同一個東西" -- shop icon and world sprite are now pixel-for-
-# pixel the same source.
 _register_sprite("dog", "Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png", 4, 0, 32, 40, (60, 60))
 _register_sprite("cat", "Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png", 0, 0, 16, 16, (60, 60))
-_register_sprite("goose", "Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Chicken Red.png", 0, 0, 16, 16, (60, 60))
-_register_sprite("owl", "Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Chicken Blonde  Green.png", 0, 0, 16, 16, (60, 60))
+_register_sprite("goose", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_duck_01_strip4.png", 0, 0, 16, 16, (60, 60))
+_register_sprite("sheep", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, 0, 16, 16, (60, 60))
+_register_sprite("bull", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png", 0, 0, 32, 32, (60, 60))
+_register_sprite("owl", "Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png", 0, 0, 16, 16, (60, 60))
 _register_sprite("scarecrow", "Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, 13, 16, 16, (60, 60))
 _register_sprite("strawberry", "Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, 5, 16, 16, (60, 60))
 _register_sprite("radish", "Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 3, 5, 16, 16, (60, 60))

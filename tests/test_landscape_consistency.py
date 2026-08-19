@@ -253,7 +253,8 @@ class TestShopItemIds(unittest.TestCase):
 
     def test_seed_and_def_tabs_untouched(self):
         self.assertEqual(ui_layout.SHOP_ITEM_IDS["seed"], ["radish", "carrot", "pumpkin"])
-        self.assertEqual(ui_layout.SHOP_ITEM_IDS["def"], ["fence", "trap", "dog"])
+        self.assertEqual(ui_layout.SHOP_ITEM_IDS["def"], ["fence", "trap", "dog", "cat", "goose", "sheep", "bull", "owl"])
+
 
 
 class TestDecorInfoAndNames(unittest.TestCase):

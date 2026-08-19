@@ -152,11 +152,12 @@ def _handle_world_click(state, mx, my, current_tool, camera_x, camera_y, active_
             state = apply_action(state, f"build_fence_{gx}_{gy}", active_zone)
         elif current_tool == "trap":
             state = apply_action(state, f"place_trap_{gx}_{gy}", active_zone)
-        elif current_tool == "dog":
-            state = apply_action(state, f"place_dog_{gx}_{gy}", active_zone)
+        elif current_tool in ["dog", "cat", "goose", "sheep", "bull", "owl"]:
+            state = apply_action(state, f"place_{current_tool}_{gx}_{gy}", active_zone)
     else:
         gx, gy = world_x, world_y
         state = apply_action(state, f"click_{gx}_{gy}", active_zone)
+
 
     return state
 
@@ -168,9 +169,6 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
     dispatch order between them -- mechanical extraction, same behavior."""
     if is_terminal(state):
         return state, current_tool, shop_open, active_tab, active_zone
-
-    if event.button == 3:  # Right click to cancel tool
-        return state, None, shop_open, active_tab, active_zone
 
     if event.button != 1:
         return state, current_tool, shop_open, active_tab, active_zone
@@ -185,14 +183,6 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
     if hotbar_handled:
         return state, current_tool, shop_open, active_tab, active_zone
 
-    # The Tutorial Sidebar (src/ui.py::draw_tutorial_sidebar) sits on top of
-    # the right edge of the world -- without this check, a click meant to
-    # land on the sidebar panel would fall through to _handle_world_click
-    # and use whatever tool is equipped on the world tile underneath it
-    # (section 一's explicit "側欄區域不可讓滑鼠點擊穿透到世界" requirement).
-    # The sidebar itself has no interactive elements yet, so "handled" here
-    # just means "swallowed, do nothing" -- same shape as hotbar padding
-    # clicks above.
     if ui_layout.tutorial_sidebar_rect().collidepoint(mx, my):
         return state, current_tool, shop_open, active_tab, active_zone
 
@@ -202,6 +192,7 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
 
     state = _handle_world_click(state, mx, my, current_tool, camera_x, camera_y, active_zone)
     return state, current_tool, shop_open, active_tab, active_zone
+
 
 
 def handle_keyboard_events(state, event, current_tool, shop_open, active_zone):

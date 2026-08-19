@@ -92,23 +92,19 @@ def _draw_top_panel_stats(screen, state, active_zone):
     text_surf = font_large.render(phase_text, True, text_color)
     screen.blit(text_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_PRIMARY_Y))
 
-    # ── SECONDARY: zone dog count ─────────────────────────────────────────
-    # The one stat actually worth checking during play (how well-guarded
-    # is the zone I'm looking at), so it keeps its own line and a brighter
-    # color instead of being buried mid-string among lifetime totals.
-    zone_dogs = len(state.get(active_zone, {}).get('dogs', []))
-    dog_stats = f"狗 ({'農田區' if active_zone == 'farm' else '佈置區'}): {zone_dogs}/10"
+    # ── SECONDARY: zone defender count ─────────────────────────────────────────
+    zone_data = state.get(active_zone, {})
+    total_defenders = len(zone_data.get('dogs', [])) + len(zone_data.get('cats', [])) + len(zone_data.get('geese', [])) + len(zone_data.get('sheeps', [])) + len(zone_data.get('bulls', [])) + len(zone_data.get('owls', []))
+    dog_stats = f"守護動物 ({'農田區' if active_zone == 'farm' else '佈置區'}): {total_defenders}/15"
     dog_surf = font_small.render(dog_stats, True, ui_layout.COLOR_STAT_SECONDARY)
     screen.blit(dog_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_SECONDARY_Y))
 
     # ── TERTIARY: prosperity / farm level / lifetime totals ────────────────
-    # Low-emphasis background info -- there's no rent/Game Over anymore, so
-    # "累積擊退敵人數" is one of the long-run numbers that keeps climbing
-    # across an endless run instead of resetting; it doesn't need PRIMARY
-    # or SECONDARY visual weight to be useful.
     lifetime_stats = f"繁榮度: {state.get('prosperity_score',0)}   農場等級: Lv{state.get('farm_level',1)}   累積擊退敵人: {state.get('enemies_defeated',0)}"
     lifetime_surf = font_tiny.render(lifetime_stats, True, ui_layout.COLOR_STAT_TERTIARY)
     screen.blit(lifetime_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_TERTIARY_Y))
+
+
 
     # Money (top-right) -- no more rent, so this is just the current balance.
     # Anchored below the shop button (ui_layout.money_label_pos) instead of
@@ -262,8 +258,14 @@ SHOP_ITEM_DETAILS = {
     # here. Descriptions rewritten to match each item's real behavior
     # instead of a generic placeholder.
     "fence": {"name": "木圍欄", "price": 20, "desc": "HP100，阻擋敵人，受損後被突破"},
-    "trap":  {"name": "地刺陷阱", "price": 50, "desc": "敵人踩到觸發，一次性"},
-    "dog":   {"name": "看門狗", "price": 200, "desc": "自動攻擊靠近敵人，不會陣亡"},  # price overridden below when free_dog
+    "trap":  {"name": "捕獸夾", "price": 50, "desc": "敵人踩到觸發，一次性重創"},
+    "dog":   {"name": "看門狗", "price": 200, "desc": "自動巡邏追擊，均衡型守護者"},  # price overridden below when free_dog
+    "cat":   {"name": "招財小貓", "price": 150, "desc": "極速爪擊減速敵人，白天產金幣"},
+    "goose": {"name": "暴躁警戒鵝", "price": 220, "desc": "領地意識極強，憤怒衝撞擊退敵人"},
+    "sheep": {"name": "棉花守護羊", "price": 260, "desc": "10HP羊毛護盾，主動吸引敵人仇恨"},
+    "bull":  {"name": "鐵壁戰鬥牛", "price": 350, "desc": "體型巨大威嚴，巨角挑擊雙倍重傷"},
+    "owl":   {"name": "夜行守護鳥", "price": 280, "desc": "空中高速俯衝，有機會嚇停敵人"},
+
     "stone_path": {"name": "石板路",   "price": 20,  "desc": "繁榮度 +5"},
     "flower":     {"name": "鮮花盆栽", "price": 50,  "desc": "繁榮度 +15"},
     "bench":      {"name": "木製長椅", "price": 100, "desc": "繁榮度 +35"},
@@ -421,6 +423,7 @@ def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
         _draw_shop_sell_tab(screen, state, mouse_pos, geo)
     else:
         _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo)
+
 
 
 def _wrap_line_to_width(text, max_width):
