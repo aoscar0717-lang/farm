@@ -291,6 +291,17 @@ class FloatingText:
 # ==========================================
 # 扁平操作卡片 (Action Card)
 # ==========================================
+# 分類色，用來給側邊商店的圖示底框、選中卡片的左側色條上色，
+# 跟舊版側欄「作物=綠/景觀=紫/設施=藍」的配色邏輯一致，只是從純文字
+# 說明搬到卡片本身上色。
+SHOP_TAB_TINTS = {
+    "CROPS": (76, 175, 80),      # C_GREEN
+    "DECO": (156, 39, 176),      # C_PURPLE
+    "DEFENSE": (33, 150, 243),   # C_BLUE
+    "TOOLS": (230, 81, 0),       # 深橘，跟主動工具（手電筒/哨子）的警示感呼應
+}
+
+
 class ActionCard:
     def __init__(self, action_id: str, label: str, cost_text: str, tab_id: str, asset_key: str, rect: pygame.Rect):
         self.action_id = action_id
@@ -304,32 +315,56 @@ class ActionCard:
         self.lock_reason = ""
 
     def draw(self, surface, is_selected: bool, loader: AssetLoader):
+        tint = SHOP_TAB_TINTS.get(self.tab_id, C_ORANGE)
+
+        # 輕微投影：往右下偏移畫一塊半透明深色，營造卡片浮起的立體感。
+        shadow = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(shadow, (20, 25, 30, 35), shadow.get_rect(), border_radius=10)
+        surface.blit(shadow, (self.rect.x + 2, self.rect.y + 3))
+
         bg_col = (255, 255, 255)
         if self.is_locked:
-            bg_col = (245, 245, 245)
+            bg_col = (243, 243, 243)
         elif is_selected:
-            bg_col = (255, 248, 225)
+            bg_col = (255, 249, 230)
         elif self.is_hovered:
-            bg_col = (250, 250, 250)
+            bg_col = (250, 250, 252)
 
-        border_col = C_ORANGE if is_selected else ((200, 200, 200) if not self.is_hovered else (100, 100, 100))
-        border_w = 3 if is_selected else 1
+        pygame.draw.rect(surface, bg_col, self.rect, border_radius=10)
 
-        pygame.draw.rect(surface, bg_col, self.rect, border_radius=8)
-        pygame.draw.rect(surface, border_col, self.rect, width=border_w, border_radius=8)
+        border_col = C_ORANGE if is_selected else ((215, 215, 220) if not self.is_hovered else tint)
+        border_w = 2 if (is_selected or self.is_hovered) else 1
+        pygame.draw.rect(surface, border_col, self.rect, width=border_w, border_radius=10)
 
+        # 選中時左側加一條實色色條，跟分類色呼應，一眼就能認出裝備中的項目。
+        if is_selected:
+            accent = pygame.Rect(self.rect.x, self.rect.y + 6, 4, self.rect.height - 12)
+            pygame.draw.rect(surface, C_ORANGE, accent, border_radius=2)
+
+        # 圖示放進一塊淡色圓角底框裡，而不是直接貼在卡片背景上，質感更豐富。
+        icon_bg = pygame.Rect(self.rect.x + 8, self.rect.y + (self.rect.height - 50) // 2, 50, 50)
+        icon_tint = tuple(min(255, c + 165) for c in tint)
+        pygame.draw.rect(surface, icon_tint if not self.is_locked else (232, 232, 232), icon_bg, border_radius=10)
         icon_surf = loader.get(self.asset_key)
         if icon_surf:
-            surface.blit(icon_surf, (self.rect.x + 4, self.rect.y + 3))
+            if self.is_locked:
+                icon_surf = icon_surf.copy()
+                icon_surf.set_alpha(110)
+            surface.blit(icon_surf, icon_bg.topleft)
 
+        text_x = icon_bg.right + 12
         lbl_col = C_TEXT_MUTED if self.is_locked else C_TEXT_MAIN
-        surface.blit(FONT_MD.render(self.label, True, lbl_col), (self.rect.x + 54, self.rect.y + 6))
+        lbl_y = self.rect.y + (self.rect.height // 2 - 22 if self.cost_text else self.rect.height // 2 - 10)
+        surface.blit(FONT_MD.render(self.label, True, lbl_col), (text_x, lbl_y))
 
-        cost_col = C_RED if self.is_locked else ((230, 81, 0) if self.cost_text else C_TEXT_MUTED)
-        surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (self.rect.x + 54, self.rect.y + 27))
+        if self.cost_text:
+            cost_col = C_RED if self.is_locked else (230, 81, 0)
+            surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
 
         if self.is_locked:
-            surface.blit(FONT_XS.render("🔒", True, C_RED), (self.rect.right - 18, self.rect.y + 6))
+            lock_surf = FONT_XS.render("🔒", True, C_RED)
+            if lock_surf.get_width() > 0:
+                surface.blit(lock_surf, (self.rect.right - 22, self.rect.y + 8))
 
 
 # ==========================================
@@ -382,12 +417,18 @@ class NightwatchFarmApp:
         self._init_ui()
 
     def _init_ui(self):
+        # 商店已經搬到右側面板（原本「即時狀態探測」的位置），窄面板
+        # (294px 寬) 放不下原本橫向的長標籤，改成 2x2 格的短標籤。
+        # rect 先放 Rect(0,0,0,0) 佔位，實際位置由 _layout_shop_tabs()
+        # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
-            ("CROPS", "🌾 農田耕作 (10種)", pygame.Rect(24, 650, 175, 36)),
-            ("DECO", "🌸 莊園景觀 (13種)", pygame.Rect(205, 650, 175, 36)),
-            ("DEFENSE", "🛡️ 防禦與寵物 (6種)", pygame.Rect(386, 650, 185, 36)),
-            ("TOOLS", "🛠️ 主動戰術工具 (4種)", pygame.Rect(577, 650, 185, 36)),
+            ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (13)", pygame.Rect(0, 0, 0, 0)),
+            ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
+            ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
+        # 商店改成側邊直向可捲動清單，捲動位置每個分頁各自獨立記憶。
+        self.shop_scroll = {"CROPS": 0, "DECO": 0, "DEFENSE": 0, "TOOLS": 0}
 
         self.cards_by_tab = {
             "CROPS": [
@@ -434,22 +475,14 @@ class NightwatchFarmApp:
 
         }
 
+        # 側邊商店是單欄直向清單，每張卡片的實際 y 座標要扣掉捲動位移，
+        # 是動態值不是固定值，這裡先用佔位 Rect，實際位置交給
+        # _layout_shop_list()（跟商店面板背景、點擊判定共用同一份幾何
+        # 常數，畫面畫哪裡跟滑鼠點得到哪裡保證是同一組數字）。
         self.action_cards = []
-        start_x = 24
-
-
         for tab_id, items in self.cards_by_tab.items():
-            count = len(items)
-            cols_per_row = 7 if count > 10 else 5
-            card_w = 170 if count > 10 else 235
-            card_h = 50
-            
-            for i, (act_id, lbl, cost, asset_key) in enumerate(items):
-                row = i // cols_per_row
-                col = i % cols_per_row
-                rx = start_x + col * (card_w + 8)
-                ry = 696 if row == 0 else 746
-                r = pygame.Rect(rx, ry, card_w, card_h)
+            for act_id, lbl, cost, asset_key in items:
+                r = pygame.Rect(0, 0, 0, 0)
                 self.action_cards.append(ActionCard(act_id, lbl, cost, tab_id, asset_key, r))
 
     def _create_display(self, fullscreen: bool):
@@ -474,6 +507,8 @@ class NightwatchFarmApp:
                     self._handle_mouse_down(event)
                 elif event.type == pygame.MOUSEMOTION:
                     self._handle_mouse_move(event)
+                elif event.type == pygame.MOUSEWHEEL:
+                    self._handle_mouse_wheel(event)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN and self.show_intro:
                         self.show_intro = False
@@ -547,6 +582,22 @@ class NightwatchFarmApp:
             self.hovered_grid = (gx, gy)
         else:
             self.hovered_grid = None
+
+    def _handle_mouse_wheel(self, event):
+        """商店清單捲動。只在滑鼠停在清單範圍內時生效，避免在地圖上
+        滾滑鼠意外捲動到看不見的商店。"""
+        area = self._shop_list_area()
+        if not area.collidepoint(self.mouse_pos):
+            return
+        items = [c for c in self.action_cards if c.tab_id == self.active_tab]
+        max_scroll = self._shop_scroll_bounds(len(items))
+        if max_scroll <= 0:
+            return
+        current = self.shop_scroll.get(self.active_tab, 0)
+        # event.y 一次滾動通常是 ±1，乘上單行高度感覺比較像「滾一格」
+        # 而不是每次只移動 1px。
+        new_scroll = current - event.y * 40
+        self.shop_scroll[self.active_tab] = max(0, min(max_scroll, new_scroll))
 
     def _handle_mouse_down(self, event):
         mx, my = event.pos
@@ -639,7 +690,7 @@ class NightwatchFarmApp:
             self.sound.play("build")
             return
 
-        # 分頁標籤
+        # 分頁標籤（點擊切換分頁時捲動歸零，避免新分頁一開就是捲到一半的畫面）
         for tab_id, label, rect in self.tab_buttons:
             if rect.collidepoint(mx, my):
                 self.active_tab = tab_id
@@ -1041,8 +1092,7 @@ class NightwatchFarmApp:
             flash_s.fill((255, 255, 220, flash_alpha))
             self.screen.blit(flash_s, (0, 0))
 
-        self._render_sidebar()
-        self._render_tabbed_toolbar()
+        self._render_shop_panel()
 
         if self.show_intro:
             self._render_story_modal()
@@ -1072,7 +1122,11 @@ class NightwatchFarmApp:
 
         btn_resume = pygame.Rect(mx + (modal_w - 220) // 2, my + 150, 220, 52)
         pygame.draw.rect(self.screen, C_GREEN, btn_resume, border_radius=8)
-        resume_txt = FONT_MD.render("▶ 繼續", True, C_WHITE)
+        # 用「恢復」而非「繼續」：後者的「繼」字不在專案自帶的精簡字型子集
+        # (assets/fonts/NotoSansTC-GameSubset.otf) 收錄範圍內，會顯示成缺字
+        # 方塊「□」。P 鍵暫停/恢復本來就用「恢復」這個詞（見上方 run() 的
+        # K_p 處理），這裡沿用同一個詞，語意一致，也保證字型一定有收錄。
+        resume_txt = FONT_MD.render("▶ 恢復", True, C_WHITE)
         self.screen.blit(resume_txt, (btn_resume.centerx - resume_txt.get_width() // 2, btn_resume.centery - resume_txt.get_height() // 2))
 
         btn_restart = pygame.Rect(mx + (modal_w - 220) // 2, my + 216, 220, 52)
@@ -1420,81 +1474,117 @@ class NightwatchFarmApp:
             pygame.draw.rect(self.screen, (30, 30, 30), bar_rect, border_radius=2)
             pygame.draw.rect(self.screen, C_RED, (bar_rect.x, bar_rect.y, int(bar_w * hp_ratio), 5), border_radius=2)
 
-    def _render_sidebar(self):
+    # ==========================================
+    # 側邊商店面板 -- 幾何常數集中在這三個 helper，畫面渲染與滑鼠點擊
+    # 判定都呼叫同一份，位置不會不同步。
+    # ==========================================
+    def _shop_panel_rect(self) -> pygame.Rect:
         sb_x = GRID_X + self.game.width * CELL_SIZE + 18
         sb_w = SCREEN_WIDTH - sb_x - 24
-        sb_rect = pygame.Rect(sb_x, GRID_Y, sb_w, self.game.height * CELL_SIZE)
+        panel_h = SCREEN_HEIGHT - GRID_Y - 24
+        return pygame.Rect(sb_x, GRID_Y, sb_w, panel_h)
 
-        pygame.draw.rect(self.screen, (255, 255, 255), sb_rect, border_radius=12)
-        pygame.draw.rect(self.screen, C_CARD_BORDER, sb_rect, width=1, border_radius=12)
+    def _layout_shop_tabs(self):
+        """回傳 [(tab_id, label, rect), ...]，面板內 2x2 分頁格。"""
+        panel = self._shop_panel_rect()
+        pad = 14
+        gap = 8
+        tab_w = (panel.width - 2 * pad - gap) // 2
+        tab_h = 32
+        top = panel.y + 44 + 12
+        out = []
+        for i, (tab_id, label, _old_rect) in enumerate(self.tab_buttons):
+            col = i % 2
+            row = i // 2
+            x = panel.x + pad + col * (tab_w + gap)
+            y = top + row * (tab_h + 6)
+            out.append((tab_id, label, pygame.Rect(x, y, tab_w, tab_h)))
+        return out
 
-        self.screen.blit(FONT_MD.render("🔍 即時狀態探測", True, C_TEXT_MAIN), (sb_x + 16, GRID_Y + 14))
+    def _shop_list_area(self) -> pygame.Rect:
+        """分頁格下方、可捲動的卡片清單可視範圍（不含捲動位移）。"""
+        panel = self._shop_panel_rect()
+        tabs_bottom = panel.y + 44 + 12 + 2 * 32 + 6
+        top = tabs_bottom + 14
+        pad = 14
+        return pygame.Rect(panel.x + pad, top, panel.width - 2 * pad - 8, panel.bottom - 14 - top)
 
-        info_y = GRID_Y + 40
-        if self.hovered_grid:
-            gx, gy = self.hovered_grid
-            tile = self.game.get_tile(gx, gy)
-            zone_str = "🌾 中央農田" if tile.zone == ZoneType.FARM_ZONE else "🌸 四周莊園"
-            self.screen.blit(FONT_SM.render(f"座標: ({gx}, {gy}) | {zone_str}", True, C_TEXT_MUTED), (sb_x + 16, info_y))
-            info_y += 22
+    def _layout_shop_list(self):
+        """把目前分頁裡的卡片依捲動位移排成一欄，回傳這份清單本身，
+        同時把每張卡片的 .rect 更新成畫面上（可能捲出可視範圍外）的
+        實際位置 -- 繪製跟點擊判定都讀這個屬性，兩者永遠一致。"""
+        area = self._shop_list_area()
+        row_h = 64 + 8
+        scroll = self.shop_scroll.get(self.active_tab, 0)
+        items = [c for c in self.action_cards if c.tab_id == self.active_tab]
+        for i, card in enumerate(items):
+            y = area.y + i * row_h - scroll
+            card.rect = pygame.Rect(area.x, y, area.width, 64)
+        return items
 
-            if (gx, gy) == MAP_CONFIG["VAULT_POS"] and tile.crop is None:
-                self.screen.blit(FONT_SM.render("🏛️ 中央農莊金庫 (若農田無作物將受襲擊)", True, (230, 81, 0)), (sb_x + 16, info_y))
-                info_y += 20
-            elif tile.crop:
-                st_map = {"SEED": "種子", "SPROUT": "幼苗", "GROWING": "生長中", "MATURE": "✨ 已成熟(點擊採收)"}
-                st_name = st_map.get(tile.crop.stage.name, "未知")
-                moon_str = " (🌕月光滋養+50%)" if tile.crop.is_moonlight_boosted else ""
-                self.screen.blit(FONT_SM.render(f"作物: {tile.crop.config['name']} ({st_name}){moon_str}", True, C_GREEN), (sb_x + 16, info_y))
-                info_y += 20
-                if not tile.crop.is_mature:
-                    rem = max(0.0, tile.crop.grow_time - tile.crop.growth_timer)
-                    self.screen.blit(FONT_XS.render(f"生長剩餘: {rem:.1f}s (可用水壺加速)", True, C_TEXT_MUTED), (sb_x + 16, info_y))
-                    info_y += 18
-            elif tile.decoration:
-                self.screen.blit(FONT_SM.render(f"景觀: {tile.decoration.config['name']} (+{tile.decoration.prosperity_score} 繁榮)", True, C_PURPLE), (sb_x + 16, info_y))
-                info_y += 20
-            elif tile.defense:
-                self.screen.blit(FONT_SM.render(f"設施: {tile.defense.config['name']}", True, C_BLUE), (sb_x + 16, info_y))
-                info_y += 20
-            else:
-                self.screen.blit(FONT_SM.render("空地（可耕作或佈置）", True, C_TEXT_MUTED), (sb_x + 16, info_y))
-                info_y += 20
-        else:
-            self.screen.blit(FONT_SM.render("請將游標移至地圖上查看", True, C_TEXT_MUTED), (sb_x + 16, info_y))
-            info_y += 24
+    def _shop_scroll_bounds(self, item_count: int) -> int:
+        area = self._shop_list_area()
+        row_h = 64 + 8
+        total_h = item_count * row_h - 8 if item_count else 0
+        return max(0, total_h - area.height)
 
-        pygame.draw.line(self.screen, (230, 235, 240), (sb_x + 12, info_y + 4), (sb_x + sb_w - 12, info_y + 4))
-        info_y += 16
+    def _render_shop_panel(self):
+        panel = self._shop_panel_rect()
 
-        self.screen.blit(FONT_MD.render("📜 莊園防禦日誌", True, C_TEXT_MAIN), (sb_x + 16, info_y))
-        info_y += 26
+        # 淡淡的投影，跟卡片一致的浮起質感。
+        shadow = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+        pygame.draw.rect(shadow, (20, 25, 30, 30), shadow.get_rect(), border_radius=14)
+        self.screen.blit(shadow, (panel.x + 3, panel.y + 4))
 
-        for msg in reversed(self.log_messages[-10:]):
-            msg_col = C_RED if ("警告" in msg or "偷走" in msg or "洗劫" in msg or "血月" in msg or "失敗" in msg) else (C_GREEN if ("收成" in msg or "升級" in msg or "招財" in msg) else C_TEXT_MAIN)
-            m_surf = FONT_XS.render(msg[:28] + "..." if len(msg) > 28 else msg, True, msg_col)
-            self.screen.blit(m_surf, (sb_x + 16, info_y))
-            info_y += 20
+        pygame.draw.rect(self.screen, (255, 255, 255), panel, border_radius=14)
+        pygame.draw.rect(self.screen, C_CARD_BORDER, panel, width=1, border_radius=14)
 
-    def _render_tabbed_toolbar(self):
-        for tab_id, label, rect in self.tab_buttons:
+        # 深色標題橫幅，跟頂部 HUD 同一套配色 (C_NAVY_TOP + C_GOLD)，
+        # 讓商店面板一眼就能認出是同一套視覺語言，不是另外貼上去的東西。
+        header_rect = pygame.Rect(panel.x, panel.y, panel.width, 44)
+        pygame.draw.rect(self.screen, C_NAVY_TOP, header_rect, border_top_left_radius=14, border_top_right_radius=14)
+        title_surf = FONT_MD.render("莊園商店", True, C_GOLD)
+        self.screen.blit(title_surf, (header_rect.centerx - title_surf.get_width() // 2, header_rect.centery - title_surf.get_height() // 2))
+
+        # 2x2 分頁格
+        tabs = self._layout_shop_tabs()
+        self.tab_buttons = tabs
+        for tab_id, label, rect in tabs:
             is_active = (self.active_tab == tab_id)
-            bg_col = (255, 255, 255) if is_active else (225, 230, 235)
-            pygame.draw.rect(self.screen, bg_col, rect, border_top_left_radius=8, border_top_right_radius=8)
-            border_col = C_ORANGE if is_active else (200, 200, 200)
-            pygame.draw.rect(self.screen, border_col, rect, width=2 if is_active else 1, border_top_left_radius=8, border_top_right_radius=8)
-
+            tint = SHOP_TAB_TINTS.get(tab_id, C_ORANGE)
+            bg_col = (255, 255, 255) if is_active else (240, 242, 245)
+            pygame.draw.rect(self.screen, bg_col, rect, border_radius=8)
+            border_col = tint if is_active else (210, 212, 216)
+            pygame.draw.rect(self.screen, border_col, rect, width=2 if is_active else 1, border_radius=8)
             txt_col = C_TEXT_MAIN if is_active else C_TEXT_MUTED
-            t_surf = FONT_MD.render(label, True, txt_col)
+            t_surf = FONT_XS.render(label, True, txt_col)
             self.screen.blit(t_surf, (rect.centerx - t_surf.get_width() // 2, rect.centery - t_surf.get_height() // 2))
 
-        panel_rect = pygame.Rect(GRID_X, 686, SCREEN_WIDTH - 2 * GRID_X, 106)
-        pygame.draw.rect(self.screen, (255, 255, 255), panel_rect, border_radius=10)
-        pygame.draw.rect(self.screen, C_CARD_BORDER, panel_rect, width=1, border_radius=10)
+        # 分頁格跟卡片清單之間的分隔線
+        area = self._shop_list_area()
+        pygame.draw.line(self.screen, (230, 235, 240), (area.x, area.y - 8), (area.right, area.y - 8))
 
-        for card in self.action_cards:
-            if card.tab_id == self.active_tab:
-                card.draw(self.screen, is_selected=(self.selected_action == card.action_id), loader=self.loader)
+        # 可捲動的卡片清單：先用 set_clip 把畫面限制在清單可視範圍內，
+        # 捲出範圍的卡片畫出來也不會溢出面板底部。
+        items = self._layout_shop_list()
+        prev_clip = self.screen.get_clip()
+        self.screen.set_clip(area)
+        for card in items:
+            if card.rect.bottom < area.y or card.rect.top > area.bottom:
+                continue
+            card.draw(self.screen, is_selected=(self.selected_action == card.action_id), loader=self.loader)
+        self.screen.set_clip(prev_clip)
+
+        # 內容超出可視範圍才畫捲軸滑塊，提示「還能往下滑」。
+        max_scroll = self._shop_scroll_bounds(len(items))
+        if max_scroll > 0:
+            track = pygame.Rect(area.right + 4, area.y, 4, area.height)
+            pygame.draw.rect(self.screen, (225, 228, 232), track, border_radius=2)
+            scroll = self.shop_scroll.get(self.active_tab, 0)
+            thumb_h = max(24, int(area.height * area.height / (area.height + max_scroll)))
+            thumb_y = area.y + int((area.height - thumb_h) * (scroll / max_scroll))
+            thumb = pygame.Rect(track.x, thumb_y, 4, thumb_h)
+            pygame.draw.rect(self.screen, (170, 176, 184), thumb, border_radius=2)
 
     # ==========================================
     # 開場新手速成圖卡彈窗
