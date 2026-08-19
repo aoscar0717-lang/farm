@@ -67,23 +67,28 @@ class BuildingType(Enum):
     類型定義出來，讓 game_state.py 的訂單/資源系統可以先假設這些建築
     未來會存在；實際「怎麼把它們放到農田/莊園格子上、怎麼把原料轉換成
     產物」的邏輯（例如 FURNACE 把 metal_ore 煉成 metal_ingot）刻意
-    不在本次改動範圍內，留給下一階段的建築放置系統一起做。"""
-    FURNACE = "FURNACE"                  # 熔爐：金屬礦 -> 金屬錠（下一階段）
-    OVEN = "OVEN"                        # 烤箱：小麥 -> 麵包（下一階段）
+    不在本次改動範圍內，留給下一階段的建築放置系統一起做。
+    【視覺升級：熔爐 Sprite Sheet 動畫階段，整批移除 OVEN / KILN】
+    使用者確認熔爐貼圖+動畫做好之後，決定直接整個砍掉 OVEN（烤箱）跟
+    KILN（炭窯）這兩個建築，含衍生邏輯——不是只從建造選單隱藏。KILN
+    被砍掉之後，木炭 (charcoal) 完全沒有任何生產來源了，連帶讓 FURNACE
+    原本「metal_ore + charcoal -> metal_ingot」的配方裡 charcoal 這個
+    原料變成永遠拿不到、卡死配方，所以這裡把 FURNACE 的配方一併改成
+    只需要 metal_ore（見下方 BUILDING_DATA 的說明），讓「礦場產
+    metal_ore -> 熔爐煉 metal_ingot」這條生產鏈維持完整可用，不會因為
+    拿掉 KILN 而斷鏈。"""
+    FURNACE = "FURNACE"                  # 熔爐：金屬礦 -> 金屬錠
     HAMSTER_WHEEL = "HAMSTER_WHEEL"      # 倉鼠滾輪：消耗糧食產生電池/科技點數（下一階段）
-    # Phase 4 新增：被動永久生效的自動化農業科技，跟上面三種「開關-配方
+    # Phase 4 新增：被動永久生效的自動化農業科技，跟熔爐這種「開關-配方
     # -倒數」機台是完全不同的互動模型（見 BUILDING_DATA 裡的說明）。
     SPRINKLER = "SPRINKLER"              # 自動灑水器：加速周圍 3x3 作物生長
     AUTO_HARVESTER = "AUTO_HARVESTER"    # 自動採收機：自動採收周圍 3x3 成熟作物
     # Phase 4.5 新增：最上游的基礎原料生產設施，「純資本工業流」——花
     # 金幣蓋下去、開關切成 ON，之後不消耗任何原料、無限期自動產出。
-    # 走的仍然是 OVEN/FURNACE 那套「開關-配方-倒數」模型 (is_active/
+    # 走的仍然是熔爐那套「開關-配方-倒數」模型 (is_active/
     # is_processing)，只是 recipe 是空字典（見 BUILDING_DATA 說明）。
     LUMBERYARD = "LUMBERYARD"            # 伐木場：無消耗，定期產出 wood
     MINE = "MINE"                        # 礦場：無消耗，定期產出 metal_ore
-    # Phase 4.75 新增：補齊木炭生產線，跟 OVEN/FURNACE 一樣走「有配方會
-    # 消耗原料」的一般路徑（不是 LUMBERYARD/MINE 那種空配方永動機）。
-    KILN = "KILN"                        # 炭窯：消耗 1 個 wood，產出 charcoal
 
 
 class EnemyType(Enum):
@@ -202,7 +207,11 @@ MAP_CONFIG = {
 # 數量從 0 開始」的背包欄位，實際「怎麼取得 wood/charcoal/metal_ore」
 # （採集？副產物？）與「怎麼用 FURNACE/OVEN 把它們加工成
 # metal_ingot/bread」的邏輯是下一階段建築放置系統要做的事，本次不實作。
-RESOURCE_KEYS = ["wood", "charcoal", "metal_ore", "metal_ingot", "bread", "battery"]
+# 視覺升級：熔爐動畫階段整批移除 OVEN/KILN 之後，"bread"（只有 OVEN
+# 產出）跟 "charcoal"（只有 KILN 產出、FURNACE 舊配方消耗）已經沒有
+# 任何建築會讀寫這兩個 key，一併從 RESOURCE_KEYS 移除，不留兩個永遠
+# 卡在 0、沒有意義的背包欄位。
+RESOURCE_KEYS = ["wood", "metal_ore", "metal_ingot", "battery"]
 
 # 訂單需求裡用來指定「要交多少個某種作物」的簡短代稱，對應到實際的
 # CropType。用簡短代稱（而不是直接用 CropType.value，例如 RED_TOMATO）
@@ -489,44 +498,31 @@ DEFENSE_DATA = {
 # ==========================================
 # 加工建築 (Phase 2：生產線機台)
 # ==========================================
-# 只實作 BuildingType 裡的 OVEN / FURNACE 兩種（HAMSTER_WHEEL 維持
+# 只實作 BuildingType 裡的 FURNACE 一種（HAMSTER_WHEEL 維持
 # Phase 1 就說明過的「留給下一階段」，這次仍然不動它）。
 #
 # recipe 的 key 沿用訂單系統已經在用的同一份物品命名空間：crop 用
 # ORDER_CROP_ALIASES 的簡短代稱（"wheat"）、原料/半成品用 RESOURCE_KEYS
-# 的名稱（"metal_ore"/"charcoal"/...），兩邊沒有重複的 key，可以直接
+# 的名稱（"metal_ore"/"metal_ingot"/...），兩邊沒有重複的 key，可以直接
 # 共用 GameState._get_item_count()/_consume_item()（訂單系統 Phase 1
 # 就寫好的通用查詢/扣除工具），不用另外為建築寫一份查庫存邏輯。
 #
-# 【FURNACE 配方選擇說明】使用者給了兩個可選配方：① wood -> charcoal
-# (10s)，② metal_ore + charcoal -> metal_ingot (20s)，並說可以先只實作
-# 一種。選了②，理由是「熔爐 (FURNACE)」這個名字在中文語境裡本來就是
-# 「熔煉金屬」的機台，①的「把木頭燒成木炭」其實比較接近「炭窯」的
-# 功能；使用者原句「熔爐專門煉金屬」這個簡化提案也是指②。這個選擇
-# 目前會讓 metal_ore/charcoal 這兩個原料完全沒有任何取得管道（跟
-# Phase 1 就已經存在的限制一樣：inventory 裡的東西目前都沒有生產
-# 來源），熔爐機制本身可以正常運作，只是要等下一階段補上「怎麼採集
-# wood/metal_ore」之後才真的能連起來用，這裡不是本次改動漏做，是刻意
-# 沿用 Phase 1 就講清楚的分階段範圍。
+# 【視覺升級：熔爐動畫階段，整批移除 OVEN/KILN 後的配方調整】
+# 原本 FURNACE 的配方是「metal_ore + charcoal -> metal_ingot」，charcoal
+# 唯一的生產來源是 KILN（炭窯）。使用者這次要求把 OVEN、KILN 連同衍生
+# 邏輯整個刪除，KILN 一拿掉，charcoal 就變成永遠拿不到的原料，FURNACE
+# 的配方會卡死、玩家永遠煉不出 metal_ingot。這裡把配方改成單純
+# 「metal_ore -> metal_ingot」（份量從 1 調成 2，維持原本「用兩份上游
+# 資源換一份精煉物」的比例感，process_time 維持 20 秒不變），讓
+# 「礦場產 metal_ore -> 熔爐煉 metal_ingot -> 灑水器/自動採收機」這條
+# 生產鏈不必依賴任何已經被刪除的建築。
 BUILDING_DATA = {
-    BuildingType.OVEN: {
-        "name": "烤箱",
-        "unlock_level": 3,     # 跟小麥 (WHEAT) 本身的解鎖等級一致，玩家能種小麥時剛好也能蓋烤箱
-        "build_cost_gold": 160,
-        "build_cost_tech": 12,  # 花費科技點數才能建造——讓 Phase 1.5 才開始能拿到的科技點數有地方花
-        "recipe": {"wheat": 2},
-        "output_key": "bread",
-        "output_qty": 1,
-        "process_time": 15.0,
-        "walkable": False,
-        "asset_key": "oven",
-    },
     BuildingType.FURNACE: {
         "name": "熔爐",
         "unlock_level": 3,
         "build_cost_gold": 200,
         "build_cost_tech": 18,
-        "recipe": {"metal_ore": 1, "charcoal": 1},
+        "recipe": {"metal_ore": 2},
         "output_key": "metal_ingot",
         "output_qty": 1,
         "process_time": 20.0,
@@ -545,16 +541,13 @@ BUILDING_DATA = {
     # build_cost_items 就會被檢查/扣除，不用另外為這兩種機台寫專用
     # 分支。
     #
-    # 【已知限制，如實揭露】metal_ingot 目前完全沒有取得管道：FURNACE
-    # 的配方需要 metal_ore + charcoal，這兩者本身也還沒有任何生產/採集
-    # 來源（Phase 2 的 BUILDING_DATA 註解就已經寫明這件事）。也就是說，
-    # 現階段就算把 SPRINKLER/AUTO_HARVESTER 的資料/邏輯都做好，玩家在
-    # 正常遊玩流程裡目前還是「摸不到」——這不是這次改動漏做，是延續
-    # Phase 1/2 就講清楚的分階段範圍：這幾種進階資源的採集來源留給未來
-    # 階段（例如新增「挖礦/砍樹」小遊戲或地圖資源點）再補上。
+    # 【原「已知限制」已隨生產鏈補齊而解除】metal_ingot 現在的取得管道
+    # 是：礦場 (MINE) 產 metal_ore -> 熔爐 (FURNACE) 消耗 metal_ore
+    # 煉出 metal_ingot，兩者都已經是可以直接蓋、可以直接運作的建築，
+    # 不再是「摸不到」的狀態。
     BuildingType.SPRINKLER: {
         "name": "自動灑水器",
-        "unlock_level": 4,   # 比烤箱/熔爐(3)高一階，符合「高階科技」的定位
+        "unlock_level": 4,   # 比熔爐(3)高一階，符合「高階科技」的定位
         "build_cost_gold": 0,
         "build_cost_tech": 0,
         "build_cost_items": {"metal_ingot": 2},
@@ -580,7 +573,7 @@ BUILDING_DATA = {
         "walkable": False,
         "asset_key": "auto_harvester",
     },
-    # Phase 4.5：打通上游生產線。伐木場/礦場刻意沿用 OVEN/FURNACE 那套
+    # Phase 4.5：打通上游生產線。伐木場/礦場刻意沿用熔爐那套
     # 「開關-配方-倒數」模型（is_active/is_processing/toggle_building()/
     # GameState._update_buildings() 既有的那段迴圈），而不是像 SPRINKLER/
     # AUTO_HARVESTER 那樣走 passive_effect 分支——因為使用者的規格描述
@@ -594,17 +587,18 @@ BUILDING_DATA = {
     # 也因為 recipe 是空字典而完全不會執行、不扣任何東西。也就是說，
     # 完全不需要為這兩座建築寫任何特例分支，只要 recipe 給空字典，
     # 「無消耗、ON 了就會自動不斷循環生產」這個效果就會自動成立，跟
-    # 烤箱/熔爐共用同一套已經測試過、正確處理「這一輪跑完才停工」的
+    # 熔爐共用同一套已經測試過、正確處理「這一輪跑完才停工」的
     # 邏輯，不會有第二套邏輯路徑需要單獨維護/單獨測試。
     #
-    # 【Phase 4.5 當時如實揭露、Phase 4.75 已補上】這兩座建築打通了
-    # wood 跟 metal_ore 這兩種原料的上游來源，但熔爐 (FURNACE) 的配方
-    # 是 metal_ore + charcoal，charcoal（木炭）當時完全沒有任何生產/
-    # 採集管道——Phase 2 選擇 FURNACE 配方時就說明過，「wood -> charcoal」
-    # 是被捨棄的另一個選項，沒有實作。Phase 4.75 已經補上 KILN（炭窯：
-    # 消耗 1 個 wood -> 產出 1 個 charcoal，見下方定義），至此
-    # 「伐木場產 wood -> 炭窯燒成 charcoal / 礦場產 metal_ore -> 熔爐煉成
-    # metal_ingot -> 灑水器/自動採收機」這條完整生產鏈才算真正打通。
+    # 【視覺升級：熔爐動畫階段，KILN 已隨這次改動整個移除】木炭
+    # (charcoal) 生產線（伐木場產 wood -> 炭窯燒成 charcoal）原本是
+    # 為了配合 FURNACE「metal_ore + charcoal -> metal_ingot」的舊配方
+    # 而在 Phase 4.75 補上的。這次使用者要求整個刪除 KILN，FURNACE 的
+    # 配方也同步改成單純「metal_ore -> metal_ingot」（見上方 FURNACE
+    # 定義），所以「伐木場產 wood」這個環節目前純粹是給玩家囤木頭用
+    # （未來要接其他消耗 wood 的機制），不再是熔煉金屬錠這條生產鏈的
+    # 必要前置——目前完整生產鏈簡化為「礦場產 metal_ore -> 熔爐煉
+    # metal_ingot -> 灑水器/自動採收機」。
     BuildingType.LUMBERYARD: {
         "name": "伐木場",
         "unlock_level": 1,   # 最基礎的原料來源，刻意設成遊戲一開局就能蓋，不卡關
@@ -628,27 +622,6 @@ BUILDING_DATA = {
         "process_time": 15.0,
         "walkable": False,
         "asset_key": "mine",
-    },
-    # Phase 4.75：補齊木炭生產線。跟 LUMBERYARD/MINE 的「空配方永動機」
-    # 不同，炭窯是「消耗 1 個 wood -> 產出 1 個 charcoal」的一般配方型
-    # 機台，走的邏輯路徑完全等同 OVEN/FURNACE（recipe 非空字典，
-    # _update_buildings() 每次要開始新一輪前都會先檢查 wood 庫存夠不
-    # 夠、不夠就自動關閉並 emit BUILDING_STOPPED），不需要任何新程式碼，
-    # 純粹是 BUILDING_DATA 多一筆設定。unlock_level 訂在 2，跟 MINE
-    # 一致——蓋炭窯前提是玩家至少已經能蓋伐木場先囤一點 wood，但不用
-    # 等到熔爐本身解鎖 (Lv.3) 才能蓋，讓玩家在熔爐解鎖的當下，charcoal
-    # 已經有機會囤好一些存量。
-    BuildingType.KILN: {
-        "name": "炭窯",
-        "unlock_level": 2,
-        "build_cost_gold": 80,
-        "build_cost_tech": 0,
-        "recipe": {"wood": 1},
-        "output_key": "charcoal",
-        "output_qty": 1,
-        "process_time": 10.0,
-        "walkable": False,
-        "asset_key": "kiln",
     },
 }
 

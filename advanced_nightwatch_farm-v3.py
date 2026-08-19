@@ -806,11 +806,16 @@ class NightwatchFarmApp:
                 # 工程量都遠超過這次「加入生產線機台」的需求範圍；機台
                 # 本來就跟裝飾一樣蓋在同一個區域，歸在同一個分頁在邏輯
                 # 上也說得通。
-                ("PLACE_OVEN", "烤箱", "$160+12科技 | 烤小麥→麵包", "oven"),
+                # 視覺升級（熔爐 Sprite Sheet 動畫）階段：使用者確認熔爐
+                # 貼圖+動畫做好之後，要求整批刪除「烤箱 (OVEN)」跟「炭窯
+                # (KILN)」這兩張卡片，含它們對應的 BuildingType/建造動作
+                # 處理分支（見上方 _handle_mouse_up 已同步移除）。熔爐的
+                # 配方也同步從「metal_ore + charcoal」改成單純
+                # 「metal_ore x2」，不再依賴已刪除的炭窯產出的 charcoal。
                 ("PLACE_FURNACE", "熔爐", "$200+18科技 | 煉礦石→鋼錠", "furnace"),
                 # Phase 4：自動化農業科技，一樣沿用同一個 DECO 分頁、同一
-                # 個「四周莊園景觀區」放置規則，理由跟 Phase 2 加烤箱/
-                # 熔爐時一樣——沒有另外開新分頁。花費是 metal_ingot（背包
+                # 個「四周莊園景觀區」放置規則，理由跟 Phase 2 加熔爐時
+                # 一樣——沒有另外開新分頁。花費是 metal_ingot（背包
                 # 物品）而不是金幣，卡片說明文字用「2錠」/「5錠+100科技」
                 # 表示，跟其餘卡片「$金額」的呈現風格有意識地做出區分，
                 # 讓玩家一眼看出這兩張卡「要花的不是錢」。
@@ -822,11 +827,6 @@ class NightwatchFarmApp:
                 # 那樣特別標注「錠」。
                 ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木頭", "lumberyard"),
                 ("PLACE_MINE", "礦場", "$150 | 每15s產1礦石", "mine"),
-                # Phase 4.75：補齊木炭生產線最後一塊拼圖。跟烤箱/熔爐一樣
-                # 是「消耗原料」的一般機台（不是伐木場/礦場那種無消耗永
-                # 動機），說明文字用「耗1木」標示會消耗庫存木頭，跟其餘
-                # 「純資本」機台的說明風格做出區分。
-                ("PLACE_KILN", "炭窯", "$80 | 耗1木頭→炭 10s", "kiln"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1405,8 +1405,6 @@ class NightwatchFarmApp:
         # 加工機台 (Phase 2)：跟景觀裝飾一樣放在「四周莊園景觀區」，
         # PLACE_ 開頭但沒有加進 _DEFENSE_ACTION_IDS，_grid_preview_is_invalid()
         # 就會自動照景觀裝飾的規則檢查 DECORATION_ZONE，不用另外處理。
-        elif act == "PLACE_OVEN":
-            success, msg = self.game.place_building(gx, gy, BuildingType.OVEN)
         elif act == "PLACE_FURNACE":
             success, msg = self.game.place_building(gx, gy, BuildingType.FURNACE)
         elif act == "PLACE_SPRINKLER":
@@ -1417,8 +1415,6 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
         elif act == "PLACE_MINE":
             success, msg = self.game.place_building(gx, gy, BuildingType.MINE)
-        elif act == "PLACE_KILN":
-            success, msg = self.game.place_building(gx, gy, BuildingType.KILN)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1716,19 +1712,20 @@ class NightwatchFarmApp:
             elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
-            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
-                                     "PLACE_LUMBERYARD", "PLACE_MINE", "PLACE_KILN"):
-                # 烤箱/熔爐/灑水器/自動採收機/伐木場/礦場/炭窯的
+            elif card.action_id in ("PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
+                                     "PLACE_LUMBERYARD", "PLACE_MINE"):
+                # 熔爐/灑水器/自動採收機/伐木場/礦場的
                 # unlock_level 都直接讀 BUILDING_DATA 定義比對
                 # self.game.farm_level，不用另外走 is_crop_unlocked 那套
                 # 只吃 CropType 的介面。金幣/科技點數/metal_ingot 材料
                 # 不足都不會鎖卡——維持跟其餘商店卡片一致的「可以點，
                 # 點了會跳紅字說明缺什麼」既有手感，只有等級這種「不管
                 # 有沒有錢都做不到」的門檻才會直接鎖卡。
+                # 視覺升級（熔爐動畫）階段整批移除 OVEN/KILN 之後，這裡
+                # 同步拿掉 "PLACE_OVEN"/"PLACE_KILN" 兩個 key，避免對照表
+                # 裡留著已經不存在的 BuildingType 成員。
                 _card_building_type = {
-                    "PLACE_OVEN": BuildingType.OVEN,
                     "PLACE_FURNACE": BuildingType.FURNACE,
-                    "PLACE_KILN": BuildingType.KILN,
                     "PLACE_SPRINKLER": BuildingType.SPRINKLER,
                     "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
                     "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
@@ -2371,14 +2368,19 @@ class NightwatchFarmApp:
     # 塊」，不如選擇肯定落在完整繁體中文字型收錄範圍內的中文詞彙，跟
     # 其餘 5 種機台的呈現風格也保持一致。如果之後確認新字型真的支援
     # Emoji，要改回 💧/🤖 只要動這個字典即可。
+    # 視覺升級（熔爐動畫）階段：使用者要求整批移除 OVEN（烤箱）跟
+    # KILN（炭窯），這裡同步拿掉這兩個 key，避免字典裡留著已經不存在的
+    # BuildingType 成員。這個字典目前只在 _render_building_tile() 貼圖
+    # 缺失時的色塊+文字圖示防呆分支用得到——熔爐本身已經有真的
+    # Sprite Sheet 動畫可以用，不會走到這裡，但保留 FURNACE 這一筆是
+    # 為了萬一動畫幀載入失敗（例如 熔爐.png 被移除）時還能有安全字元
+    # 可以退回，不會直接壞掉。
     _BUILDING_ICONS = {
         BuildingType.FURNACE: "熔煉",
-        BuildingType.OVEN: "烘烤",
         BuildingType.SPRINKLER: "灑水",
         BuildingType.AUTO_HARVESTER: "採收",
         BuildingType.LUMBERYARD: "伐木",
         BuildingType.MINE: "採礦",
-        BuildingType.KILN: "燒炭",
     }
 
     def _render_building_tile(self, building, px: int, py: int):

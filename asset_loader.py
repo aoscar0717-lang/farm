@@ -552,7 +552,8 @@ class AssetLoader:
             self.images[key] = self._load_image(path, sz)
 
         # 3b. 加工機台/生產設施（烤箱/熔爐/炭窯/伐木場/礦場/灑水器/自動
-        # 採收機）。這 7 個 asset_key 從 Phase 2 起就一直存在於
+        # 採收機）。視覺升級（熔爐動畫）階段已移除 OVEN/KILN，目前剩 5
+        # 個 asset_key，從 Phase 2 起就一直存在於
         # BUILDING_DATA 裡（_render_building_tile() 會呼叫
         # self.loader.get(asset_key)），但 AssetLoader 之前從來沒有真的
         # 幫這些 key 呼叫過 _load_image()——self.images 字典裡根本沒有
@@ -565,10 +566,11 @@ class AssetLoader:
         # 的動態佔位圖取代原本 _render_building_tile() 手畫的純色塊。
         # category 這裡明確指定，不靠 asset_key 字串去猜——避免日後這幾
         # 個 key 命名調整時，猜測邏輯悄悄失準也不會發現。
+        # 視覺升級（熔爐動畫）階段：使用者要求整批移除 OVEN（烤箱）跟
+        # KILN（炭窯）這兩個建築，這裡同步拿掉 "oven"/"kiln" 兩筆載入
+        # 呼叫，避免載入兩個已經不會被任何 BuildingType 用到的 key。
         buildings = [
-            ("oven", "buildings/oven.png", "furnace"),
             ("furnace", "buildings/furnace.png", "furnace"),
-            ("kiln", "buildings/kiln.png", "furnace"),
             ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
             # 礦場沒有對應到使用者這次給的三種分類（機台/伐木場/防禦
             # 塔），generate_placeholder() 目前也還沒有「礦場」專屬的
@@ -584,13 +586,18 @@ class AssetLoader:
         # 3c. 熔爐 Sprite Sheet 特定影格動畫 (assets/decorations/熔爐.png)。
         # 只切第一排 3 格，縮放到跟上面 buildings 清單一樣的 sz
         # (CELL_SIZE x CELL_SIZE)，存進 self.building_anim_frames["furnace"]。
-        # 這裡刻意不去動上面 buildings 清單裡 ("furnace", "buildings/
-        # furnace.png", "furnace") 這一筆——那張圖目前不存在，
-        # self.images["furnace"] 仍然會照舊落到 generate_placeholder()，
-        # 當作「動畫幀也載入失敗時」的第二層防呆退回路徑；渲染層會優先
-        # 檢查 get_anim_frames("furnace") 有沒有內容，有的話才用動畫幀，
-        # 沒有的話才退回 self.images["furnace"] 的靜態圖或色塊。兩條載
-        # 入路徑不會互相覆蓋，只是渲染時分優先順序。
+        # 上面 buildings 清單裡 ("furnace", "buildings/furnace.png",
+        # "furnace") 這一筆仍然保留——那張圖目前不存在，
+        # self.images["furnace"] 原本會落到 generate_placeholder()，是
+        # 「動畫幀也載入失敗時」的第二層防呆退回路徑。但這次追加需求
+        # 要求建造選單卡片（ActionCard.draw() 直接呼叫
+        # loader.get(asset_key)，不會走動畫幀那條路徑）也要顯示真的熔爐
+        # 圖，所以 _load_building_anim_frames() 切出動畫幀成功時，會
+        # 順手把 self.images["furnace"] 覆寫成 frame[0]（靜態幀），這樣
+        # 商店卡片、以及任何其他呼叫 loader.get("furnace") 的地方都能拿
+        # 到真圖，不用另外為卡片渲染寫一條專用邏輯；地圖上蓋好的熔爐
+        # 建築本體則是靠 _render_building_tile() 優先檢查
+        # get_anim_frames("furnace") 播放 3 幀動畫。
         self._load_building_anim_frames("furnace", "decorations/熔爐.png", sz)
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
@@ -753,3 +760,9 @@ class AssetLoader:
             # 熔爐會比同排的烤箱/炭窯等其他建築明顯小一圈或大一圈。
             frames.append(pygame.transform.scale(frame, size))
         self.building_anim_frames[key] = frames
+        # 額外把 self.images[key] 覆寫成 frame[0]（閒置幀），這樣建造
+        # 選單卡片（ActionCard.draw() 只呼叫 loader.get(asset_key)，不知
+        # 道動畫幀這回事）也能顯示真的熔爐圖，不用另外為卡片渲染寫一條
+        # 專用邏輯——地圖上蓋好的建築本體則交給 _render_building_tile()
+        # 優先用 get_anim_frames() 播放完整 3 幀動畫。
+        self.images[key] = frames[0]

@@ -47,7 +47,7 @@ class GameState:
         # 不會讓玩家變相損失原本的採收金幣。
         self.crop_inventory: Dict[str, int] = {alias: 0 for alias in ORDER_CROP_ALIASES}
         # 科技點數：終局進度貨幣，目前只有 fulfill_order() 這個管道可以
-        # 取得，下一階段的科技樹系統會消耗它來解鎖 FURNACE/OVEN/
+        # 取得，下一階段的科技樹系統會消耗它來解鎖 FURNACE/
         # HAMSTER_WHEEL 等建築。
         self.tech_points: int = 0
         # 每日訂單：進入白天時 (_start_day / __init__ 的第 1 天) 呼叫
