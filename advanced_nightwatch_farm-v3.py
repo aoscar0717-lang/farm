@@ -68,12 +68,80 @@ C_ORANGE = (255, 152, 0)
 C_BLOOD_RED = (211, 47, 47)
 
 
-def get_font(size: int, bold: bool = False):
-    for fn in ['microsoftjhenghei', 'simhei', 'pingfang', 'segoeui', 'arial']:
-        try:
-            match = pygame.font.match_font(fn)
+# ------------------------------------------------------------------
+# 中文字型載入 (fixes "□" tofu-box rendering)
+#
+# 舊寫法的問題：pygame.font.match_font(name) 對 SDL 來說是很寬鬆的模糊比對，
+# 就算清單裡四個名字全部比對失敗，match_font 也常常不會回傳 None，而是回退到
+# 隨便一個系統預設字型（通常是 Arial 之類的西方字型），完全不含中文字形，
+# 於是遊戲畫面上的中文字全部變成「□」豆腐塊，而且不會有任何錯誤訊息。
+#
+# 新寫法分兩層 Fallback，優先順序如下：
+#   1. 專案自帶字型：assets/fonts/ 底下第一個 .ttf/.ttc/.otf 檔（最可靠，
+#      不依賴玩家電腦裝了什麼系統字型，換一台機器也保證看得到中文）。
+#      要掛載開源中文字體，只要把 .ttf 檔案丟進 assets/fonts/ 資料夾即可，
+#      不用改任何程式碼，例如思源黑體 Traditional Chinese (Noto Sans TC)：
+#      https://fonts.google.com/noto/specimen/Noto+Sans+TC
+#   2. 系統字型：改用 pygame.font.get_fonts() 列出「這台機器真的偵測到」的
+#      字型名單，再跟一份跨平台的中文字型名稱清單取交集，而不是像舊寫法
+#      直接盲猜 match_font 一定會成功。
+#   3. 都找不到才退回 Arial，並在終端機印出明確警告，而不是默默顯示豆腐塊。
+# ------------------------------------------------------------------
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+
+_CJK_SYSTEM_FONT_HINTS = [
+    # Windows
+    "microsoftjhenghei", "microsoftjhengheiui", "microsoftjhengheiuibold",
+    "microsoftyahei", "microsoftyaheiui", "simhei", "simsun", "mingliu", "dfkaisb",
+    # macOS
+    "pingfangtc", "pingfangsc", "pingfang", "heititc", "heitisc", "stheititc", "stheitisc",
+    # Linux
+    "notosanscjktc", "notosanscjksc", "notosanscjk", "wqymicrohei", "wqyzenhei",
+    "droidsansfallback",
+]
+
+
+def _find_bundled_font_path() -> Optional[str]:
+    if not os.path.isdir(FONT_DIR):
+        return None
+    for fn in sorted(os.listdir(FONT_DIR)):
+        if fn.lower().endswith((".ttf", ".ttc", ".otf")):
+            return os.path.join(FONT_DIR, fn)
+    return None
+
+
+def _find_system_cjk_font_path() -> Optional[str]:
+    try:
+        available = set(pygame.font.get_fonts())
+    except Exception:
+        return None
+    for hint in _CJK_SYSTEM_FONT_HINTS:
+        if hint in available:
+            match = pygame.font.match_font(hint)
             if match:
-                return pygame.font.Font(match, size)
+                return match
+    return None
+
+
+_BUNDLED_FONT_PATH = _find_bundled_font_path()
+_SYSTEM_CJK_FONT_PATH = None if _BUNDLED_FONT_PATH else _find_system_cjk_font_path()
+_RESOLVED_FONT_PATH = _BUNDLED_FONT_PATH or _SYSTEM_CJK_FONT_PATH
+
+if _RESOLVED_FONT_PATH is None:
+    print(
+        "[字型警告] 找不到可顯示中文的字型，UI 文字可能會顯示「□」。"
+        f"請把一個中文 .ttf/.ttc/.otf 字型檔放進 {FONT_DIR} 資料夾"
+        "（例如思源黑體 Noto Sans TC），程式下次啟動會自動優先使用它，"
+        "不需要改任何程式碼。"
+    )
+
+
+def get_font(size: int, bold: bool = False):
+    if _RESOLVED_FONT_PATH:
+        try:
+            f = pygame.font.Font(_RESOLVED_FONT_PATH, size)
+            f.set_bold(bold)
+            return f
         except Exception:
             pass
     return pygame.font.SysFont('arial', size, bold=bold)
@@ -189,7 +257,13 @@ class ActionCard:
 # ==========================================
 class NightwatchFarmApp:
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        # 全螢幕切換 (F11)：邏輯解析度固定在 SCREEN_WIDTH x SCREEN_HEIGHT，
+        # 全螢幕時加上 pygame.SCALED，讓 SDL2 自動把這個邏輯畫面等比例縮放、
+        # 置中貼到實際螢幕解析度上（畫面比例不會跑掉，多出來的部分自動黑邊）。
+        # SCALED 也會自動幫滑鼠事件座標做對應換算，所以 _handle_mouse_move /
+        # _handle_mouse_down 裡讀 event.pos 的邏輯完全不用改。
+        self.is_fullscreen = False
+        self.screen = self._create_display(fullscreen=False)
         pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 經典精緻像素塔防農場")
         self.clock = pygame.time.Clock()
         
@@ -286,6 +360,14 @@ class NightwatchFarmApp:
                 r = pygame.Rect(rx, ry, card_w, card_h)
                 self.action_cards.append(ActionCard(act_id, lbl, cost, tab_id, asset_key, r))
 
+    def _create_display(self, fullscreen: bool):
+        flags = (pygame.FULLSCREEN | pygame.SCALED) if fullscreen else 0
+        return pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
+
+    def _toggle_fullscreen(self):
+        self.is_fullscreen = not self.is_fullscreen
+        self.screen = self._create_display(self.is_fullscreen)
+
     def run(self):
         running = True
         while running:
@@ -303,6 +385,8 @@ class NightwatchFarmApp:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN and self.show_intro:
                         self.show_intro = False
+                    elif event.key == pygame.K_F11:
+                        self._toggle_fullscreen()
                     elif event.key == pygame.K_r and self.game.game_over:
                         self.game = GameState()
                         self.log_messages.clear()
