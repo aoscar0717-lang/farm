@@ -55,16 +55,62 @@ class TestDefenseAnimals(unittest.TestCase):
         # Bull deals 2 damage per hit
         self.assertEqual(state["farm"]["thief_hp"], 3)
 
-    def test_shovel_reclaims_animals(self):
+    def test_animals_do_not_rush_to_boundary_when_enemy_far_away(self):
         state = new_game()
-        state["farm"]["cats"].append((10, 10))
-        state["farm"]["bulls"].append((20, 20))
+        farm = state["farm"]
+        farm["cats"].append((80, 80))
+        farm["dogs"].append((90, 90))
+        farm["owls"].append((100, 100))
+        farm["sheeps"].append((70, 70))
+        state["phase"] = "night"
+        # Enemy spawns far away on the map boundary (0, 0)
+        farm["thief_pos"] = (0, 0)
+        farm["thief_hp"] = 5
+        farm["thief_iframes"] = 0
 
-        state = apply_action(state, "use_shovel_10_10")
-        self.assertNotIn((10, 10), state["farm"]["cats"])
+        state = apply_action(state, "night_tick")
+        # Defenders should stay stationed near their posts and NOT rush to (0, 0)
+        self.assertEqual(state["farm"]["cats"][0], (80, 80))
+        self.assertEqual(state["farm"]["dogs"][0], (90, 90))
+        self.assertEqual(state["farm"]["sheeps"][0], (70, 70))
 
-        state = apply_action(state, "use_shovel_20_20")
-        self.assertNotIn((20, 20), state["farm"]["bulls"])
+    def test_animals_return_home_when_enemy_defeated(self):
+        state = new_game()
+        farm = state["farm"]
+        farm["dogs"].append((50, 50))
+        farm["dogs_homes"].append((50, 50))
+        state["phase"] = "night"
+        # Enemy approaches within dog's detection range
+        farm["thief_pos"] = (55, 50)
+        farm["thief_hp"] = 1
+        farm["thief_iframes"] = 0
+
+        # Dog moves towards enemy and attacks
+        state = apply_action(state, "night_tick")
+        # Thief is killed (thief_pos becomes None)
+        self.assertIsNone(state["farm"]["thief_pos"])
+
+        # Over the next few ticks, dog walks back and returns to its home (50, 50)
+        for _ in range(10):
+            state = apply_action(state, "night_tick")
+
+        self.assertEqual(state["farm"]["dogs"][0], (50, 50))
+
+    def test_sheep_stationary_guard(self):
+        state = new_game()
+        farm = state["farm"]
+        farm["sheeps"].append((30, 30))
+        state["phase"] = "night"
+        farm["thief_pos"] = (0, 10)
+        farm["thief_hp"] = 3
+        farm["thief_iframes"] = 0
+
+        for _ in range(5):
+            state = apply_action(state, "night_tick")
+
+        # Sheep stays firmly at (30, 30)
+        self.assertEqual(state["farm"]["sheeps"][0], (30, 30))
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -162,14 +162,21 @@ def _new_zone_state() -> dict:
         "fences": [],
         "traps": [],
         "dogs": [],
+        "dogs_homes": [],
         "cats": [],
+        "cats_homes": [],
         "geese": [],
+        "geese_homes": [],
         "sheeps": [],
+        "sheeps_homes": [],
         "bulls": [],
+        "bulls_homes": [],
         "owls": [],
+        "owls_homes": [],
         "sheep_hp": {},
         "enemy_slow_ticks": 0,
         "enemy_stun_ticks": 0,
+
         "trees": [],
         "rocks": [],
         "building_tasks": [],
@@ -427,6 +434,13 @@ def _end_night(state):
     decor["boar_pos"] = None
     decor["boar_path"] = []
     decor["target_decor"] = None
+
+    # 重設所有守護動物位置回到其原本放置的守備點，避免留在地圖邊界
+    for z in [farm, decor]:
+        for k in ["dogs", "cats", "geese", "sheeps", "bulls", "owls"]:
+            homes = z.get(f"{k}_homes", [])
+            if homes and len(homes) == len(z.get(k, [])):
+                z[k] = list(homes)
     return state
 
 
@@ -449,14 +463,25 @@ def _tick_zone_building(zone, on_decor_complete=None):
                 }
             elif t_type == "fence": zone["fences"].append((pos[0], pos[1], FENCE_MAX_HP))
             elif t_type == "farmland": zone["farmland"].append(pos)
-            elif t_type == "dog": zone["dogs"].append(pos)
-            elif t_type == "cat": zone.setdefault("cats", []).append(pos)
-            elif t_type == "goose": zone.setdefault("geese", []).append(pos)
+            elif t_type == "dog":
+                zone["dogs"].append(pos)
+                zone.setdefault("dogs_homes", []).append(pos)
+            elif t_type == "cat":
+                zone.setdefault("cats", []).append(pos)
+                zone.setdefault("cats_homes", []).append(pos)
+            elif t_type == "goose":
+                zone.setdefault("geese", []).append(pos)
+                zone.setdefault("geese_homes", []).append(pos)
             elif t_type == "sheep":
                 zone.setdefault("sheeps", []).append(pos)
+                zone.setdefault("sheeps_homes", []).append(pos)
                 zone.setdefault("sheep_hp", {})[pos] = 10
-            elif t_type == "bull": zone.setdefault("bulls", []).append(pos)
-            elif t_type == "owl": zone.setdefault("owls", []).append(pos)
+            elif t_type == "bull":
+                zone.setdefault("bulls", []).append(pos)
+                zone.setdefault("bulls_homes", []).append(pos)
+            elif t_type == "owl":
+                zone.setdefault("owls", []).append(pos)
+                zone.setdefault("owls_homes", []).append(pos)
             elif t_type == "trap": zone["traps"].append(pos)
             elif t_type == "decor":
                 decor_type = task["decor_type"]
@@ -465,6 +490,7 @@ def _tick_zone_building(zone, on_decor_complete=None):
         else:
             new_tasks.append(task)
     zone["building_tasks"] = new_tasks
+
 
 
 
@@ -789,25 +815,39 @@ def apply_action(state: GameState, action: str, zone: str = "farm") -> GameState
         elif pos in zstate.get("traps", []):
             zstate["traps"].remove(pos)
             _working_copy["last_msg"] = "回收了地刺陷阱！"
-        elif pos in zstate.get("dogs", []):
-            zstate["dogs"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("dogs", [])):
+            idx = next(i for i, d in enumerate(zstate["dogs"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            zstate["dogs"].pop(idx)
+            if "dogs_homes" in zstate and idx < len(zstate["dogs_homes"]): zstate["dogs_homes"].pop(idx)
             _working_copy["last_msg"] = "收回了看門狗！"
-        elif pos in zstate.get("cats", []):
-            zstate["cats"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("cats", [])):
+            idx = next(i for i, d in enumerate(zstate["cats"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            zstate["cats"].pop(idx)
+            if "cats_homes" in zstate and idx < len(zstate["cats_homes"]): zstate["cats_homes"].pop(idx)
             _working_copy["last_msg"] = "收回了招財小貓！"
-        elif pos in zstate.get("geese", []):
-            zstate["geese"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("geese", [])):
+            idx = next(i for i, d in enumerate(zstate["geese"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            zstate["geese"].pop(idx)
+            if "geese_homes" in zstate and idx < len(zstate["geese_homes"]): zstate["geese_homes"].pop(idx)
             _working_copy["last_msg"] = "收回了警戒鵝！"
-        elif pos in zstate.get("sheeps", []):
-            zstate["sheeps"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("sheeps", [])):
+            idx = next(i for i, d in enumerate(zstate["sheeps"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            spos = zstate["sheeps"].pop(idx)
+            if "sheeps_homes" in zstate and idx < len(zstate["sheeps_homes"]): zstate["sheeps_homes"].pop(idx)
+            if spos in zstate.get("sheep_hp", {}): del zstate["sheep_hp"][spos]
             if pos in zstate.get("sheep_hp", {}): del zstate["sheep_hp"][pos]
             _working_copy["last_msg"] = "收回了守護羊！"
-        elif pos in zstate.get("bulls", []):
-            zstate["bulls"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("bulls", [])):
+            idx = next(i for i, d in enumerate(zstate["bulls"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            zstate["bulls"].pop(idx)
+            if "bulls_homes" in zstate and idx < len(zstate["bulls_homes"]): zstate["bulls_homes"].pop(idx)
             _working_copy["last_msg"] = "收回了戰鬥牛！"
-        elif pos in zstate.get("owls", []):
-            zstate["owls"].remove(pos)
+        elif any(d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE for d in zstate.get("owls", [])):
+            idx = next(i for i, d in enumerate(zstate["owls"]) if d == pos or math.hypot(d[0]-pos[0], d[1]-pos[1]) < ITEM_SIZE)
+            zstate["owls"].pop(idx)
+            if "owls_homes" in zstate and idx < len(zstate["owls_homes"]): zstate["owls_homes"].pop(idx)
             _working_copy["last_msg"] = "收回了守護鳥！"
+
         elif pos in zstate.get("trees", []):
             _working_copy["last_msg"] = "樹木是景觀，無法用鐵鏟移除！"
         elif pos in zstate.get("rocks", []):
@@ -1317,12 +1357,19 @@ def _process_zone_dogs(zone, enemy_key):
 
     enemy_pos = zone.get(pos_key)
     has_enemy = enemy_pos is not None and zone.get(hp_key, 0) > 0
+    tx, ty = enemy_pos if has_enemy else (0, 0)
 
-    # 1. 🐕 看門狗 (Guard Dogs): 均衡戰士, 速度 1.0, 傷害 1
+    # 1. 🐕 看門狗 (Guard Dogs): 均衡守護 (警戒範圍 60, 追擊上限 80, 速度 1.0, 傷害 1)
     new_dogs = []
-    for dx, dy in zone.get("dogs", []):
-        if has_enemy:
-            tx, ty = enemy_pos
+    dog_homes = zone.setdefault("dogs_homes", list(zone.get("dogs", [])))
+    while len(dog_homes) < len(zone.get("dogs", [])):
+        dog_homes.append(zone["dogs"][len(dog_homes)])
+    for i, (dx, dy) in enumerate(zone.get("dogs", [])):
+        hx, hy = dog_homes[i] if i < len(dog_homes) else (dx, dy)
+        dist_from_home = math.hypot(tx - hx, ty - hy) if has_enemy else 999999
+        dist_to_enemy = math.hypot(tx - dx, ty - dy) if has_enemy else 999999
+
+        if has_enemy and dist_from_home <= 60:
             if _rects_overlap(dx, dy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
                     zone[hp_key] -= 1
@@ -1330,51 +1377,74 @@ def _process_zone_dogs(zone, enemy_key):
                 new_dogs.append((dx, dy))
             else:
                 step = 1.0
-                dist_x = tx - dx
-                dist_y = ty - dy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_dogs.append((dx + (dist_x / length) * step, dy + (dist_y / length) * step))
+                if dist_to_enemy > 0:
+                    nx = dx + ((tx - dx) / dist_to_enemy) * step
+                    ny = dy + ((ty - dy) / dist_to_enemy) * step
+                    if math.hypot(nx - hx, ny - hy) <= 80:
+                        new_dogs.append((nx, ny))
+                    else:
+                        new_dogs.append((dx, dy))
                 else:
                     new_dogs.append((dx, dy))
         else:
-            new_dogs.append((dx, dy))
+            dist_to_home = math.hypot(hx - dx, hy - dy)
+            if dist_to_home <= 1.0:
+                new_dogs.append((hx, hy))
+            else:
+                new_dogs.append((dx + ((hx - dx) / dist_to_home) * 1.0, dy + ((hy - dy) / dist_to_home) * 1.0))
     zone["dogs"] = new_dogs
 
-    # 2. 🐱 招財小貓 (Agile Cats): 極速抓瞎減速, 速度 1.8, 傷害 1, 附加減速 50%
+    # 2. 🐱 招財小貓 (Agile Cats): 靈動突襲 (警戒範圍 50, 追擊上限 70, 速度 1.8, 傷害 1, 減速 50%)
     new_cats = []
-    for cx, cy in zone.get("cats", []):
-        if has_enemy:
-            tx, ty = enemy_pos
+    cat_homes = zone.setdefault("cats_homes", list(zone.get("cats", [])))
+    while len(cat_homes) < len(zone.get("cats", [])):
+        cat_homes.append(zone["cats"][len(cat_homes)])
+    for i, (cx, cy) in enumerate(zone.get("cats", [])):
+        hx, hy = cat_homes[i] if i < len(cat_homes) else (cx, cy)
+        dist_from_home = math.hypot(tx - hx, ty - hy) if has_enemy else 999999
+        dist_to_enemy = math.hypot(tx - cx, ty - cy) if has_enemy else 999999
+
+        if has_enemy and dist_from_home <= 50:
             if _rects_overlap(cx, cy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
                     zone[hp_key] -= 1
                     zone[iframes_key] = 20
-                    zone["enemy_slow_ticks"] = 90  # 減速 3 秒
+                    zone["enemy_slow_ticks"] = 90
                 new_cats.append((cx, cy))
             else:
                 step = 1.8
-                dist_x = tx - cx
-                dist_y = ty - cy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_cats.append((cx + (dist_x / length) * step, cy + (dist_y / length) * step))
+                if dist_to_enemy > 0:
+                    nx = cx + ((tx - cx) / dist_to_enemy) * step
+                    ny = cy + ((ty - cy) / dist_to_enemy) * step
+                    if math.hypot(nx - hx, ny - hy) <= 70:
+                        new_cats.append((nx, ny))
+                    else:
+                        new_cats.append((cx, cy))
                 else:
                     new_cats.append((cx, cy))
         else:
-            new_cats.append((cx, cy))
+            dist_to_home = math.hypot(hx - cx, hy - cy)
+            if dist_to_home <= 1.8:
+                new_cats.append((hx, hy))
+            else:
+                new_cats.append((cx + ((hx - cx) / dist_to_home) * 1.8, cy + ((hy - cy) / dist_to_home) * 1.8))
     zone["cats"] = new_cats
 
-    # 3. 🪿 暴躁警戒鵝 (Battle Geese): 領域擊退, 速度 1.2, 傷害 1, 擊退 15 像素
+    # 3. 🪿 暴躁警戒鵝 (Battle Geese): 領域衝撞 (警戒範圍 40, 追擊上限 55, 速度 1.2, 傷害 1, 擊退 15px)
     new_geese = []
-    for gx, gy in zone.get("geese", []):
-        if has_enemy:
-            tx, ty = enemy_pos
+    geese_homes = zone.setdefault("geese_homes", list(zone.get("geese", [])))
+    while len(geese_homes) < len(zone.get("geese", [])):
+        geese_homes.append(zone["geese"][len(geese_homes)])
+    for i, (gx, gy) in enumerate(zone.get("geese", [])):
+        hx, hy = geese_homes[i] if i < len(geese_homes) else (gx, gy)
+        dist_from_home = math.hypot(tx - hx, ty - hy) if has_enemy else 999999
+        dist_to_enemy = math.hypot(tx - gx, ty - gy) if has_enemy else 999999
+
+        if has_enemy and dist_from_home <= 40:
             if _rects_overlap(gx, gy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
                     zone[hp_key] -= 1
                     zone[iframes_key] = 20
-                    # 擊退衝撞
                     k_dx = tx - gx
                     k_dy = ty - gy
                     k_len = math.hypot(k_dx, k_dy) or 1.0
@@ -1382,93 +1452,119 @@ def _process_zone_dogs(zone, enemy_key):
                 new_geese.append((gx, gy))
             else:
                 step = 1.2
-                dist_x = tx - gx
-                dist_y = ty - gy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_geese.append((gx + (dist_x / length) * step, gy + (dist_y / length) * step))
+                if dist_to_enemy > 0:
+                    nx = gx + ((tx - gx) / dist_to_enemy) * step
+                    ny = gy + ((ty - gy) / dist_to_enemy) * step
+                    if math.hypot(nx - hx, ny - hy) <= 55:
+                        new_geese.append((nx, ny))
+                    else:
+                        new_geese.append((gx, gy))
                 else:
                     new_geese.append((gx, gy))
         else:
-            new_geese.append((gx, gy))
+            dist_to_home = math.hypot(hx - gx, hy - gy)
+            if dist_to_home <= 1.2:
+                new_geese.append((hx, hy))
+            else:
+                new_geese.append((gx + ((hx - gx) / dist_to_home) * 1.2, gy + ((hy - gy) / dist_to_home) * 1.2))
     zone["geese"] = new_geese
 
-    # 4. 🐑 棉花守護羊 (Cotton Sheep): 羊毛護盾 + 嘲諷吸收傷害, 速度 0.6
+    # 4. 🐑 棉花守護羊 (Cotton Sheep): 堅守陣地肉盾 (永遠堅守原位，不滿地亂跑！靠近35px吸引仇恨)
     new_sheeps = []
-    for sx, sy in zone.get("sheeps", []):
+    sheeps_homes = zone.setdefault("sheeps_homes", list(zone.get("sheeps", [])))
+    while len(sheeps_homes) < len(zone.get("sheeps", [])):
+        sheeps_homes.append(zone["sheeps"][len(sheeps_homes)])
+    for i, (sx, sy) in enumerate(zone.get("sheeps", [])):
+        hx, hy = sheeps_homes[i] if i < len(sheeps_homes) else (sx, sy)
         if has_enemy:
-            tx, ty = enemy_pos
-            dist_to_sheep = math.hypot(tx - sx, ty - sy)
+            dist_to_sheep = math.hypot(tx - hx, ty - hy)
             if dist_to_sheep < 35 and zone.get(iframes_key, 0) <= 0:
-                # 吸引敵人仇恨與防禦
-                hp = zone.setdefault("sheep_hp", {}).get((sx, sy), 10) - 1
-                zone["sheep_hp"][(sx, sy)] = hp
+                hp = zone.setdefault("sheep_hp", {}).get((hx, hy), 10) - 1
+                zone["sheep_hp"][(hx, hy)] = hp
                 zone[iframes_key] = 25
                 if hp > 0:
-                    new_sheeps.append((sx, sy))
+                    new_sheeps.append((hx, hy))
                 else:
-                    if (sx, sy) in zone.get("sheep_hp", {}):
-                        del zone["sheep_hp"][(sx, sy)]
+                    if (hx, hy) in zone.get("sheep_hp", {}):
+                        del zone["sheep_hp"][(hx, hy)]
             else:
-                step = 0.6
-                dist_x = tx - sx
-                dist_y = ty - sy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_sheeps.append((sx + (dist_x / length) * step, sy + (dist_y / length) * step))
-                else:
-                    new_sheeps.append((sx, sy))
+                new_sheeps.append((hx, hy))
         else:
-            new_sheeps.append((sx, sy))
+            new_sheeps.append((hx, hy))
     zone["sheeps"] = new_sheeps
 
-    # 5. 🐮 鐵壁戰鬥牛 (Iron Bulls): 巨角重擊, 速度 0.8, 雙倍傷害 (2 dmg)
+    # 5. 🐮 鐵壁戰鬥牛 (Iron Bulls): 巨角重擊 (警戒範圍 45, 追擊上限 65, 速度 0.8, 雙倍傷害 2)
     new_bulls = []
-    for bx, by in zone.get("bulls", []):
-        if has_enemy:
-            tx, ty = enemy_pos
+    bulls_homes = zone.setdefault("bulls_homes", list(zone.get("bulls", [])))
+    while len(bulls_homes) < len(zone.get("bulls", [])):
+        bulls_homes.append(zone["bulls"][len(bulls_homes)])
+    for i, (bx, by) in enumerate(zone.get("bulls", [])):
+        hx, hy = bulls_homes[i] if i < len(bulls_homes) else (bx, by)
+        dist_from_home = math.hypot(tx - hx, ty - hy) if has_enemy else 999999
+        dist_to_enemy = math.hypot(tx - bx, ty - by) if has_enemy else 999999
+
+        if has_enemy and dist_from_home <= 45:
             if _rects_overlap(bx, by, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
-                    zone[hp_key] -= 2  # 雙倍重擊傷害！
+                    zone[hp_key] -= 2
                     zone[iframes_key] = 25
                 new_bulls.append((bx, by))
             else:
                 step = 0.8
-                dist_x = tx - bx
-                dist_y = ty - by
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_bulls.append((bx + (dist_x / length) * step, by + (dist_y / length) * step))
+                if dist_to_enemy > 0:
+                    nx = bx + ((tx - bx) / dist_to_enemy) * step
+                    ny = by + ((ty - by) / dist_to_enemy) * step
+                    if math.hypot(nx - hx, ny - hy) <= 65:
+                        new_bulls.append((nx, ny))
+                    else:
+                        new_bulls.append((bx, by))
                 else:
                     new_bulls.append((bx, by))
         else:
-            new_bulls.append((bx, by))
+            dist_to_home = math.hypot(hx - bx, hy - by)
+            if dist_to_home <= 0.8:
+                new_bulls.append((hx, hy))
+            else:
+                new_bulls.append((bx + ((hx - bx) / dist_to_home) * 0.8, by + ((hy - by) / dist_to_home) * 0.8))
     zone["bulls"] = new_bulls
 
-    # 6. 🦉 夜行守護鳥 (Night Owls): 空中高速俯衝, 速度 2.2, 傷害 1, 30% 驚嚇暈眩
+    # 6. 🦉 夜行守護鳥 (Night Owls): 高空俯衝哨兵 (警戒範圍 80, 追擊上限 100, 速度 2.2, 傷害 1, 30% 驚嚇暈眩)
     new_owls = []
-    for ox, oy in zone.get("owls", []):
-        if has_enemy:
-            tx, ty = enemy_pos
+    owls_homes = zone.setdefault("owls_homes", list(zone.get("owls", [])))
+    while len(owls_homes) < len(zone.get("owls", [])):
+        owls_homes.append(zone["owls"][len(owls_homes)])
+    for i, (ox, oy) in enumerate(zone.get("owls", [])):
+        hx, hy = owls_homes[i] if i < len(owls_homes) else (ox, oy)
+        dist_from_home = math.hypot(tx - hx, ty - hy) if has_enemy else 999999
+        dist_to_enemy = math.hypot(tx - ox, ty - oy) if has_enemy else 999999
+
+        if has_enemy and dist_from_home <= 80:
             if _rects_overlap(ox, oy, ITEM_SIZE, ITEM_SIZE, tx, ty, ITEM_SIZE, ITEM_SIZE):
                 if zone.get(iframes_key, 0) <= 0:
                     zone[hp_key] -= 1
                     zone[iframes_key] = 20
                     if random.random() < 0.30:
-                        zone["enemy_stun_ticks"] = 30  # 暈眩 1 秒
+                        zone["enemy_stun_ticks"] = 30
                 new_owls.append((ox, oy))
             else:
                 step = 2.2
-                dist_x = tx - ox
-                dist_y = ty - oy
-                length = math.hypot(dist_x, dist_y)
-                if length > 0:
-                    new_owls.append((ox + (dist_x / length) * step, oy + (dist_y / length) * step))
+                if dist_to_enemy > 0:
+                    nx = ox + ((tx - ox) / dist_to_enemy) * step
+                    ny = oy + ((ty - oy) / dist_to_enemy) * step
+                    if math.hypot(nx - hx, ny - hy) <= 100:
+                        new_owls.append((nx, ny))
+                    else:
+                        new_owls.append((ox, oy))
                 else:
                     new_owls.append((ox, oy))
         else:
-            new_owls.append((ox, oy))
+            dist_to_home = math.hypot(hx - ox, hy - oy)
+            if dist_to_home <= 2.2:
+                new_owls.append((hx, hy))
+            else:
+                new_owls.append((ox + ((hx - ox) / dist_to_home) * 2.2, oy + ((hy - oy) / dist_to_home) * 2.2))
     zone["owls"] = new_owls
+
 
 
 
