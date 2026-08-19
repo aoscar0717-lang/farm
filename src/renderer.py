@@ -412,10 +412,11 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
             )
             screen.blit(rubble, (screen_x, screen_y))
 
-    # 畫出寵物
+    # 畫出守護動物
     import time
     anim_frame = int(time.time() * 4) % 4
-    # Goldie is 32x40, row 4 is walking down (4 frames)
+    
+    # 1. 🐕 看門狗
     dog_img = sprite_loader.get_sprite("Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png", 4, anim_frame, 32, 40, (int(ITEM_PX * SPRITE_SCALES["dog"][0]), int(ITEM_PX * SPRITE_SCALES["dog"][1])))
     for dx, dy in zstate.get("dogs", []):
         screen_x, screen_y = get_screen_coords(dx, dy)
@@ -424,6 +425,57 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
             screen.blit(dog_img, (screen_x - ITEM_PX//4, screen_y - ITEM_PX//4))
         else:
             pygame.draw.circle(screen, (205, 133, 63), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
+    # 2. 🐱 招財小貓
+    cat_img = sprite_loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png", 0, anim_frame, 16, 16, (int(ITEM_PX * SPRITE_SCALES["cat"][0]), int(ITEM_PX * SPRITE_SCALES["cat"][1])))
+    for cx, cy in zstate.get("cats", []):
+        screen_x, screen_y = get_screen_coords(cx, cy)
+        if screen_x is None: continue
+        if cat_img:
+            screen.blit(cat_img, (screen_x - ITEM_PX//6, screen_y - ITEM_PX//6))
+        else:
+            pygame.draw.circle(screen, (255, 215, 0), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
+    # 3. 🪿 暴躁警戒鵝
+    goose_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_duck_01_strip4.png", 0, anim_frame, 16, 16, (int(ITEM_PX * SPRITE_SCALES["goose"][0]), int(ITEM_PX * SPRITE_SCALES["goose"][1])))
+    for gx, gy in zstate.get("geese", []):
+        screen_x, screen_y = get_screen_coords(gx, gy)
+        if screen_x is None: continue
+        if goose_img:
+            screen.blit(goose_img, (screen_x - ITEM_PX//6, screen_y - ITEM_PX//6))
+        else:
+            pygame.draw.circle(screen, (240, 240, 240), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
+    # 4. 🐑 棉花守護羊
+    sheep_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_sheep_01_strip4.png", 0, anim_frame, 16, 16, (int(ITEM_PX * SPRITE_SCALES["sheep"][0]), int(ITEM_PX * SPRITE_SCALES["sheep"][1])))
+    for sx, sy in zstate.get("sheeps", []):
+        screen_x, screen_y = get_screen_coords(sx, sy)
+        if screen_x is None: continue
+        if sheep_img:
+            screen.blit(sheep_img, (screen_x - ITEM_PX//4, screen_y - ITEM_PX//4))
+        else:
+            pygame.draw.circle(screen, (220, 220, 230), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
+    # 5. 🐮 鐵壁戰鬥牛
+    bull_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png", 0, anim_frame, 32, 32, (int(ITEM_PX * SPRITE_SCALES["bull"][0]), int(ITEM_PX * SPRITE_SCALES["bull"][1])))
+    for bx, by in zstate.get("bulls", []):
+        screen_x, screen_y = get_screen_coords(bx, by)
+        if screen_x is None: continue
+        if bull_img:
+            screen.blit(bull_img, (screen_x - ITEM_PX//3, screen_y - ITEM_PX//3))
+        else:
+            pygame.draw.circle(screen, (139, 69, 19), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
+    # 6. 🦉 夜行守護鳥
+    owl_img = sprite_loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png", 0, anim_frame, 16, 16, (int(ITEM_PX * SPRITE_SCALES["owl"][0]), int(ITEM_PX * SPRITE_SCALES["owl"][1])))
+    for ox, oy in zstate.get("owls", []):
+        screen_x, screen_y = get_screen_coords(ox, oy)
+        if screen_x is None: continue
+        if owl_img:
+            screen.blit(owl_img, (screen_x - ITEM_PX//6, screen_y - ITEM_PX//6))
+        else:
+            pygame.draw.circle(screen, (100, 149, 237), (screen_x + ITEM_PX // 2, screen_y + ITEM_PX // 2), ITEM_PX // 2)
+
 
     # Draw Thief (farm zone only -- zstate.get("thief_pos") is always None
     # while viewing the decor map, since that key never gets set there)
@@ -562,12 +614,8 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
         progress_ratio = task["progress"] / max(1, task["max_progress"])
         
         t_type = task["type"]
-        img = None
-        if t_type == "dog": img = images.get("dog")
-        elif t_type == "cat": img = images.get("cat")
-        elif t_type == "goose": img = images.get("goose")
-        elif t_type == "owl": img = images.get("owl")
-        elif t_type == "fence": img = images.get("fence")
+        img = images.get(t_type)
+
         
         # Ghost image
         ghost = pygame.Surface((ITEM_PX, ITEM_PX), pygame.SRCALPHA)

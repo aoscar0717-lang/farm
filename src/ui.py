@@ -68,15 +68,13 @@ def draw_hud(screen, state, current_tool, active_zone):
     text_surf = font_large.render(phase_text, True, (240, 220, 150) if not is_night else (160, 200, 255))
     screen.blit(text_surf, (40, 22))
 
-    # Pet / farm stats -- dog count is per-zone now, since farm dogs guard
-    # crops and decor dogs guard decorations on two separate maps.
-    # Also shows the uncapped lifetime "累積擊退敵人數" stat -- there's no
-    # rent/Game Over anymore, so this is one of the long-run numbers that
-    # keeps climbing across an endless run instead of resetting.
-    zone_dogs = len(state.get(active_zone, {}).get('dogs', []))
-    pet_stats = f"狗 ({'農田區' if active_zone == 'farm' else '佈置區'}): {zone_dogs}/10   繁榮度: {state.get('prosperity_score',0)}   農場等級: Lv{state.get('farm_level',1)}   累積擊退敵人: {state.get('enemies_defeated',0)}"
+    # Pet / farm stats
+    zone_data = state.get(active_zone, {})
+    total_defenders = len(zone_data.get('dogs', [])) + len(zone_data.get('cats', [])) + len(zone_data.get('geese', [])) + len(zone_data.get('sheeps', [])) + len(zone_data.get('bulls', [])) + len(zone_data.get('owls', []))
+    pet_stats = f"守護動物 ({'農田區' if active_zone == 'farm' else '佈置區'}): {total_defenders}/15   繁榮度: {state.get('prosperity_score',0)}   農場等級: Lv{state.get('farm_level',1)}   累積擊退: {state.get('enemies_defeated',0)}"
     pet_surf = font_small.render(pet_stats, True, (180, 200, 255))
     screen.blit(pet_surf, (40, 66))
+
 
     # Money (top-right) -- no more rent, so this is just the current balance.
     money_surf = font_small.render(f"資金: ${state['money']}", True, (255, 215, 0))
@@ -241,16 +239,15 @@ def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
                 {"id": "pumpkin", "name": "魔法南瓜種子", "price": 300, "desc": "3天成熟，鐮刀收割 $1000"},
             ]
         elif active_tab == "def":
-            # V1.1 balance pass: the fence card used to show a literal
-            # "1 木材" price -- there is no wood/material system anywhere in
-            # this project (only a couple of unused leftover sprite/string
-            # references), and build_fence_ actually charges $20 cash, same
-            # as every other item here. Descriptions rewritten to match
-            # each item's real behavior instead of a generic placeholder.
             items = [
                 {"id": "fence", "name": "木圍欄", "price": 20, "desc": "HP100，阻擋敵人，受損後被突破"},
-                {"id": "trap",  "name": "捕獸夾", "price": 50, "desc": "敵人踩到觸發，一次性"},
-                {"id": "dog",   "name": "看門狗", "price": "FREE" if state.get("free_dog") else 200, "desc": "自動攻擊靠近敵人，不會陣亡"},
+                {"id": "trap",  "name": "捕獸夾", "price": 50, "desc": "敵人踩到觸發，一次性重創"},
+                {"id": "dog",   "name": "看門狗", "price": "FREE" if state.get("free_dog") else 200, "desc": "自動巡邏追擊，均衡型守護者"},
+                {"id": "cat",   "name": "招財小貓", "price": 150, "desc": "極速爪擊減速敵人，白天產金幣"},
+                {"id": "goose", "name": "暴躁警戒鵝", "price": 220, "desc": "領地意識極強，憤怒衝撞擊退敵人"},
+                {"id": "sheep", "name": "棉花守護羊", "price": 260, "desc": "10HP羊毛護盾，主動吸引敵人仇恨"},
+                {"id": "bull",  "name": "鐵壁戰鬥牛", "price": 350, "desc": "體型巨大威嚴，巨角挑擊雙倍重傷"},
+                {"id": "owl",   "name": "夜行守護鳥", "price": 280, "desc": "空中高速俯衝，有機會嚇停敵人"},
             ]
         elif active_tab == "pet":
             items = [
@@ -263,30 +260,30 @@ def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
         left_items  = items[:(len(items)+1)//2]
         right_items = items[(len(items)+1)//2:]
 
-        for page_items, page_x, start_y in [(left_items, left_page_x, shop_y + 210), (right_items, right_page_x, shop_y + 170)]:
+        for page_items, page_x, start_y in [(left_items, left_page_x, shop_y + 205), (right_items, right_page_x, shop_y + 165)]:
             y_offset = start_y
             for item in page_items:
-                card_rect = pygame.Rect(page_x, y_offset, left_page_w, 65)
+                card_rect = pygame.Rect(page_x, y_offset, left_page_w, 60)
                 hovered = card_rect.collidepoint(mouse_pos)
 
-                card_surf = pygame.Surface((left_page_w, 65), pygame.SRCALPHA)
+                card_surf = pygame.Surface((left_page_w, 60), pygame.SRCALPHA)
                 bg_a = 160 if hovered else 100
                 pygame.draw.rect(card_surf, (255, 255, 255, bg_a), card_surf.get_rect(), border_radius=10)
                 screen.blit(card_surf, card_rect.topleft)
 
                 img = images.get(item["id"])
                 if img:
-                    screen.blit(pygame.transform.scale(img, (40, 40)), (card_rect.x + 10, card_rect.y + 12))
+                    screen.blit(pygame.transform.scale(img, (38, 38)), (card_rect.x + 10, card_rect.y + 11))
                 else:
-                    pygame.draw.rect(screen, (220, 220, 220), (card_rect.x + 10, card_rect.y + 12, 40, 40), border_radius=5)
+                    pygame.draw.rect(screen, (220, 220, 220), (card_rect.x + 10, card_rect.y + 11, 38, 38), border_radius=5)
                     fb = font_tiny.render(item["name"][:2], True, (100, 100, 100))
-                    screen.blit(fb, (card_rect.x + 30 - fb.get_width()//2, card_rect.y + 32 - fb.get_height()//2))
+                    screen.blit(fb, (card_rect.x + 29 - fb.get_width()//2, card_rect.y + 30 - fb.get_height()//2))
 
                 n_surf = font_small.render(item["name"], True, BLACK)
-                screen.blit(n_surf, (card_rect.x + 60, card_rect.y + 10))
+                screen.blit(n_surf, (card_rect.x + 55, card_rect.y + 8))
 
                 d_surf = font_tiny.render(item["desc"], True, (80, 80, 80))
-                screen.blit(d_surf, (card_rect.x + 60, card_rect.y + 35))
+                screen.blit(d_surf, (card_rect.x + 55, card_rect.y + 33))
 
                 p_str = f"${item['price']}" if isinstance(item['price'], int) else str(item['price'])
                 p_col = YELLOW if item['price'] != "FREE" else (50, 220, 50)
@@ -296,7 +293,8 @@ def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
                 if hovered:
                     pygame.draw.rect(screen, BLUE, card_rect, 2, border_radius=10)
 
-                y_offset += 75
+                y_offset += 68
+
     else:
         grades     = ["normal", "rare", "epic", "legendary"]
         grades_tw  = {"normal": "一般", "rare": "稀有", "epic": "史詩", "legendary": "傳奇"}

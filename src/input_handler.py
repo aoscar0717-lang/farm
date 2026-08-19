@@ -46,25 +46,36 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
                         else:
                             items = []
                             if active_tab == "seed": items = [{"id": "radish", "price": 30}, {"id": "carrot", "price": 100}, {"id": "pumpkin", "price": 300}]
-                            elif active_tab == "def": items = [{"id": "fence", "price": 20}, {"id": "trap", "price": 50}, {"id": "dog", "price": "FREE" if state.get("free_dog") else 200}]
+                            elif active_tab == "def":
+                                items = [
+                                    {"id": "fence", "price": 20},
+                                    {"id": "trap", "price": 50},
+                                    {"id": "dog", "price": "FREE" if state.get("free_dog") else 200},
+                                    {"id": "cat", "price": 150},
+                                    {"id": "goose", "price": 220},
+                                    {"id": "sheep", "price": 260},
+                                    {"id": "bull", "price": 350},
+                                    {"id": "owl", "price": 280},
+                                ]
                             elif active_tab == "pet": items = [{"id": "stone_path", "price": 20}, {"id": "flower", "price": 50}, {"id": "bench", "price": 100}, {"id": "fountain", "price": 300}]
                             else: items = []
-                            
+
                             left_items = items[:(len(items)+1)//2]
                             right_items = items[(len(items)+1)//2:]
-                            
+
                             clicked = False
-                            for page_items, page_x, start_y in [(left_items, left_page_x, shop_y + 210), (right_items, right_page_x, shop_y + 170)]:
+                            for page_items, page_x, start_y in [(left_items, left_page_x, shop_y + 205), (right_items, right_page_x, shop_y + 165)]:
                                 y_offset = start_y
                                 for item in page_items:
-                                    card_rect = pygame.Rect(page_x, y_offset, left_page_w, 65)
+                                    card_rect = pygame.Rect(page_x, y_offset, left_page_w, 60)
                                     if card_rect.collidepoint(mx, my):
                                         current_tool = item["id"]
                                         shop_open = False
                                         clicked = True
                                         break
-                                    y_offset += 75
+                                    y_offset += 68
                                 if clicked: break
+
                     else:
                         grades = ["normal", "rare", "epic", "legendary"]
                         grades_tw = {"normal": "一般", "rare": "稀有", "epic": "史詩", "legendary": "傳奇"}
@@ -151,8 +162,9 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
                         state = apply_action(state, f"build_fence_{gx}_{gy}", active_zone)
                     elif current_tool == "trap":
                         state = apply_action(state, f"place_trap_{gx}_{gy}", active_zone)
-                    elif current_tool == "dog":
-                        state = apply_action(state, f"place_dog_{gx}_{gy}", active_zone)
+                    elif current_tool in ["dog", "cat", "goose", "sheep", "bull", "owl"]:
+                        state = apply_action(state, f"place_{current_tool}_{gx}_{gy}", active_zone)
+
                 else:
                     gx, gy = world_x, world_y
                     state = apply_action(state, f"click_{gx}_{gy}", active_zone)
