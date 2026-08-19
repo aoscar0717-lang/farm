@@ -277,9 +277,37 @@ _CJK_SYSTEM_FONT_HINTS = [
 ]
 
 
+# 技術債清理：原本的 NotoSansTC-GameSubset.otf 是裁切過的子集字型，
+# Phase 4.75 調查發現實際顯示文字裡有 140+ 個字不在這個子集的收錄範圍
+# 內，這次直接換成完整繁體中文字庫的字型檔，從根本解決缺字豆腐塊，
+# 不用再逐字排查/替換現有文字。
+#
+# PREFERRED_FONT_FILENAME 是「明確指定優先使用哪個檔名」，而不是沿用
+# 舊版 _find_bundled_font_path() 那種「掃資料夾，按檔名排序抓第一個副
+# 檔名符合的字型檔」的隱式規則——舊規則其實不用改任何程式碼、只要把
+# Cubic_11.ttf 丟進 assets/fonts/ 資料夾，因為 "C" 排序在 "N" 前面，
+# 舊邏輯本來就會自動抓到新字型；但這樣的行為完全取決於檔名字母順序，
+# 使用者/未來的人不容易一眼看出「現在到底在用哪個字型檔」，而且如果
+# 資料夾裡日後又多放了其他字型檔，排序結果可能悄悄變動、行為跟著跑掉
+# 而不容易發現。明確寫一個「優先檔名」常數，配合下面的判斷邏輯（有這
+# 個檔案就一定用它；沒有的話才退回舊的自動掃描邏輯），行為清楚、可預
+# 期，也保留了「使用者還沒放新字型檔進去之前，遊戲至少還能用舊字型跑
+# 起來」這個容錯後備，不會突然完全沒有中文字型可用。
+PREFERRED_FONT_FILENAME = "Cubic_11.ttf"
+
+
 def _find_bundled_font_path() -> Optional[str]:
     if not os.path.isdir(FONT_DIR):
         return None
+
+    preferred_path = os.path.join(FONT_DIR, PREFERRED_FONT_FILENAME)
+    if os.path.isfile(preferred_path):
+        return preferred_path
+
+    # 後備：PREFERRED_FONT_FILENAME 還沒放進資料夾時，退回舊版「掃資料
+    # 夾抓第一個字型檔」的行為，維持向下相容（例如目前資料夾裡還留著
+    # 的 NotoSansTC-GameSubset.otf 會被抓到，遊戲不會因為新字型檔案還
+    # 沒就位就完全沒有中文字型可用）。
     for fn in sorted(os.listdir(FONT_DIR)):
         if fn.lower().endswith((".ttf", ".ttc", ".otf")):
             return os.path.join(FONT_DIR, fn)
@@ -342,30 +370,21 @@ _SAFE_TEXT_ALLOWED_RANGES = (
 
 def safe_text(text) -> str:
     """把字串裡任何落在允許範圍外的字元濾掉（主要是 Emoji、Dingbats、
-    Misc Symbols 這些目前綁定字型沒有字形的字元），確保丟進 font.render
-    的字串一定乾淨，不會跑出缺字符方塊「☒」。
+    Misc Symbols 這些字型通常沒有字形的字元），確保丟進 font.render 的
+    字串一定乾淨，不會跑出缺字符方塊「☒」。
 
-    Phase 4.75 補充說明（沒有改這個函式本身，見下方調查結果）：這次修
-    「伐/礦變豆腐塊」時，用 fontTools 直接讀 assets/fonts/
-    NotoSansTC-GameSubset.otf 的 cmap 驗證發現，這個字型是「裁切過的
-    子集字型」，同一個 Unicode 區段裡（例如整個 CJK 統一表意文字
-    0x4E00-0x9FFF）只收錄一部分字，這個函式目前只按區段放行，抓不到
-    「區段合法但字型子集裡其實沒有這個字」的情況——這正是「伐」「礦」
-    變豆腐塊的根本原因。原本評估過在這裡加一層用 fontTools 讀取真實
-    cmap 的第二道過濾，但實測發現這個字型子集缺字的範圍遠比這次要修
-    的兩個機台圖示大得多（粗略掃過整份程式碼裡的顯示字串，「科」
-    「技」「訂」「關」「灑」等目前 UI 上大量使用的字，包括「科技點數」
-    「訂單」「開關」「自動灑水器」這些既有名稱本身用到的字，都同樣不
-    在這個字型子集的收錄範圍內），如果現在就加上這層過濾，會讓
-    safe_text() 一次性從很多既有、目前可能運作正常或至少「看起來還
-    好」的顯示文字裡拿掉大量字元，而這個環境沒辦法執行 pygame 實際看
-    畫面驗證會變成什麼樣子，貿然全面套用風險太高，可能把現有文字改
-    得更難讀甚至語意不通。這次保守處理：只針對這次明確要修的機台簡寫
-    字元，逐一用 fontTools 驗證後手動挑選字型真的有的替代字（見
-    _BUILDING_ICONS），這個函式本身維持原樣不擴大範圍；這個更大範圍
-    的字型子集缺字問題，已經另外完整揭露給使用者，建議另開一個階段
-    專門處理（重新產生涵蓋更完整的子集字型，或整份改用完整字集的中文
-    字型檔）。"""
+    技術債清理備註：Phase 4.75 曾經調查過，發現舊字型
+    NotoSansTC-GameSubset.otf 是裁切過的子集字型，實際顯示文字裡有
+    140+ 個字不在收錄範圍內（「科」「技」「訂」「關」「灑」等大量既有
+    UI 文字用字都中標），當時因為那個範圍太大、這個環境又沒辦法執行
+    pygame 實際驗證，決定不擴大 safe_text() 的過濾範圍，只針對機台簡
+    寫做局部替換，並把完整問題揭露給使用者建議另外處理。這次換成完整
+    字庫的 Cubic_11.ttf 之後，那個「字型子集缺字」的根本原因已經不存
+    在（只要新字型檔案真的有完整涵蓋繁體中文常用字）——這個函式維持
+    原本「按 Unicode 區段過濾」的簡單邏輯即可，不需要、也不必再加上
+    當時評估過的 fontTools 動態 cmap 檢查那層複雜度。這裡仍然保留區段
+    過濾（不是整個拿掉這個函式），是因為就算換成點陣中文字型，通常也
+    不會內建 Emoji 字形，emoji 字元還是需要被濾掉，道理跟原本一樣。"""
     if not text:
         return text
     text = str(text)
@@ -400,6 +419,23 @@ def get_font(size: int, bold: bool = False):
             pass
     return _SafeFont(pygame.font.SysFont('arial', size, bold=bold))
 
+# 技術債清理：換成 Cubic_11.ttf 這類點陣風格 (pixel font) 字型後，這裡
+# 有兩件事這個環境沒辦法用 pygame 實際渲染驗證，需要換好字型後麻煩
+# 實機肉眼確認：
+#   1. 字級大小——點陣字型通常是照固定像素網格設計的（Cubic 11 顧名思
+#      義是 11px 網格，Zpix 是 12px 網格），用非網格倍數的字級渲染時，
+#      SDL_ttf 還是能正常畫出來，但字形可能因為縮放而變得模糊、不像
+#      原本設計的那麼銳利。下面 FONT_XS/SM/MD/LG 的字級 (12/14/16/20)
+#      是照原本 Noto Sans TC（向量字型，任何字級都清晰）調的，換成點
+#      陣字型後如果肉眼看起來模糊，建議把這四個數字都調整成新字型網
+#      格大小的整數倍（例如 Cubic 11 可以試 11/22/33），再依畫面實際
+#      排版空間微調。
+#   2. 粗體 (bold=True，FONT_MD/FONT_LG 目前有用到)——pygame/SDL_ttf 的
+#      粗體是用「加粗筆畫」的方式模擬出來的合成粗體，對向量字型效果
+#      通常沒問題，但對點陣字型可能會讓字形糊成一團、可讀性下降。如果
+#      換字型後 FONT_MD/FONT_LG 顯示的粗體文字看起來模糊或變形，可以
+#      考慮把對應的 bold=True 拿掉，改用其他方式做視覺區分（例如字級
+#      加大或顏色加強)。
 FONT_XS = get_font(12)
 FONT_SM = get_font(14)
 FONT_MD = get_font(16, bold=True)
@@ -1752,10 +1788,13 @@ class NightwatchFarmApp:
             blit_text_with_shadow(self.screen, FONT_MD, label, C_TEXT_ON_DARK, center=rect.center)
 
         btn_resume = pygame.Rect(mx + (modal_w - 220) // 2, my + 150, 220, 52)
-        # 用「恢復」而非「繼續」：後者的「繼」字不在專案自帶的精簡字型子集
-        # (assets/fonts/NotoSansTC-GameSubset.otf) 收錄範圍內，會顯示成缺字
-        # 方塊「□」。P 鍵暫停/恢復本來就用「恢復」這個詞（見上方 run() 的
-        # K_p 處理），這裡沿用同一個詞，語意一致，也保證字型一定有收錄。
+        # 用「恢復」而非「繼續」：這個選字原本是因為舊字型
+        # NotoSansTC-GameSubset.otf 是裁切過的子集字型，「繼」字不在收錄
+        # 範圍內會變成缺字方塊「□」。技術債清理階段換成完整字庫的
+        # Cubic_11.ttf 之後，這個限制理論上已經不存在，但這裡沒有跟著
+        # 改回「繼續」——P 鍵暫停/恢復本來就用「恢復」這個詞（見上方
+        # run() 的 K_p 處理），兩處維持同一個詞語意更一致，純粹是用字
+        # 習慣的選擇，不是缺字限制強迫的了。
         _draw_menu_button(btn_resume, "▶ 恢復", (90, 122, 74))
 
         btn_restart = pygame.Rect(mx + (modal_w - 220) // 2, my + 216, 220, 52)
@@ -2268,56 +2307,36 @@ class NightwatchFarmApp:
 
         self.screen.blit(overlay, (GRID_X, GRID_Y))
 
-    # 機台圖示文字對照表：烤箱/熔爐是 Phase 2 就有的兩種，Phase 4 的
-    # 灑水器/自動採收機沒有對應貼圖 asset_key 素材，走跟其他機台一致的
-    # 退回色塊 + emoji 圖示。用字典而不是原本的 if/else 三元式，是因為
-    # 現在種類變成 4 種，寫成字典比疊 elif 好讀。
-    # Phase 4.75：機台簡寫字元全面改成「字型真的有這個字形」的安全字元，
-    # 不再用 emoji。
+    # 機台圖示文字對照表：Phase 4.75 為了迴避舊字型
+    # NotoSansTC-GameSubset.otf（裁切過的子集字型）缺字，把這裡全部改
+    # 成單一「字型驗證過真的有字形」的安全字元，犧牲了辨識度。技術債
+    # 清理階段換成完整字庫的 Cubic_11.ttf 之後，缺字限制理論上已經解
+    # 除，這裡照使用者要求復原成更完整、更好辨識的詞彙：
+    #   LUMBERYARD (伐木場)     木  -> 伐木
+    #   MINE       (礦場)       鐵  -> 採礦
+    #   KILN       (炭窯)       火  -> 燒炭
+    #   OVEN       (烤箱)       熟  -> 烘烤
+    #   FURNACE    (熔爐)       鋼  -> 熔煉
     #
-    # 【根本原因，跟使用者的描述有出入，如實說明】伐/礦會變成豆腐塊，
-    # 不是「字型檔字庫不全」這種模糊說法能完全解釋的——這個專案綁定的
-    # assets/fonts/NotoSansTC-GameSubset.otf 是一個「裁切過的子集字型」
-    # (GameSubset)，本來就只收錄一部分常用中文字，不是完整字集。用
-    # fontTools 直接讀這個 .otf 檔的 cmap 表逐字驗證後發現：不只
-    # 「伐」「礦」缺字形，使用者這次建議的替代字「炭」「烤」「熔」
-    # 「爐」也全部都不在這個字型的收錄範圍內——如果直接照字面建議改，
-    # 會把 2 個豆腐塊變成 4 個豆腐塊，問題更嚴重。這裡改用 fontTools
-    # 實際驗證過、確定字型裡真的有字形的替代字：
-    #   LUMBERYARD (伐木場) -> 木  （使用者原本的建議，字型裡有，維持）
-    #   MINE       (礦場)   -> 鐵  （使用者建議的兩個選項之一，字型裡有）
-    #   KILN       (炭窯)   -> 火  （使用者建議的「炭」缺字形，改用字型
-    #                                裡有、且同樣能表達「燃燒」意象的「火」）
-    #   OVEN       (烤箱)   -> 熟  （使用者建議的「烤」缺字形，改用字型
-    #                                裡有、能表達「烘烤完成」意象的「熟」）
-    #   FURNACE    (熔爐)   -> 鋼  （使用者建議的「熔」「爐」都缺字形，
-    #                                改用字型裡有、能對應熔爐產出物
-    #                                metal_ingot「金屬錠」意象的「鋼」，
-    #                                也剛好跟 MINE 的「鐵」形成「礦石 ->
-    #                                鋼」的原料/產物視覺對應）
-    #
-    # 另外順手修掉一個連帶發現、範圍相關的既有 bug：原本 SPRINKLER/
-    # AUTO_HARVESTER 用的 🔥🍞💧🤖 這些 emoji，其實從 Phase 2 開始就
-    # 從來沒有真的顯示出來過——advanced_nightwatch_farm-v3.py 頂部的
-    # safe_text()（防止字型沒有的字元變成缺字符方塊 ☒）只依照 Unicode
-    # 「區段」放行（ASCII/CJK 統一表意文字等），emoji 所在的
-    # U+1F300~U+1FAFF 這段完全不在允許範圍內，所以這些 emoji 字串進了
-    # FONT_MD.render() 之前就已經被 safe_text() 整個濾掉、變成空字串
-    # ——也就是說這幾座機台上原本應該顯示圖示的位置，這幾個階段以來
-    # 實際上什麼都沒畫出來，只是因為那個位置本來就有進度條/指示燈等其
-    # 他視覺元素，才沒有被注意到「圖示消失了」。這次既然要把 4 種機台
-    # 的簡寫都換成安全字元，乾脆把另外 2 種也一起換掉，全部 6 種機台
-    # 圖示統一使用同一套「fontTools 驗證過真的有字形」的中文字，不再
-    # 混用 emoji，徹底解決這一整類問題，不用逐一為每個 emoji 再想一次
-    # 替代字。
+    # SPRINKLER/AUTO_HARVESTER 這兩個使用者給的是「Emoji 或更完整中文
+    # 名稱擇一」的彈性指示，這裡選擇中文詞彙（灑水/採收）而不是照
+    # Phase 4 原樣復原成 💧/🤖 這兩個 emoji，原因是：這次換的
+    # Cubic_11.ttf 是點陣風格的「中文」字型，這類字型通常只收錄中文/
+    # 標點/基本符號的字形，不太會內建全彩 Emoji 字形（那通常是作業系統
+    # 層級的 Emoji 字型負責的範疇，不是一般中文字型檔會做的事）；而且
+    # 目前綁定字型的實際檔案還沒放進這個環境，沒辦法用 fontTools 驗證
+    # Emoji 字形是否存在。與其賭一把「這次真的復原回去可能又變回豆腐
+    # 塊」，不如選擇肯定落在完整繁體中文字型收錄範圍內的中文詞彙，跟
+    # 其餘 5 種機台的呈現風格也保持一致。如果之後確認新字型真的支援
+    # Emoji，要改回 💧/🤖 只要動這個字典即可。
     _BUILDING_ICONS = {
-        BuildingType.FURNACE: "鋼",
-        BuildingType.OVEN: "熟",
-        BuildingType.SPRINKLER: "水",
-        BuildingType.AUTO_HARVESTER: "採",
-        BuildingType.LUMBERYARD: "木",
-        BuildingType.MINE: "鐵",
-        BuildingType.KILN: "火",
+        BuildingType.FURNACE: "熔煉",
+        BuildingType.OVEN: "烘烤",
+        BuildingType.SPRINKLER: "灑水",
+        BuildingType.AUTO_HARVESTER: "採收",
+        BuildingType.LUMBERYARD: "伐木",
+        BuildingType.MINE: "採礦",
+        BuildingType.KILN: "燒炭",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
