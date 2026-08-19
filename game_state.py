@@ -847,6 +847,66 @@ class GameState:
             if e in self.enemies:
                 self.enemies.remove(e)
 
+        self._apply_enemy_separation(dt)
+
+    def _apply_enemy_separation(self, dt: float):
+        """簡化版 Boids 分離 (Separation)：多隻敵人的尋路都指向同一個目標
+        時，座標會完全重合、疊成一坨，畫面上看起來只有一隻。這裡在正常
+        的尋路移動『之上』疊加一個很小的互斥推力，讓彼此靠太近時輕微
+        擠開，形成散開的一群，而不影響原本朝目標前進的路徑邏輯。
+
+        只處理 MOVING / FLEEING（正在移動的）敵人——ACTING（原地掠奪
+        中）跟 STUNNED（暈眩）的敵人應該待在原地不動，不參與推擠，也
+        不應該被推離它正在行動的目標格。
+
+        距離用跟尋路一致的「格」為單位，不是像素：這個檔案（純邏輯層）
+        不知道畫面上一格是幾像素，CELL_SIZE 是 advanced_nightwatch_farm
+        -v3.py 渲染層的常數，邏輯層不應該反過來依賴渲染層的東西。
+        0.8 格對應需求裡「CELL_SIZE * 0.8」的比例，換算成這個檔案原生
+        使用的座標單位。
+
+        效能：雙層迴圈是 O(n^2)，但夜晚同時存在的敵人數量通常是個位數
+        到十幾隻，就算 20 隻同時在場也只是 190 次距離比較，這一幀內完全
+        可忽略，不會造成卡頓。
+        """
+        movable = [e for e in self.enemies if e.state in (EnemyState.MOVING, EnemyState.FLEEING)]
+        n = len(movable)
+        if n < 2:
+            return
+
+        SEPARATION_DIST = 0.8   # 格：兩隻敵人的直線距離小於這個值就互推
+        PUSH_STRENGTH = 1.6     # 格/秒：推力大小，乘上 dt 換算成這一幀的實際位移
+
+        pushes = [[0.0, 0.0] for _ in range(n)]
+        for i in range(n):
+            ax, ay = movable[i].x, movable[i].y
+            for j in range(i + 1, n):
+                bx, by = movable[j].x, movable[j].y
+                dx = ax - bx
+                dy = ay - by
+                dist = math.hypot(dx, dy)
+                if dist >= SEPARATION_DIST:
+                    continue
+                if dist < 1e-6:
+                    # 座標完全重合，方向不確定，給一個固定方向的小推力
+                    # 錯開，避免除以 0。
+                    nx, ny = 1.0, 0.0
+                    overlap = 1.0
+                else:
+                    nx, ny = dx / dist, dy / dist
+                    overlap = (SEPARATION_DIST - dist) / SEPARATION_DIST
+                push_x = nx * overlap * PUSH_STRENGTH * dt
+                push_y = ny * overlap * PUSH_STRENGTH * dt
+                pushes[i][0] += push_x
+                pushes[i][1] += push_y
+                pushes[j][0] -= push_x
+                pushes[j][1] -= push_y
+
+        for enemy, (px, py) in zip(movable, pushes):
+            if px == 0.0 and py == 0.0:
+                continue
+            enemy.x = max(0.0, min(float(self.width - 1), enemy.x + px))
+            enemy.y = max(0.0, min(float(self.height - 1), enemy.y + py))
 
     def _move_enemy_along_path(self, enemy: Enemy, dt: float):
         if enemy.path:
@@ -878,14 +938,17 @@ class GameState:
         # 情況 A：突襲農莊金庫 (若無作物)
         if enemy.is_targeting_vault:
             stolen_vault_gold = max(30, int(self.gold * 0.35))
-            self.gold -= stolen_vault_gold
+            # 夾住下限，不讓金幣變負數——這個下限同時也是「還有沒有東西
+            # 可以打」的判斷依據 (見 _retreat_or_reengage)：金庫被搬空到
+            # 0 金幣之後，敵人才會判定金庫已經沒有意義，考慮撤退。
+            self.gold = max(0, self.gold - stolen_vault_gold)
             self._emit_event(
                 EventType.VAULT_RAIDED,
                 f"🚨 金庫失守！{enemy.config['name']} 洗劫了中央農莊金庫，掠奪了 {stolen_vault_gold} 金幣！",
                 {"gold_lost": stolen_vault_gold, "remaining_gold": self.gold}
             )
-            self._set_enemy_flee_path(enemy)
             self.check_game_over()
+            self._retreat_or_reengage(enemy)
             return
 
         # 情況 B：破壞作物
@@ -899,13 +962,34 @@ class GameState:
             gold_loss = tile.crop.config["theft_gold_loss"]
             tile.crop = None
             self.gold = max(0, self.gold - gold_loss)
-            
+
             self._emit_event(
                 EventType.CROP_STOLEN,
                 f"😱 {enemy.config['name']} 破壞了 ({tx}, {ty}) 的 {crop_name}，並使您損失了 {gold_loss} 金幣！",
                 {"x": tx, "y": ty, "gold_lost": gold_loss, "remaining_gold": self.gold}
             )
-        self._set_enemy_flee_path(enemy)
+        self._retreat_or_reengage(enemy)
+
+    def _retreat_or_reengage(self, enemy: Enemy):
+        """敵人破壞/偷竊完一個目標後的下一步決定：不再是原本『吃完就跑』
+        的固定行為，改成預設繼續進攻——立刻重新尋路找下一個目標（下一塊
+        作物，或者農田已經被搜刮一空時改盯上金庫）。
+
+        允許撤退（進入 FLEEING）只有幾種情況：
+          - 白天來臨：_update_enemies() 本來就只在夜晚 (GamePhase.NIGHT)
+            被 update() 呼叫，天亮之後敵人根本不會再跑到這個函式，不用
+            在這裡另外判斷一次。
+          - 被手電筒擊暈 / 被看門狗或陷阱擊敗：這兩種情況分別會提前把
+            敵人設成 STUNNED（在 _update_enemies 開頭就 continue，不會
+            執行到掠奪動作）或直接消滅放進 dead_or_escaped（同樣走不到
+            這裡），跟這個函式互不影響。
+          - 地圖上已經完全沒有任何可攻擊目標：農田裡一株作物都不剩，
+            且金庫也已經被搬空到 0 金幣，再攻擊金庫也搬不到東西，這時
+            才真的撤退，不會呆站在空地圖中央發呆。
+        """
+        self._assign_enemy_target_and_path(enemy)
+        if enemy.is_targeting_vault and self.gold <= 0:
+            self._set_enemy_flee_path(enemy)
 
     def _set_enemy_flee_path(self, enemy: Enemy):
         enemy.state = EnemyState.FLEEING
