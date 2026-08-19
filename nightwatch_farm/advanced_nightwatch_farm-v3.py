@@ -11,7 +11,9 @@ import sys
 import os
 import math
 import random
+from typing import List, Tuple, Optional, Dict, Any
 import pygame
+
 
 if sys.platform == "win32":
     try:
