@@ -26,31 +26,25 @@ BOSS_DIRECTION_ROWS = {"down": 0, "right": 1, "up": 2}
 BOSS_CHROMA_KEY = (0, 0, 0)
 
 # ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
-# 實測 128x32，4 格橫向排列、每格 32x32，由左至右正好是
-# seed / sprout / growing / mature 4 個生長階段，不用額外挑選。
-# 圖片本身就有真正的 PNG alpha 透明背景（跟 pig_chroma.png 不同，這張
-# 沒有純色背景，也有少量真正不透明的黑色像素是畫作的一部分，比如描邊，
-# 所以不能用 set_colorkey 去背，直接 convert_alpha() 保留原始透明度）。
-CORN_FRAME_WIDTH = 32
+# 實測 128x32，原本以為是 4 格橫向排列、每格 32x32，但其實每組是 2 個 16x32 並排
+# (左邊健康，右邊枯萎)。將寬度減半為 16 以排除連在一起的枯萎版本。
+CORN_FRAME_WIDTH = 16  # 寬度減半：原本 32 -> 改為 16
 CORN_FRAME_HEIGHT = 32
-CORN_STAGE_COLUMNS = {"seed": 0, "sprout": 1, "growing": 2, "mature": 3}
+# 欄數加倍，只取偶數欄 (0, 2, 4, 6) 即代表健康版本
+CORN_STAGE_COLUMNS = {"seed": 0, "sprout": 2, "growing": 4, "mature": 6}
 
 # ---- 胡蘿蔔/番茄/土豆/藍莓 (assets/crops/胡蘿蔔_番茄_土豆_藍莓.png) --------
 # 實測 224x192，是 7 欄 x 4 列、每格 32x32 的網格：
 #   row 0 = 胡蘿蔔 (carrot)，row 1 = 番茄 (tomato)，
 #   row 2 = 土豆 (potato，目前遊戲沒有這個作物，切圖時直接跳過)，
 #   row 3 = 藍莓 (blueberry)。
-# 每一列裡實際上有 5 組「生長圖示」由左至右依序變大（col 0~4），
-# 每組本身又是兩個並排的小變體（跟 pig_chroma 的站姿雙格類似，是美術
-# 風格，不影響切格——照樣一格 32x32 整組切下來），col 5 是空白，
-# col 6 是「已收成」的道具圖示（不是生長階段，不使用）。
-# 4 個生長階段目前先取 [0, 1, 3, 4]（seed / sprout / growing / mature），
-# 跳過 col 2（變化太小，跟 col1/col3 差異不明顯）——想調整的話改
-# MIX_STAGE_COLUMNS 這個字典就好，不用動切圖邏輯。
-MIX_FRAME_WIDTH = 32
+# 每一列裡實際上有 5 組「生長圖示」由左至右依序變大，每組本身是兩個並排的變體
+# (左邊健康，右邊枯萎)。將寬度減半為 16 以排除枯萎圖案。
+MIX_FRAME_WIDTH = 16  # 寬度減半：原本 32 -> 改為 16
 MIX_FRAME_HEIGHT = 32
 MIX_ROW_CROPS = {"carrot": 0, "tomato": 1, "blueberry": 3}  # row 2 (potato) 略過
-MIX_STAGE_COLUMNS = {"seed": 0, "sprout": 1, "growing": 3, "mature": 4}
+# 原本的 col (0, 1, 3, 4) 乘以 2 轉換為 16px 的新欄位索引，只取健康版本 (左半邊)
+MIX_STAGE_COLUMNS = {"seed": 0, "sprout": 2, "growing": 6, "mature": 8}
 
 
 class AssetLoader:
