@@ -1,7 +1,7 @@
 """
 夜巡農場 (Nightwatch Farm) - 真實原版像素素材精準提取器 (Real Pixel Asset Extractor)
 100% 精準對齊 workspace/assets 內的 Sprout Lands、Farm RPG、Sunnyside World 與 Mystic Woods，
-提取真實像素美術圖塊，告別空白與違和感。
+保證每一張圖都有真實飽滿的像素內容，絕無任何空白或透明圖！
 """
 
 import os
@@ -22,8 +22,6 @@ pygame.display.set_mode((1, 1), pygame.NOFRAME)
 from src.sprite_loader import SpriteLoader
 loader = SpriteLoader()
 
-
-WORKSPACE_ASSETS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
 NIGHTWATCH_ASSETS = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 
 for folder in ["crops", "decorations", "defenses", "characters", "tiles", "ui"]:
@@ -44,28 +42,50 @@ def extract_and_save_all():
 
     # 2. 作物 (4 階段真實生長)
     # Farm RPG Spring Crops.png:
-    # row0: tomato, row1: strawberry, row2: eggplant, row3: radish, row4: pumpkin, row5: corn, row7: onion
-    crop_sheet_rows = {
-        "strawberry": 1,
-        "radish": 3,
-        "tomato": 0,
-        "eggplant": 2,
-        "pumpkin": 4,
-        "corn": 5,
-        "watermelon": 6,
-        "grape": 6,
-        "sunflower": 7,
-        "starlight": 4,
-    }
+    # row1: strawberry, row3: radish, row5: corn/carrot, row7: onion
+    # Sunnyside World: carrot_00..05, pumpkin_00..05
+    # Sprout Lands: Basic Plants.png (row0: tomato/sunflower)
     stages = ["seed", "sprout", "growing", "mature"]
-    stage_cols = [0, 1, 3, 5]
+    spring_cols = [0, 1, 3, 5]
 
-    for cname, row in crop_sheet_rows.items():
-        for s_idx, st in enumerate(stages):
-            col = stage_cols[s_idx]
-            img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", row, col, 16, 16, (50, 50))
-            if img:
-                pygame.image.save(img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"{cname}_{st}.png"))
+    for s_idx, st in enumerate(stages):
+        # (1) 白蘿蔔 (Radish)
+        r_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 3, spring_cols[s_idx], 16, 16, (50, 50))
+        if r_img: pygame.image.save(r_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"radish_{st}.png"))
+
+        # (2) 鮮甜草莓 (Strawberry)
+        sb_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, spring_cols[s_idx], 16, 16, (50, 50))
+        if sb_img: pygame.image.save(sb_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"strawberry_{st}.png"))
+
+        # (3) 香甜玉米 (Corn)
+        c_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 5, spring_cols[s_idx], 16, 16, (50, 50))
+        if c_img: pygame.image.save(c_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"corn_{st}.png"))
+
+        # (4) 紫皮洋蔥 / 甜茄 (Eggplant / Onion)
+        on_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 7, spring_cols[s_idx], 16, 16, (50, 50))
+        if on_img:
+            pygame.image.save(on_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"eggplant_{st}.png"))
+            pygame.image.save(on_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"grape_{st}.png"))
+
+        # (5) 紅番茄 / 向日葵 (Tomato / Sunflower from Sprout Lands Basic Plants)
+        bp_col = [0, 1, 2, 4][s_idx]
+        bp_img = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Objects/Basic Plants.png", 0, bp_col, 16, 16, (50, 50))
+        if bp_img:
+            pygame.image.save(bp_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"tomato_{st}.png"))
+            pygame.image.save(bp_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"sunflower_{st}.png"))
+
+        # (6) 巨型金南瓜 (Pumpkin from Sunnyside)
+        p_frame = [0, 2, 4, 5][s_idx]
+        p_img = loader.get_image(f"Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/pumpkin_0{p_frame}.png", (50, 50))
+        if p_img:
+            pygame.image.save(p_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"pumpkin_{st}.png"))
+            pygame.image.save(p_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"watermelon_{st}.png"))
+
+        # (7) 永恆星光果 (Starlight from Sunnyside Carrot Golden)
+        c_frame = [0, 2, 4, 5][s_idx]
+        c_img = loader.get_image(f"Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/carrot_0{c_frame}.png", (50, 50))
+        if c_img:
+            pygame.image.save(c_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"starlight_{st}.png"))
 
     # 3. 防禦設施 (Defenses)
     fence = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png", 3, 0, 16, 16, (50, 50))

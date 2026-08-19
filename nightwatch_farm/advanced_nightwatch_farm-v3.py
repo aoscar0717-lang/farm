@@ -303,21 +303,8 @@ class NightwatchFarmApp:
                         self.log_messages.clear()
                         self.log_messages.append("🌾 遊戲已重新開始！")
                     elif event.key == pygame.K_SPACE:
-                        if self.game.phase == GamePhase.NIGHT:
-                            mx, my = self.mouse_pos
-                            world_gx = (mx - GRID_X) / CELL_SIZE
-                            world_gy = (my - GRID_Y) / CELL_SIZE
-                            success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
-                            self.flash_vfx_timer = 0.28
-                            self.sound.play("harvest")
-                            if success:
-                                self._spawn_particles(mx, my, (255, 255, 200), count=25)
-                                self.floating_texts.append(FloatingText("🔦 強光擊暈！", mx - 30, my - 20, (255, 255, 120)))
-                                self.log_messages.append(f"🔦 {msg}")
-                            else:
-                                self.log_messages.append(f"🔦 {msg}")
-                        else:
-                            self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按【空白鍵 Space】可發動手電筒強光擊暈！")
+                        self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
+
 
             if not self.show_intro:
                 self.game.update(dt)
@@ -634,6 +621,10 @@ class NightwatchFarmApp:
                 if self.active_tab == "TOOLS" or self.selected_action in ("FLASHLIGHT", "WHISTLE"):
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
+            elif ev.event_type == EventType.PHASE_CHANGED and ev.data.get("new_phase") == GamePhase.NIGHT:
+                self.active_tab = "TOOLS"
+                self.selected_action = "FLASHLIGHT"
+                self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, (255, 235, 59), duration=2.5))
 
     def _get_mascot_guide_data(self) -> Tuple[str, tuple, str, tuple, str]:
         """Returns (badge_text, badge_bg_color, main_dialogue, text_color, step_tag)"""
@@ -642,18 +633,19 @@ class NightwatchFarmApp:
                 return (
                     "🩸 血月首領",
                     (211, 47, 47),
-                    "【血月警報】巨型野豬巨獸即將破壞防線！請用手電筒強光擊暈，柴犬與蜜蜂塔全力集火！",
+                    "【血月警報】巨型野豬首領來襲！點選【強光手電筒】滑鼠點擊 Boss 照暈，柴犬全力集火！",
                     (255, 180, 180),
-                    "[集火 Boss]"
+                    "[滑鼠點擊 Boss 照暈]"
                 )
             else:
                 return (
                     "🔦 夜巡夜戰",
                     (33, 150, 243),
-                    "【夜間防守】入侵者來襲！游標瞄準敵人，按【空白鍵 Space】發動強光手電筒擊暈他！",
+                    "【夜間防守】入侵者來襲！點選下方工具列【強光手電筒】，滑鼠直接點擊敵人照暈他！",
                     (179, 229, 252),
-                    "[空白鍵擊暈]"
+                    "[點選強光・滑鼠照暈]"
                 )
+
         else:
             # Daytime
             crops_count = sum(1 for row in self.game.grid for tile in row if tile.crop)
@@ -1199,15 +1191,16 @@ class NightwatchFarmApp:
                 ]
             ),
             (
-                "🔦 步驟 3：夜晚夜巡與強光擊暈（滑鼠點擊 或 空白鍵）",
+                "🔦 步驟 3：夜晚夜巡與強光手電筒擊暈",
                 (33, 150, 243),
                 (240, 246, 255),
                 [
-                    "1. 【方法 A（滑鼠點擊）】：點選「強光手電筒」後，滑鼠點擊敵人發射強光！",
-                    "2. 【方法 B（空白鍵快捷）】：不用換工具，游標移到敵人旁按【空白鍵 Space】瞬間照暈！",
+                    "1. 天黑怪物突襲時，點選下方工具列【強光手電筒】。",
+                    "2. 滑鼠游標直接【點擊地圖上的敵人】，即可瞬間發射強光照暈 2.5 秒（3秒充能）！",
                     "3. 阻止小偷與野豬掠奪作物與金庫，破曉後至【景觀】佈置松樹、楓樹提升莊園等級！"
                 ]
             ),
+
 
         ]
 
