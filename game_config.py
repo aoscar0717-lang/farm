@@ -573,6 +573,21 @@ class FarmCat:
     timer: float = 0.0
 
 
+def direction_from_delta(dx: float, dy: float) -> str:
+    """
+    把一段移動位移 (dx, dy) 轉成 4 方向精靈圖用的方向字串。
+    取位移量較大的軸決定朝向（左右 vs 上下），平手時預設看下面。
+    game_state.py 在每次真正移動 enemy.x / enemy.y 之前就已經算好
+    (dx, dy) 了，所以直接呼叫這個函式寫回 enemy.facing_direction 即可，
+    不需要額外記錄「上一幀座標」。
+    """
+    if dx == 0 and dy == 0:
+        return "down"
+    if abs(dx) >= abs(dy):
+        return "right" if dx > 0 else "left"
+    return "down" if dy > 0 else "up"
+
+
 @dataclass
 class Enemy:
     id: str
@@ -587,10 +602,11 @@ class Enemy:
     stun_timer: float = 0.0
     is_targeting_vault: bool = False
     attacking_fence: Optional[Tuple[int, int]] = None
-    
+    facing_direction: str = "down"  # 'down' / 'left' / 'right' / 'up' -- 由 game_state.py 在移動時更新，供渲染層播放對應方向的動畫用
+
     def __post_init__(self):
         self.hp = ENEMY_DATA[self.enemy_type]["max_hp"]
-        
+
     @property
     def config(self) -> dict:
         return ENEMY_DATA[self.enemy_type]

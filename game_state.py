@@ -13,7 +13,8 @@ from game_config import (
     DefenseType, EnemyType, EnemyState, DogState, EventType,
     MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA,
     DOG_CONFIG, CAT_CONFIG, ENEMY_DATA,
-    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent
+    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent,
+    direction_from_delta
 )
 from pathfinding import GridBFS
 
@@ -814,6 +815,7 @@ class GameState:
                         dy = next_node[1] - enemy.y
                         dist = math.hypot(dx, dy)
                         step = enemy.speed * dt
+                        enemy.facing_direction = direction_from_delta(dx, dy)
 
                         if dist <= step:
                             enemy.x, enemy.y = float(next_node[0]), float(next_node[1])
@@ -839,6 +841,7 @@ class GameState:
             dy = next_node[1] - enemy.y
             dist = math.hypot(dx, dy)
             step = enemy.speed * dt * 1.4
+            enemy.facing_direction = direction_from_delta(dx, dy)
             if dist <= step:
                 enemy.x, enemy.y = float(next_node[0]), float(next_node[1])
                 enemy.path.pop(0)

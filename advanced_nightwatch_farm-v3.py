@@ -1311,12 +1311,26 @@ class NightwatchFarmApp:
         for enemy in self.game.enemies:
             px = int(GRID_X + enemy.x * CELL_SIZE)
             py = int(GRID_Y + enemy.y * CELL_SIZE)
-            
-            k = "boss_boar" if enemy.enemy_type == EnemyType.BOSS_BOAR_KING else ENEMY_DATA[enemy.enemy_type].get("asset_key", "enemy_thief")
-            img = self.loader.get(k)
-            if img:
-                offset_y = -10 if enemy.enemy_type == EnemyType.BOSS_BOAR_KING else 0
-                self.screen.blit(img, (px, py + offset_y))
+
+            if enemy.enemy_type == EnemyType.BOSS_BOAR_KING:
+                # 血月首領：優先用 pig_chroma.png 切好的移動動畫，
+                # 每 200ms 換下一幀，依 enemy.facing_direction 選方向；
+                # 素材還沒放進 assets/characters/ 時 boss_frames 是空字典，
+                # 自動退回原本的靜態 boss_boar 圖，不會壞掉。
+                frames = self.loader.boss_frames.get(enemy.facing_direction, [])
+                if frames:
+                    frame_index = (pygame.time.get_ticks() // 200) % len(frames)
+                    img = frames[frame_index]
+                else:
+                    img = self.loader.get("boss_boar")
+                if img:
+                    offset_y = -10
+                    self.screen.blit(img, (px, py + offset_y))
+            else:
+                k = ENEMY_DATA[enemy.enemy_type].get("asset_key", "enemy_thief")
+                img = self.loader.get(k)
+                if img:
+                    self.screen.blit(img, (px, py))
 
             if enemy.state == EnemyState.STUNNED:
                 pygame.draw.circle(self.screen, (255, 235, 59), (px + CELL_SIZE // 2, py - 12), 8)
