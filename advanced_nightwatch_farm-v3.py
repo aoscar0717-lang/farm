@@ -12,6 +12,16 @@ import os
 import math
 import random
 from typing import List, Tuple, Optional, Dict, Any
+
+# pygame.SCALED (used by the F11 fullscreen toggle below) upscales the
+# fixed SCREEN_WIDTH x SCREEN_HEIGHT canvas to the real display via an
+# SDL2 renderer. SDL2's default scale quality is linear/smoothed, which
+# blurs pixel-art sprites badly once stretched past 1:1 -- setting this
+# hint to "0" (nearest-neighbor) before pygame.init() keeps scaled-up
+# frames crisp instead of blurry, matching the game's pixel-art look.
+# Must be set before pygame.init() / the first set_mode() call.
+os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "0")
+
 import pygame
 
 
