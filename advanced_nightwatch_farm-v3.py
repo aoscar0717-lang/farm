@@ -262,9 +262,10 @@ class NightwatchFarmApp:
             "TOOLS": [
                 ("SHOVEL", "鐵鏟 / 拆除", "免費 | 挖除退80%", "shovel"),
                 ("WATER_CROP", "黃金澆水壺", "$5 | 加速50%", "watering_can"),
-                ("FLASHLIGHT", "強光手電筒", "就緒 | 3s充能", "soul_lantern"),
+                ("FLASHLIGHT", "強光手電筒", "就緒 | 3s充能", "flashlight"),
                 ("WHISTLE", "守衛指揮哨", "免費 | 指揮狗狗衝刺", "guard_dog"),
             ]
+
         }
 
         self.action_cards = []

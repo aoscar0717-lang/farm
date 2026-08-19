@@ -176,9 +176,30 @@ def extract_and_save_all():
     if sunflower_obj:
         pygame.image.save(sunflower_obj, os.path.join(NIGHTWATCH_ASSETS, "decorations", "sundial_tower.png"))
 
-    lantern = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_02_strip4.png", 0, 0, 28, 43, (50, 50))
-    if lantern:
-        pygame.image.save(lantern, os.path.join(NIGHTWATCH_ASSETS, "decorations", "soul_lantern.png"))
+    # 精緻像素夜巡路燈 (Soul Lantern / Street Light)
+    sl = pygame.Surface((50, 50), pygame.SRCALPHA)
+    pygame.draw.rect(sl, (55, 65, 81), (23, 14, 4, 30))
+    pygame.draw.rect(sl, (31, 41, 55), (18, 42, 14, 4), border_radius=2)
+    pygame.draw.polygon(sl, (75, 85, 99), [(17, 16), (33, 16), (25, 9)])
+    pygame.draw.rect(sl, (255, 213, 79), (19, 17, 12, 14), border_radius=2)
+    pygame.draw.circle(sl, (255, 255, 255), (25, 24), 3)
+    pygame.draw.circle(sl, (255, 215, 0, 90), (25, 24), 12)
+    pygame.image.save(sl, os.path.join(NIGHTWATCH_ASSETS, "decorations", "soul_lantern.png"))
+
+    # 戰術強光手電筒 (Tactical Flashlight Tool)
+    fl = pygame.Surface((50, 50), pygame.SRCALPHA)
+    pygame.draw.rect(fl, (45, 55, 72), (10, 24, 22, 14), border_radius=3)
+    pygame.draw.rect(fl, (74, 85, 104), (10, 24, 22, 14), width=1, border_radius=3)
+    for rx in [15, 20, 25]:
+        pygame.draw.line(fl, (160, 174, 192), (rx, 25), (rx, 36), 1)
+    pygame.draw.polygon(fl, (30, 41, 59), [(32, 21), (42, 17), (42, 41), (32, 37)])
+    pygame.draw.polygon(fl, (255, 215, 0), [(32, 21), (42, 17), (42, 41), (32, 37)], width=1)
+    pygame.draw.ellipse(fl, (255, 255, 240), (40, 19, 5, 20))
+    pygame.draw.polygon(fl, (255, 235, 59, 150), [(44, 25), (49, 14), (49, 44), (44, 33)])
+    pygame.draw.circle(fl, (255, 255, 255, 220), (43, 29), 3)
+    pygame.image.save(fl, os.path.join(NIGHTWATCH_ASSETS, "ui", "flashlight.png"))
+    pygame.image.save(fl, os.path.join(NIGHTWATCH_ASSETS, "defenses", "flashlight.png"))
+
 
     fountain = loader.get_image("Sprout Sorry pack/Sprout Sorry pack/Early Access/Plant update 2/piknik/Piknik basket.png", (50, 50))
     if fountain:

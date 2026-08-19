@@ -81,9 +81,11 @@ class AssetLoader:
             ("beehive", "defenses/beehive.png"),
             ("watering_can", "defenses/watering_can.png"),
             ("shovel", "defenses/shovel.png"),
+            ("flashlight", "defenses/flashlight.png"),
         ]
         for key, path in defs:
             self.images[key] = self._load_image(path, sz)
+
 
         # 4. 生物角色
         chars = [
