@@ -2681,24 +2681,40 @@ class NightwatchFarmApp:
         asset_key = config.get("asset_key")
         img = self.loader.get(asset_key) if asset_key else None
 
-        # 視覺升級：熔爐 Sprite Sheet 特定影格動畫。asset_key 對應到有
-        # 提取好動畫幀的機台（目前只有 "furnace"）時，優先用 3 幀動畫
-        # 取代單張靜態貼圖；沒有動畫幀（get_anim_frames 回傳空 list，
-        # 例如熔爐.png 缺檔或載入失敗）時，anim_frames 是 falsy，直接
+        # 視覺升級：Sprite Sheet 特定影格動畫（熔爐/伐木場共用同一套
+        # 播放邏輯）。asset_key 對應到有提取好動畫幀的機台時，優先用
+        # 動畫幀取代單張靜態貼圖；沒有動畫幀（get_anim_frames 回傳空
+        # list，例如貼圖缺檔或載入失敗）時，anim_frames 是 falsy，直接
         # 落到下面既有的 img/色塊防呆邏輯，不受影響。
         anim_frames = self.loader.get_anim_frames(asset_key) if asset_key else []
         if anim_frames:
-            if not building.is_processing:
+            # 「開啟/運作中」該看哪個旗標，兩種機台的需求文字給的定義不
+            # 一樣：熔爐當初明確要求看 is_processing（這一輪配方是否正在
+            # 倒數，避免兩輪配方交接的空檔誤判成「關閉」而閃爍）；伐木場
+            # 這次明確要求看 is_active（開關本身的狀態）。伐木場是
+            # LUMBERYARD/MINE 那種空配方永動機，is_active 打開之後
+            # is_processing 幾乎全程都是 True（只有极短的一幀交接空
+            # 檔），兩者在這座機台身上實質差異很小，但既然使用者這次明
+            # 確指定 is_active，就照literal 需求实作，不假設兩種機台
+            # 應該共用同一個判斷欄位。
+            is_running = building.is_processing if building.building_type == BuildingType.FURNACE else building.is_active
+            if not is_running:
                 frame_index = 0
             else:
-                # 只在 frame[1]、frame[2] 之間來回切換，frame[0] 保留給
-                # 「關閉/閒置」狀態，符合經典像素跳動感的需求。這裡沿用
-                # 專案裡已經存在、每一幀都會無條件累加的 self.anim_time
-                # （run() 主迴圈裡 `self.anim_time += dt`，不受暫停/日夜
-                # 切換影響），而不是另外新增一個 self.animation_timer——
-                # 兩者效果完全一樣，但重用既有計時器可以避免專案裡多出
-                # 一個語意重複的計時器變數。
-                frame_index = 1 + int(self.anim_time / ANIMATION_SPEED) % 2
+                # frame[0] 保留給「關閉/閒置」狀態，運作中的時候在
+                # frame[1] ~ frame[len-1] 之間循環（熔爐只有 3 幀，等於
+                # 在 frame[1]/frame[2] 兩幀來回切換；伐木場有 9 幀，等於
+                # 在 frame[1]~frame[8] 共 8 幀之間循環播放，鋸木頭的動作
+                # 會比熔爐的火焰跳動更流暢）。用 len(anim_frames) - 1
+                # 算模數，同一套公式套用在不同影格數量的機台上都成立，
+                # 不用為每種機台各寫一份切幀邏輯。這裡沿用專案裡已經存
+                # 在、每一幀都會無條件累加的 self.anim_time（run() 主迴
+                # 圈裡 `self.anim_time += dt`，不受暫停/日夜切換影響），
+                # 而不是另外新增一個 self.animation_timer——兩者效果完
+                # 全一樣，但重用既有計時器可以避免專案裡多出一個語意重
+                # 複的計時器變數。
+                cycle_len = max(1, len(anim_frames) - 1)
+                frame_index = 1 + int(self.anim_time / ANIMATION_SPEED) % cycle_len
             frame_img = anim_frames[frame_index]
             img_rect = frame_img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
             self.screen.blit(frame_img, img_rect)

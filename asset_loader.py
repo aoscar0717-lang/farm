@@ -600,6 +600,18 @@ class AssetLoader:
         # get_anim_frames("furnace") 播放 3 幀動畫。
         self._load_building_anim_frames("furnace", "decorations/熔爐.png", sz)
 
+        # 3d. 伐木場 Sprite Sheet 特定影格動畫 (assets/decorations/伐木場.png)。
+        # 跟熔爐同一張 3x3 網格規格，但這裡傳 frame_count=9 切出全部
+        # 9 格——使用者這次明確要求「為了呈現鋸木頭的流暢動態，提取
+        # 所有的 9 個影格」，不是像熔爐那樣只取第一排 3 格。上面
+        # buildings 清單裡 ("lumberyard", "buildings/lumberyard.png",
+        # "lumberyard") 這一筆同樣保留當第二層防呆（那張圖不存在，會
+        # 落到 generate_placeholder() 的棕色木紋佔位圖）；
+        # _load_building_anim_frames() 切出動畫幀成功時一樣會把
+        # self.images["lumberyard"] 覆寫成 frame[0]，建造選單卡片跟地圖
+        # 建築本體都能吃到真圖，寫法完全比照熔爐那份。
+        self._load_building_anim_frames("lumberyard", "decorations/伐木場.png", sz, frame_count=9)
+
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
         # 上面的 defs 清單），完全不會走到 generate_placeholder() 的
@@ -708,28 +720,37 @@ class AssetLoader:
         """
         return self.building_anim_frames.get(key, [])
 
-    def _load_building_anim_frames(self, key: str, rel_path: str, size: Tuple[int, int]) -> None:
+    def _load_building_anim_frames(self, key: str, rel_path: str, size: Tuple[int, int],
+                                    frame_count: int = 3) -> None:
         """
-        視覺升級：熔爐 Sprite Sheet 特定影格提取。
+        視覺升級：3x3 Sprite Sheet 特定影格提取（熔爐/伐木場共用同一套
+        邏輯）。sheet 一律是 3 欄 x 3 列共 9 格的網格，frame_count 決定
+        實際要用幾格：
+          - frame_count=3：只切第一排 (Y=0) 的 3 格 (X=0, 1, 2)，索引
+            3~8（第二、三排）不讀取——熔爐用這個模式，「經典像素跳動
+            感」只需要 3 幀（見 furnace 呼叫端的說明）。
+          - frame_count=9：把全部 9 格依「先橫向再往下一列」的順序
+            (row-major：0,1,2 是第一排，3,4,5 第二排，6,7,8 第三排)
+            全部切出來——伐木場用這個模式，使用者原始需求明確說「為了
+            呈現鋸木頭的流暢動態，請提取所有的 9 個影格」，鋸木頭這種
+            動作比熔爐的火焰跳動更需要多張過渡影格才不會看起來卡頓。
 
-        使用者原始需求提到的檔名是 furnace_anim.jpg，但實際放進
-        assets/decorations/ 的檔案是「熔爐.png」——這裡直接用真實存在
-        的檔名，不是照著需求文字裡的假設檔名去找一個不存在的檔案。
+        使用者原始需求提到的檔名是 furnace_anim.jpg / 伐木場.jpg，但
+        實際放進 assets/decorations/ 的檔案分別是「熔爐.png」「伐木場
+        .png」——這裡直接用真實存在的檔名，不是照著需求文字裡的假設
+        檔名去找一個不存在的檔案。
 
-        使用者也要求「用 set_colorkey((0,0,0)) 去背」，但用 PIL 實際檢
-        查過 熔爐.png 之後發現：這張圖本身是 951x1024 的 RGBA PNG，背
-        景本來就是真正的 alpha=0 透明（不是不透明黑底的 JPG）；抽樣熔
-        爐第一格範圍內，找到 7,156 個「顏色接近黑色、但 alpha 是不透明
-        的」像素——這些是熔爐本體的黑色描邊/陰影線條。如果照字面上跑
-        set_colorkey((0,0,0))，pygame 只看 RGB 顏色比對、不管原本的
-        alpha 狀態，會把這幾千個本來就不透明、屬於熔爐外框的黑色像素
-        一併挖空，畫面上會變成有破洞的熔爐。所以這裡只呼叫
+        使用者也要求「用 set_colorkey((0,0,0)) 去背」，但用 PIL 實際
+        檢查過這兩張圖後發現：兩張都是背景本來就是真正 alpha=0 透明的
+        RGBA PNG（不是不透明黑底的 JPG），而且兩張圖裡都找得到「顏色
+        接近黑色、但 alpha 是不透明」的像素（熔爐第一格內 7,156 個、
+        伐木場第一格內 414 個抽樣命中）——這些是機台本體的黑色描邊/
+        陰影線條。如果照字面上跑 set_colorkey((0,0,0))，pygame 只看
+        RGB 顏色比對、不管原本的 alpha 狀態，會把這些本來就不透明的
+        黑色像素一併挖空，畫面上會變成有破洞的貼圖。所以這裡只呼叫
         convert_alpha() 保留圖片原生的 alpha 透明度，不呼叫
         set_colorkey()——這個作法跟專案裡所有其他真實 PNG 素材的載入
         方式（decos/defs/chars 清單）完全一致。
-
-        只切第一排 (Y=0) 的 3 格 (X=0, 1, 2)，索引 3~8（第二、三排）維
-        持不讀取，符合「經典像素跳動感只需要 3 幀」的需求。
         """
         full_path = os.path.join(ASSET_ROOT, rel_path)
         if not os.path.exists(full_path):
@@ -747,22 +768,24 @@ class AssetLoader:
         cell_w, cell_h = sheet_w // 3, sheet_h // 3
         if cell_w <= 0 or cell_h <= 0:
             print(f"[AssetLoader] 警告：{rel_path} 尺寸異常 ({sheet_w}x{sheet_h})，"
-                  f"無法切出 3 欄影格，{key} 動畫將退回既有繪製方式。")
+                  f"無法切出 3x3 網格，{key} 動畫將退回既有繪製方式。")
             return
 
         frames = []
-        for i in range(3):
-            cell_rect = pygame.Rect(i * cell_w, 0, cell_w, cell_h)
+        for i in range(frame_count):
+            col = i % 3
+            row = i // 3
+            cell_rect = pygame.Rect(col * cell_w, row * cell_h, cell_w, cell_h)
             frame = sheet.subsurface(cell_rect).copy()
             # 縮放到跟其他建築貼圖一致的 CELL_SIZE（呼叫端傳進來的
             # size），不是需求文字裡的範例尺寸 32x32/40x40——那兩個數字
             # 只是舉例，真正要對齊的是這個專案實際的地圖網格尺寸，否則
-            # 熔爐會比同排的烤箱/炭窯等其他建築明顯小一圈或大一圈。
+            # 這座機台會比同排的其他建築明顯小一圈或大一圈。
             frames.append(pygame.transform.scale(frame, size))
         self.building_anim_frames[key] = frames
         # 額外把 self.images[key] 覆寫成 frame[0]（閒置幀），這樣建造
         # 選單卡片（ActionCard.draw() 只呼叫 loader.get(asset_key)，不知
-        # 道動畫幀這回事）也能顯示真的熔爐圖，不用另外為卡片渲染寫一條
+        # 道動畫幀這回事）也能顯示真的貼圖，不用另外為卡片渲染寫一條
         # 專用邏輯——地圖上蓋好的建築本體則交給 _render_building_tile()
-        # 優先用 get_anim_frames() 播放完整 3 幀動畫。
+        # 優先用 get_anim_frames() 播放完整的動畫幀。
         self.images[key] = frames[0]
