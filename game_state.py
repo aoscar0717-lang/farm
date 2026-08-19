@@ -3,7 +3,9 @@
 包含：金庫洗劫防偷懶、每日領地稅、月光加成、蜜蜂塔、血月首領與主動戰術。
 """
 
+import json
 import math
+import os
 import random
 import uuid
 from typing import List, Tuple, Optional, Dict, Any, Set
@@ -1000,6 +1002,242 @@ class GameState:
         self._generate_daily_orders()
 
         self.check_game_over()
+
+        # 【Phase 7：自動存檔】需求文字寫的觸發點是「每天早晨開始時
+        # （切換到 GamePhase.DAY 的瞬間）」——這個方法 _start_day() 正是
+        # 唯一會把 self.phase 設回 GamePhase.DAY 的地方（開局第一天走
+        # __init__ 直接指定初始值 GamePhase.DAY，不算「切換」，所以第一
+        # 天不會觸發這次自動存檔；從第 2 天開始，每次破曉都會存一次）。
+        # 放在這個方法最後一行（稅金/分紅/訂單/破產判定都處理完之後）
+        # 存檔，確保存下去的是「新的一天完全結算完成」之後的乾淨狀態，
+        # 不會存到稅金還沒扣、訂單還沒重新產生的中間態。如果玩家在這個
+        # 瞬間剛好因為繳不出稅金而破產（check_game_over() 剛剛判定
+        # game_over=True），這裡仍然會存檔——這是刻意的：破產也是一種
+        # 「遊戲進度」，讀檔應該重現破產當下的畫面，而不是靜默跳過存檔
+        # 讓玩家覺得進度憑空消失。
+        self.save_game()
+
+    # =========================================================================
+    # 【Phase 7：JSON 存檔與讀檔系統 (Save/Load System)】
+    # =========================================================================
+    # 序列化範圍照需求文字明確列出的欄位：gold、tech_points、
+    # day（day_count）、time_of_day、inventory，以及所有 crops
+    # （座標/種類/生長時間）跟 buildings（座標/種類/狀態/計時器）。
+    #
+    # 【時間概念的命名修正】需求文字用的是 time_of_day，但這個屬性在
+    # GameState 裡從來不存在——真正代表「現在是白天還是夜晚、這個階段
+    # 已經過了多久」的兩個欄位是 self.phase（GamePhase.DAY/NIGHT 列舉）
+    # 跟 self.time_in_phase（目前這個階段已經經過的秒數）。這裡把兩者
+    # 都存進存檔，讀檔後可以精確重現「原本在白天/夜晚的第幾秒」，而不是
+    # 憑空假設 time_of_day 是某個浮點數欄位硬讀一個不存在的屬性。
+    #
+    # 【額外納入 farm_level / prosperity_score 的理由】需求文字沒有明確
+    # 列出這兩個欄位，但它們跟 gold/tech_points 一樣是「頂層純數值計
+    # 分」，不是像作物/建築那樣需要另外設計序列化格式的子系統，追加成本
+    # 幾乎是零；而且如果不存這兩個值，讀檔後玩家會發現地圖上蓋著的建築/
+    # 種著的作物都在，但莊園等級卻被重置回 1、繁榮度歸零，跟畫面上的
+    # 進度明顯矛盾，體驗上比「乾脆不要有存檔」還讓人困惑。因此這裡視為
+    # gold/tech_points 這組「基礎進度數值」的自然延伸，一併存入。
+    #
+    # 【已知限制，如實揭露：這一版不存的東西】莊園景觀 (decorations)、
+    # 防禦設施 (defenses)、看門柴犬/招財小雞、已採收未交訂單的作物庫存
+    # (crop_inventory)、當天的訂單看板 (active_orders) 都不在這次需求
+    # 列出的範圍內，這一版刻意不存這些——讀檔後地圖上會看到原本種的
+    # 作物、蓋的加工建築都還在，但景觀擺設、圍籬/陷阱/稻草人/蜂巢、寵物
+    # 都會消失，訂單看板也會回到全新一天的狀態（因為 from_dict() 之後
+    # 緊接著就是切回 PLAYING 狀態，不會再跑一次 _start_day()，訂單其實
+    # 是讀檔當下 active_orders 為空——直到下一次破曉才會重新產生）。這
+    # 不是漏做，是照需求文字明確列出的範圍實作；如果要完整重現離線前的
+    # 莊園樣貌，之後可以在同一套 to_dict()/from_dict() 機制上依樣畫葫蘆
+    # 加上 decorations/defenses/dog/cat/orders 這幾塊。
+    def to_dict(self) -> Dict[str, Any]:
+        crops_data = []
+        buildings_data = []
+        for row in self.grid:
+            for tile in row:
+                if tile.crop is not None:
+                    crops_data.append({
+                        "x": tile.x,
+                        "y": tile.y,
+                        "crop_type": tile.crop.crop_type.value,
+                        "growth_timer": tile.crop.growth_timer,
+                        "stage": tile.crop.stage.value,
+                        "is_moonlight_boosted": tile.crop.is_moonlight_boosted,
+                    })
+                if tile.building is not None:
+                    b = tile.building
+                    buildings_data.append({
+                        "x": b.x,
+                        "y": b.y,
+                        "building_type": b.building_type.value,
+                        "is_active": b.is_active,
+                        "is_processing": b.is_processing,
+                        "processing_time_left": b.processing_time_left,
+                        "scan_timer": b.scan_timer,
+                    })
+
+        return {
+            "gold": self.gold,
+            "tech_points": self.tech_points,
+            "day": self.day_count,
+            # phase 存列舉的字串值 (.value，例如 "DAY"/"NIGHT")，不是存
+            # 整個 Enum 物件本身——json 模組不知道怎麼序列化自訂 Enum
+            # 類別，直接丟整個 GamePhase.DAY 進 json.dump() 會噴
+            # TypeError，一定要先轉成基本型別 (str/int/float/bool/
+            # list/dict/None) 才能存。
+            "phase": self.phase.value,
+            "time_in_phase": self.time_in_phase,
+            "farm_level": self.farm_level,
+            "prosperity_score": self.prosperity_score,
+            "inventory": dict(self.inventory),
+            "crops": crops_data,
+            "buildings": buildings_data,
+        }
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        """把 to_dict() 存出來的字典重建回這個 GameState 實例身上（原地
+        修改 self，不是回傳一個新的 GameState）。所有欄位讀取都用
+        .get(key, 目前的值) 當預設值而不是直接 data[key]——存檔檔案理
+        論上可能是使用者手動編輯過、或未來版本格式有調整過的舊存檔，
+        缺欄位時寧可保留這個新 GameState 原本 __init__ 就設好的合理預
+        設值，也不要讓讀檔動作直接噴 KeyError 把整個遊戲炸掉。crop_type/
+        stage/building_type 這種要轉型成 Enum 的欄位另外用 try/except
+        擋 ValueError（存檔裡存的字串如果對不上任何一個列舉成員，例如
+        存檔是用舊版遊戲存的、當時的作物/建築種類後來被砍掉了），單純
+        跳過這筆資料，不會讓一筆壞資料拖垮整個讀檔流程。
+        """
+        self.gold = data.get("gold", self.gold)
+        self.tech_points = data.get("tech_points", self.tech_points)
+        self.day_count = data.get("day", self.day_count)
+
+        phase_value = data.get("phase")
+        if phase_value is not None:
+            try:
+                self.phase = GamePhase(phase_value)
+            except ValueError:
+                pass
+        self.time_in_phase = data.get("time_in_phase", self.time_in_phase)
+
+        self.farm_level = data.get("farm_level", self.farm_level)
+        self.prosperity_score = data.get("prosperity_score", self.prosperity_score)
+
+        loaded_inventory = data.get("inventory", {})
+        for key in RESOURCE_KEYS:
+            self.inventory[key] = loaded_inventory.get(key, self.inventory.get(key, 0))
+
+        # 讀檔前先清空目前地圖上所有的作物/建築（例如剛 __init__ 出來
+        # 的全新 GameState，中央農田是空的，這裡本來就沒東西可清；但
+        # 如果 from_dict() 是被呼叫在一個已經玩了一段時間的 GameState
+        # 上，就要先清乾淨，避免舊資料跟讀檔內容疊在一起）。self.buildings
+        # 這個扁平陣列也要跟著清空重建，維持 Building dataclass 說明裡
+        # 講的「tile.building 反向參照 + self.buildings 陣列直接持有」
+        # 雙軌同步，不能只清 tile 沒清陣列（或反過來）。
+        for row in self.grid:
+            for tile in row:
+                tile.crop = None
+                tile.building = None
+        self.buildings = []
+
+        for c in data.get("crops", []):
+            x, y = c.get("x"), c.get("y")
+            tile = self.get_tile(x, y) if x is not None and y is not None else None
+            if not tile:
+                continue
+            try:
+                crop_type = CropType(c["crop_type"])
+                stage = CropStage(c["stage"])
+            except (KeyError, ValueError):
+                continue
+            tile.crop = Crop(
+                crop_type=crop_type,
+                growth_timer=c.get("growth_timer", 0.0),
+                stage=stage,
+                is_moonlight_boosted=c.get("is_moonlight_boosted", False),
+            )
+
+        for b in data.get("buildings", []):
+            x, y = b.get("x"), b.get("y")
+            tile = self.get_tile(x, y) if x is not None and y is not None else None
+            if not tile:
+                continue
+            try:
+                building_type = BuildingType(b["building_type"])
+            except (KeyError, ValueError):
+                continue
+            building = Building(
+                building_type=building_type,
+                x=x,
+                y=y,
+                is_active=b.get("is_active", False),
+                is_processing=b.get("is_processing", False),
+                processing_time_left=b.get("processing_time_left", 0.0),
+                scan_timer=b.get("scan_timer", 0.0),
+            )
+            tile.building = building
+            self.buildings.append(building)
+
+    @staticmethod
+    def _save_file_path(filename: str = "savegame.json") -> str:
+        """存檔實際會讀寫的絕對路徑。用 os.path.dirname(__file__) 接
+        檔名（跟 asset_loader.py 的 ASSET_ROOT 是同一種寫法），存在
+        專案根目錄底下，不依賴呼叫者當下的工作目錄 (CWD) 在哪裡——如果
+        依賴 CWD，同一個 savegame.json 檔名，玩家從不同資料夾啟動遊戲
+        就會存到不同地方，「繼續遊戲」永遠讀不到「新遊戲」存的檔。抽成
+        static method 是因為 UI 層（advanced_nightwatch_farm-v3.py 的
+        主選單）需要在「還沒有 GameState 實例可用/不想為了單純查一下
+        存檔在不在就先建一個」的情境下也能算出同一個路徑，跟
+        save_game()/load_game() 共用同一份路徑計算邏輯，不會出現兩邊
+        算出不同路徑、互相讀不到對方存檔的情況。
+        """
+        return os.path.join(os.path.dirname(__file__), filename)
+
+    @staticmethod
+    def has_save(filename: str = "savegame.json") -> bool:
+        """給 UI 層查詢用：存檔檔案存不存在。純粹檢查檔案是否存在，不
+        會真的打開檔案、不會驗證 JSON 格式是否正確（格式壞掉的情況留給
+        load_game() 內部處理並回傳 False，這裡只回答「有沒有檔案」這個
+        更基本的問題），也不需要先建立一個 GameState 實例才能呼叫——主
+        選單畫「繼續遊戲」按鈕要不要顯示成灰階 Disabled 狀態時，還沒有
+        玩家選擇要不要開新局，本來就不該只為了查詢就先建一個沒用到的
+        GameState。
+        """
+        return os.path.exists(GameState._save_file_path(filename))
+
+    def save_game(self, filename: str = "savegame.json") -> None:
+        """把 to_dict() 的結果寫成 JSON 檔案。存檔失敗（例如磁碟權限
+        問題）只印警告、不拋例外炸掉遊戲——自動存檔失敗不應該讓玩家連
+        當下這局都玩不下去。
+        """
+        save_path = self._save_file_path(filename)
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            print(f"[GameState] 警告：存檔失敗（{e}），本次進度未儲存，"
+                  f"不影響目前這局繼續遊玩。")
+
+    def load_game(self, filename: str = "savegame.json") -> bool:
+        """讀取存檔檔案並呼叫 from_dict() 重建狀態。檔案不存在時回傳
+        False（符合需求文字明確要求的行為），讀到但格式壞掉（JSON 語法
+        錯誤、或內容不是預期的字典結構）也視同讀檔失敗回傳 False，不會
+        讓一個壞掉的存檔檔案直接讓遊戲噴例外關閉——UI 層（見
+        advanced_nightwatch_farm-v3.py 的「繼續遊戲」點擊處理）會依這個
+        回傳值決定要不要切換到 PLAYING 狀態。
+        """
+        save_path = self._save_file_path(filename)
+        if not os.path.exists(save_path):
+            return False
+        try:
+            with open(save_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[GameState] 警告：讀檔失敗（{e}），視同沒有存檔。")
+            return False
+        if not isinstance(data, dict):
+            print("[GameState] 警告：存檔內容格式不正確（不是一個 JSON 物件），視同沒有存檔。")
+            return False
+        self.from_dict(data)
+        return True
 
     # =========================================================================
     # 敵人生成與金庫掠奪尋路

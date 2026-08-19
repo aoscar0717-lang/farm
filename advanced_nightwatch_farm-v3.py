@@ -721,6 +721,14 @@ class NightwatchFarmApp:
         self.btn_new_game_rect = None
         self.btn_continue_rect = None
         self.btn_exit_rect = None
+        # 【Phase 7】選單上的短暫提示訊息（目前唯一用途是「⚠ 沒有找到
+        # 存檔」）。跟 self.floating_texts 不是同一套機制——floating_texts
+        # 是畫在世界地圖座標上、只有 PLAYING 狀態的 _render() 才會畫，
+        # MENU 狀態下根本不會被畫到；這裡另外用一組「文字 + 倒數計時」
+        # 存在 App 上，由 run() 每幀遞減、_render_main_menu() 依剩餘時間
+        # 決定要不要畫，是專屬選單畫面的獨立小型提示系統。
+        self.menu_message = None
+        self.menu_message_timer = 0.0
         # run() 原本用區域變數 running 控制主迴圈是否繼續，但「離開」
         # 按鈕的點擊處理是在 _handle_menu_mouse_down() 這個獨立方法裡，
         # 摸不到 run() 內部的區域變數，所以這裡改成 self.running 這個
@@ -1009,6 +1017,10 @@ class NightwatchFarmApp:
                 if not self.show_pause_menu:
                     self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
                     self.particles = [p for p in self.particles if p.update(dt)]
+            elif self.menu_message_timer > 0:
+                # 【Phase 7】選單提示訊息（例如「⚠ 沒有找到存檔」）的倒數，
+                # 只在 MENU 狀態才需要跑，PLAYING 狀態用不到這個計時器。
+                self.menu_message_timer = max(0.0, self.menu_message_timer - dt)
 
             # 渲染同樣依 app_state 分流：MENU 只畫選單畫面，PLAYING 才
             # 畫原本整套農場畫面（_render() 內部，含 HUD/地圖/商店/各種
@@ -1124,7 +1136,19 @@ class NightwatchFarmApp:
             # 進度），一併清掉浮動文字/特效/訊息記錄，避免上一局的殘留
             # 畫面元素飄進新的一局。show_intro 重設回 True，讓新手教學
             # 彈窗在每次「新遊戲」都會重新出現一次。
+            #
+            # 【Phase 7】需求文字要求「刪除舊的 savegame.json（或覆蓋
+            # 它）」，這裡選擇「覆蓋」而不是刪除檔案：立刻對這個全新的
+            # GameState 呼叫一次 save_game()，讓 savegame.json 內容變成
+            # 這局剛開始、day=1、gold=初始值的乾淨狀態。選覆蓋不選刪除
+            # 的理由是：覆蓋永遠會留下一個「格式正確、可以被 load_game()
+            # 成功讀回」的檔案；如果改成刪除檔案，玩家在新遊戲之後、還
+            # 沒撐過第一次破曉自動存檔之前如果不小心點到選單，
+            # 「繼續遊戲」會因為檔案不存在而被判定成「沒有存檔」，即使
+            # 玩家明明才剛新遊戲、遊戲根本沒有真的重置到「從未玩過」的
+            # 狀態——覆蓋寫入可以避免這個時間窗內的行為不一致。
             self.game = GameState()
+            self.game.save_game()
             self.floating_texts.clear()
             self.particles.clear()
             self.log_messages = ["🌾 歡迎來到夜巡農場！精緻像素莊園，中央為農田與防線，四周為景觀與寵物！"]
@@ -1134,12 +1158,35 @@ class NightwatchFarmApp:
             self.app_state = 'PLAYING'
             self.sound.play("build")
         elif self.btn_continue_rect and self.btn_continue_rect.collidepoint(mx, my):
-            # 繼續遊戲：需求文字明確說「目前先直接切換狀態，不動
-            # GameState，未來再接存檔系統」——這裡忠實照做，不額外做
-            # 存檔/讀檔（那是還沒開始的下一階段工作），單純把畫面切回
-            # 玩家離開前（或開機時 __init__ 建立的那個）self.game 狀態。
-            self.app_state = 'PLAYING'
-            self.sound.play("build")
+            # 【Phase 7】繼續遊戲：檢查 savegame.json 存不存在。存在就用
+            # 一個全新的 GameState 呼叫 load_game() 讀回存檔內容（不是在
+            # 原本 __init__ 就建立、可能已經被把玩過的那個 self.game 上
+            # 疊讀檔結果——先歸零再讀，才不會有舊 self.game 殘留的
+            # 屬性/物件混進讀檔後的狀態）；不存在就播放 error 音效、在
+            # 選單畫面顯示 2 秒「⚠ 沒有找到存檔」提示，並且直接 return，
+            # 不執行下面的 app_state 切換，維持在 MENU。
+            #
+            # show_intro 這裡明確設成 False（不是像新遊戲那樣設 True）：
+            # 讀檔代表玩家是回來繼續一局已經在進行中的遊戲，不應該再看
+            # 到新手教學彈窗——這是原本 Phase 6 版本「繼續遊戲不動
+            # show_intro」遺留的小瑕疵（当時 show_intro 從開機 __init__
+            # 就是 True，從未被清掉，等於舊版「繼續遊戲」其實也會顯示
+            # 教學彈窗），這次一併修正。
+            if GameState.has_save():
+                self.game = GameState()
+                self.game.load_game()
+                self.floating_texts.clear()
+                self.particles.clear()
+                self.log_messages = ["🌾 歡迎回來！已讀取上次的莊園進度。"]
+                self.show_intro = False
+                self.show_pause_menu = False
+                self.show_order_board = False
+                self.app_state = 'PLAYING'
+                self.sound.play("build")
+            else:
+                self.menu_message = "⚠ 沒有找到存檔"
+                self.menu_message_timer = 2.0
+                self.sound.play("error")
         elif self.btn_exit_rect and self.btn_exit_rect.collidepoint(mx, my):
             self.running = False
 
@@ -1891,11 +1938,25 @@ class NightwatchFarmApp:
         blit_text_with_shadow(self.screen, FONT_SM, "經典精緻像素塔防農場", C_TEXT_ON_DARK,
                                center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140))
 
-        def _draw_menu_button(rect, label, base_color):
-            hovered = rect.collidepoint(self.mouse_pos)
+        def _draw_menu_button(rect, label, base_color, disabled=False):
+            hovered = (not disabled) and rect.collidepoint(self.mouse_pos)
             draw_wood_panel(self.screen, rect, self.loader, "ui_wood_button",
                              base_color, border_radius=10, depth=3, pressed=hovered)
-            blit_text_with_shadow(self.screen, FONT_MD, label, C_TEXT_ON_DARK, center=rect.center)
+            if disabled:
+                # 【Phase 7，選用需求】沒有存檔時「繼續遊戲」畫成灰階
+                # Disabled 樣式：半透明深色遮罩壓暗整顆按鈕（跟既有
+                # ActionCard.is_locked 鎖卡遮罩是同一種手法），文字改用
+                # 較暗的顏色，讓玩家一眼就能看出這顆按鈕目前點了也沒用，
+                # 不用等點下去才發現。點擊判定本身完全不受這個影響——
+                # _handle_menu_mouse_down() 一樣會檢查 has_save()，就算
+                # 玩家真的點了沒存檔的「繼續遊戲」，也只會觸發下面的
+                # 「⚠ 沒有找到存檔」提示，不會出錯。
+                overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+                pygame.draw.rect(overlay, (20, 20, 20, 140), overlay.get_rect(), border_radius=10)
+                self.screen.blit(overlay, rect.topleft)
+                blit_text_with_shadow(self.screen, FONT_MD, label, (170, 170, 170), center=rect.center)
+            else:
+                blit_text_with_shadow(self.screen, FONT_MD, label, C_TEXT_ON_DARK, center=rect.center)
 
         btn_w, btn_h, gap = 260, 58, 20
         btn_x = SCREEN_WIDTH // 2 - btn_w // 2
@@ -1904,11 +1965,20 @@ class NightwatchFarmApp:
         self.btn_new_game_rect = pygame.Rect(btn_x, start_y, btn_w, btn_h)
         _draw_menu_button(self.btn_new_game_rect, "🌱 新遊戲", (90, 122, 74))
 
+        has_save = GameState.has_save()
         self.btn_continue_rect = pygame.Rect(btn_x, start_y + (btn_h + gap), btn_w, btn_h)
-        _draw_menu_button(self.btn_continue_rect, "▶ 繼續遊戲", (86, 108, 140))
+        _draw_menu_button(self.btn_continue_rect, "▶ 繼續遊戲", (86, 108, 140), disabled=not has_save)
 
         self.btn_exit_rect = pygame.Rect(btn_x, start_y + (btn_h + gap) * 2, btn_w, btn_h)
         _draw_menu_button(self.btn_exit_rect, "✖ 離開", (150, 70, 60))
+
+        # 【Phase 7】沒存檔時點「繼續遊戲」的短暫提示，畫在按鈕群下方，
+        # 剩餘時間歸零（由 run() 每幀遞減 self.menu_message_timer）之後
+        # 自動消失，不需要玩家手動關閉。
+        if self.menu_message and self.menu_message_timer > 0:
+            blit_text_with_shadow(
+                self.screen, FONT_SM, self.menu_message, C_LOCK_TEXT_RED,
+                center=(SCREEN_WIDTH // 2, self.btn_exit_rect.bottom + 36))
 
     # ==========================================
     # 純色扁平無網格渲染管道 (Flat Pipeline)

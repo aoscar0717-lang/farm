@@ -16,3 +16,8 @@ crop_preview.py
 fix_renderer.py
 update_renderer.py
 temp*.png
+
+# Phase 7：JSON 存檔/讀檔系統。savegame.json 是玩家個人進度，不是專案
+# 原始碼的一部分，不該被提交進版本控制（每個玩家、每次遊玩都會覆寫出
+# 不同內容，提交進 git 只會造成一堆沒有意義的 diff noise）。
+savegame.json
