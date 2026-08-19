@@ -245,6 +245,33 @@ def blit_text_with_shadow(surface, font, text, color, topleft=None, center=None,
     return r
 
 
+def draw_text_with_outline(surface, text, font, text_color, outline_color, center_pos, outline_width=2):
+    """畫帶有完整 8 方向（上下左右 + 四個斜角）描邊的文字，用來解決淺色
+    文字疊在亮度不固定的背景圖（例如主選單的太空船背景圖）上「吃色」、
+    對比度不足看不清楚的問題。
+
+    跟上面既有的 blit_text_with_shadow() 不是同一個函式、刻意沒有讓
+    這個新函式去呼叫/重構那個舊函式：blit_text_with_shadow() 只往
+    上下左右 4 個方向各偏移固定 1px（原本是給彈窗這種本來就是深色/
+    木紋背景設計的，背景本身已經夠暗，4 方向 1px 的描邊已經夠讀），
+    這裡的需求明確是「背景亮度不可預期、太空船背景可能比文字本身還
+    亮」，需要更強的 8 方向描邊 + 可調粗細（outline_width）才夠可靠，
+    直接沿用舊函式的固定 4 方向/1px 沒辦法達到這個强度，所以另外獨立
+    實作一個函式，職責分開、互不影響彼此既有的呼叫端。
+    """
+    outline_surf = font.render(text, True, outline_color)
+    main_surf = font.render(text, True, text_color)
+    r = main_surf.get_rect(center=center_pos)
+    for dx, dy in (
+        (-outline_width, 0), (outline_width, 0), (0, -outline_width), (0, outline_width),
+        (-outline_width, -outline_width), (outline_width, -outline_width),
+        (-outline_width, outline_width), (outline_width, outline_width),
+    ):
+        surface.blit(outline_surf, (r.x + dx, r.y + dy))
+    surface.blit(main_surf, r)
+    return r
+
+
 # ------------------------------------------------------------------
 # 中文字型載入 (fixes "□" tofu-box rendering)
 #
@@ -1933,10 +1960,28 @@ class NightwatchFarmApp:
         overlay.fill((10, 12, 20, 90))
         self.screen.blit(overlay, (0, 0))
 
-        blit_text_with_shadow(self.screen, FONT_TITLE, "🌾 夜巡農場 Nightwatch Farm", C_GOLD,
-                               center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 180))
-        blit_text_with_shadow(self.screen, FONT_SM, "經典精緻像素塔防農場", C_TEXT_ON_DARK,
-                               center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140))
+        # 【UI 視覺優化：修復主選單標題吃色問題】上面那層是整個畫面的
+        # 淡淡遮罩（alpha 90，本來就存在），這裡另外疊一塊「只蓋在標題
+        # 文字附近」、更暗一階的區域性遮罩（alpha 100，寬度等於整個
+        # 螢幕、高度約 120px），專門把主標題「夜巡農場 Nightwatch
+        # Farm」正後方那一小塊背景再壓暗一次——黃色文字最容易在太空船
+        # 背景圖本身較亮的區域（例如星空/艙體反光）被吃色，這塊局部加
+        # 深的遮罩加上下面的文字描邊雙重保險，確保不管背景圖哪個區域
+        # 剛好落在標題位置，文字都維持足夠對比度。
+        title_band_h = 120
+        title_band_y = SCREEN_HEIGHT // 2 - 180 - title_band_h // 2
+        title_band = pygame.Surface((SCREEN_WIDTH, title_band_h), pygame.SRCALPHA)
+        title_band.fill((0, 0, 0, 100))
+        self.screen.blit(title_band, (0, title_band_y))
+
+        # 主標題/副標題改用 draw_text_with_outline()：8 方向黑色描邊 +
+        # 正中央黃色/米白色主體文字，比原本 blit_text_with_shadow() 的
+        # 4 方向 1px 描邊更強，搭配上面新增的局部遮罩，雙重解決背景圖
+        # 亮度不可預期造成的吃色問題。
+        draw_text_with_outline(self.screen, "🌾 夜巡農場 Nightwatch Farm", FONT_TITLE, C_GOLD, (0, 0, 0),
+                                center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 180), outline_width=2)
+        draw_text_with_outline(self.screen, "經典精緻像素塔防農場", FONT_SM, C_TEXT_ON_DARK, (0, 0, 0),
+                                center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140), outline_width=2)
 
         def _draw_menu_button(rect, label, base_color, disabled=False):
             hovered = (not disabled) and rect.collidepoint(self.mouse_pos)
