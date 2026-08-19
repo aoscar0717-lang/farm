@@ -506,6 +506,14 @@ class AssetLoader:
             ("sunflower", ["seed", "sprout", "growing", "mature"]),  # 小麥 (WHEAT) 目前還沿用這組舊圖
             ("grape", ["seed", "sprout", "growing", "mature"]),
             ("starlight", ["seed", "sprout", "growing", "mature"]),
+            # 系統大重構 Phase 7：富鐵花 (CropType.IRON_FLOWER)，取代原本
+            # MINE 建築的 metal_ore 產出來源。使用者說明會在本地端自行
+            # 準備 16x16 Sprite Sheet 並對應好檔名，這裡先照跟其餘作物
+            # 完全一致的命名慣例（crops/iron_flower_{stage}.png）登記
+            # 四個階段的載入——檔案還沒放進 assets/ 之前，_load_image()
+            # 既有的 generate_placeholder() 後備機制會自動接手，不會讓
+            # 遊戲壞掉，這就是使用者要求的「安全圖檔路徑」。
+            ("iron_flower", ["seed", "sprout", "growing", "mature"]),
         ]
         for cname, stages in crops:
             for st in stages:
@@ -569,16 +577,13 @@ class AssetLoader:
         # 視覺升級（熔爐動畫）階段：使用者要求整批移除 OVEN（烤箱）跟
         # KILN（炭窯）這兩個建築，這裡同步拿掉 "oven"/"kiln" 兩筆載入
         # 呼叫，避免載入兩個已經不會被任何 BuildingType 用到的 key。
+        # 系統大重構 Phase 7：MINE（礦場）連同它的 asset_key 載入呼叫一併
+        # 移除——BuildingType.MINE 已經從 game_config.py 整批刪除，這裡
+        # 留著會去讀一個已經不存在於 BUILDING_DATA 的 key，且畫面上也
+        # 沒有任何建築會再用到 "mine" 這個 asset_key，屬於死代碼。
         buildings = [
             ("furnace", "buildings/furnace.png", "furnace"),
             ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
-            # 礦場沒有對應到使用者這次給的三種分類（機台/伐木場/防禦
-            # 塔），generate_placeholder() 目前也還沒有「礦場」專屬的
-            # 底色/特徵設計——不勉強套用一個不合適的分類（例如硬套用
-            # furnace 分類會讓礦場看起來像在燒火，語意不對），先讓它落
-            # 到 category=None、退回原本半透明灰色方塊的通用樣式，等
-            # 之後有明確的礦場視覺需求時再回來替它加一個專屬分類。
-            ("mine", "buildings/mine.png", None),
         ]
         for key, path, category in buildings:
             self.images[key] = self._load_image(path, sz, name=key, category=category)

@@ -29,6 +29,13 @@ class CropType(Enum):
     WHEAT = "WHEAT"                      # 小麥 (Lv.3)     -- 原 GOLDEN_SUNFLOWER (金黃向日葵) 改名
     ROYAL_GRAPE = "ROYAL_GRAPE"          # 皇家紫葡萄 (Lv.4)
     STARLIGHT_FRUIT = "STARLIGHT_FRUIT"  # 永恆星光果 (Lv.5)
+    # 系統大重構 Phase 7：取代原本的 MINE（礦場）建築成為 metal_ore 的
+    # 新來源——礦場被移除後，metal_ore 完全沒有任何產出管道，熔爐
+    # (FURNACE) 的「metal_ore x2 -> metal_ingot」配方會直接卡死。改用
+    # 「種在田裡的作物」取代「蓋在莊園景觀區的建築」來產出同一種原料，
+    # 這是使用者這次明確要求的設計方向（"以全新的「富鐵花」取代原本的
+    # 「礦場」"），不是我自己的取捨。
+    IRON_FLOWER = "IRON_FLOWER"          # 富鐵花 (Lv.3)：採收後產出 metal_ore，不是金幣
 
 
 class CropStage(Enum):
@@ -88,7 +95,10 @@ class BuildingType(Enum):
     # 走的仍然是熔爐那套「開關-配方-倒數」模型 (is_active/
     # is_processing)，只是 recipe 是空字典（見 BUILDING_DATA 說明）。
     LUMBERYARD = "LUMBERYARD"            # 伐木場：無消耗，定期產出 wood
-    MINE = "MINE"                        # 礦場：無消耗，定期產出 metal_ore
+    # 系統大重構 Phase 7：MINE（礦場）整批移除——使用者要求以全新的
+    # 「富鐵花」(CropType.IRON_FLOWER) 農作物取代，metal_ore 改由採收
+    # 富鐵花取得，不再由建築產出。詳見 CROP_DATA[IRON_FLOWER] 與
+    # GameState.harvest_crop() 的說明。
 
 
 class EnemyType(Enum):
@@ -254,9 +264,9 @@ ORDER_CONFIG = {
 FARM_LEVELS = {
     1: {"name": "初級農莊", "min_prosperity": 0, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO]},
     2: {"name": "興旺莊園", "min_prosperity": 40, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY]},
-    3: {"name": "繁花莊園", "min_prosperity": 100, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT]},
-    4: {"name": "璀璨莊園", "min_prosperity": 200, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.ROYAL_GRAPE]},
-    5: {"name": "傳奇仙境", "min_prosperity": 350, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.ROYAL_GRAPE, CropType.STARLIGHT_FRUIT]},
+    3: {"name": "繁花莊園", "min_prosperity": 100, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.IRON_FLOWER]},
+    4: {"name": "璀璨莊園", "min_prosperity": 200, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.IRON_FLOWER, CropType.ROYAL_GRAPE]},
+    5: {"name": "傳奇仙境", "min_prosperity": 350, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.IRON_FLOWER, CropType.ROYAL_GRAPE, CropType.STARLIGHT_FRUIT]},
 }
 
 CROP_DATA = {
@@ -335,6 +345,36 @@ CROP_DATA = {
         # 顯示改成「小麥」。之後如果有真的小麥素材，把這裡改成新的
         # asset_key，並在 asset_loader.py 補上對應圖檔即可。
         "asset_key": "sunflower",
+    },
+    # 系統大重構 Phase 7：富鐵花，取代 MINE（礦場）成為 metal_ore 的
+    # 產出來源。跟其餘 10 種作物最大的不同是採收後不直接給金幣、而是
+    # 給原料背包物品——harvest_reward 刻意設為 0，實際輸出改在
+    # GameState.harvest_crop() 裡讀 output_key/output_qty 這兩個新欄位
+    # 特別處理（其餘 10 種作物都沒有這兩個欄位，harvest_crop() 對它們
+    # 的行為完全不變）。unlock_level 訂為 3，跟 FURNACE（熔爐，也是
+    # unlock_level 3）同一階解鎖，確保玩家蓋得起熔爐的那一刻，田裡也已
+    # 經能種富鐵花取得 metal_ore 原料，不會出現「熔爐蓋好了但沒有任何
+    # 管道取得 metal_ore」的斷鏈空窗期。seed_cost/grow_time 直接採用
+    # 使用者規格給的 150 / 15.0；theft_gold_loss 沿用其餘作物「約
+    # seed_cost 的 1.2~1.27 倍」這個既有比例抓 185（150*1.233≈185），
+    # 即使富鐵花被偷不會讓玩家平白損失原料產出的邏輯意義，也要有個跟
+    # 其他作物一致、合理的「失竊代價」數字，不留 0 這種特例。
+    CropType.IRON_FLOWER: {
+        "name": "富鐵花",
+        "unlock_level": 3,
+        "seed_cost": 150,
+        "grow_time": 15.0,
+        "harvest_reward": 0,
+        "theft_gold_loss": 185,
+        "output_key": "metal_ore",
+        "output_qty": 1,
+        # 使用者說明會在本地端自行對應 16x16 Sprite Sheet 檔名，這裡先
+        # 用跟其餘作物一致的命名慣例（asset_loader.py 的
+        # crops 清單會用這個 key 去找 crops/iron_flower_{stage}.png），
+        # 檔案還沒放進 assets/ 時，AssetLoader._load_image() 既有的
+        # generate_placeholder() 後備機制會自動生成一張有底色區分的
+        # 佔位圖，不會讓遊戲壞掉——這就是規格裡要求的「安全圖檔路徑」。
+        "asset_key": "iron_flower",
     },
     CropType.ROYAL_GRAPE: {
         "name": "櫻桃小蘿蔔",
@@ -528,6 +568,11 @@ BUILDING_DATA = {
         "process_time": 20.0,
         "walkable": False,
         "asset_key": "furnace",
+        # 系統大重構 Phase 7：蒸汽龐克風 Sprite Sheet 改成 2x2 尺寸。
+        # 這是新增欄位，沒有 "size" 的建築（SPRINKLER/AUTO_HARVESTER）
+        # 在讀取端一律用 .get("size", (1, 1)) 取值，維持原本的 1x1 footprint，
+        # 不用把這個欄位補到每一個建築定義上。
+        "size": (2, 2),
     },
     # Phase 4：自動化農業科技。跟烤箱/熔爐不同，這兩種機台「蓋下去就
     # 永久被動生效」，完全不需要 is_active/is_processing 那套開關-配方-
@@ -610,19 +655,13 @@ BUILDING_DATA = {
         "process_time": 10.0,
         "walkable": False,
         "asset_key": "lumberyard",
+        "size": (2, 2),  # 系統大重構 Phase 7：同 FURNACE，改成 2x2 佔地
     },
-    BuildingType.MINE: {
-        "name": "礦場",
-        "unlock_level": 2,   # 比伐木場高一階（成本也高 3 倍），但仍遠低於熔爐(3)，確保熔爐解鎖時礦場已經可以先蓋好
-        "build_cost_gold": 150,
-        "build_cost_tech": 0,
-        "recipe": {},              # 無消耗——見上方說明
-        "output_key": "metal_ore",
-        "output_qty": 1,
-        "process_time": 15.0,
-        "walkable": False,
-        "asset_key": "mine",
-    },
+    # 系統大重構 Phase 7：BuildingType.MINE（礦場）連同這筆 BUILDING_DATA
+    # 一併整批移除——使用者要求以全新的富鐵花 (CropType.IRON_FLOWER)
+    # 農作物取代礦場成為 metal_ore 的產出來源，做法跟先前 OVEN/KILN
+    # 的整批移除一致（不是只從商店隱藏，是連 enum 成員、資料、UI 卡片/
+    # 點擊處理/鎖卡判定/圖示對照表全部刪乾淨）。
 }
 
 DOG_CONFIG = {

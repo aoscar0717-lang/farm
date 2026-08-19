@@ -339,13 +339,29 @@ class GameState:
         if not tile:
             return False, "座標無效！"
 
-        if tile.zone != ZoneType.DECORATION_ZONE:
-            return False, "加工機台只能建造在「四周的莊園景觀區」！中央農田請保留給作物與防禦設施。"
-
-        if not tile.is_empty:
-            return False, "該位置已有物件，無法建造加工機台！"
-
         config = BUILDING_DATA[building_type]
+
+        # 系統大重構 Phase 7：2x2 多格子建築。size 預設 (1, 1)，沒有
+        # "size" 欄位的建築（SPRINKLER/AUTO_HARVESTER）維持原本的單格
+        # 判定，行為完全不變；FURNACE/LUMBERYARD 現在是 size=(2, 2)，
+        # (x, y) 當作左上角錨點座標，footprint 展開成
+        # (x, y)/(x+1, y)/(x, y+1)/(x+1, y+1) 這四格，逐一檢查每一格
+        # 都存在、都是莊園景觀區、都是空地，任何一格不合格就整個拒絕
+        # 建造（不會蓋出一半在景觀區一半在別的區域、或蓋在已被佔用的
+        # 格子上的殘破狀態）。
+        size_w, size_h = config.get("size", (1, 1))
+        footprint = [(x + dx, y + dy) for dy in range(size_h) for dx in range(size_w)]
+        footprint_tiles = []
+        for fx, fy in footprint:
+            ftile = self.get_tile(fx, fy)
+            if not ftile:
+                return False, "座標無效！建築範圍超出地圖邊界。"
+            if ftile.zone != ZoneType.DECORATION_ZONE:
+                return False, "加工機台只能建造在「四周的莊園景觀區」！中央農田請保留給作物與防禦設施。"
+            if not ftile.is_empty:
+                return False, "該位置已有物件，無法建造加工機台！"
+            footprint_tiles.append(ftile)
+
         req_lvl = config["unlock_level"]
         if self.farm_level < req_lvl:
             return False, f"{config['name']} 需要莊園等級 Lv.{req_lvl} 才能建造！"
@@ -372,8 +388,16 @@ class GameState:
         self.tech_points -= cost_tech
         for item_key, need_qty in cost_items.items():
             self._consume_item(item_key, need_qty)
+        # 建築的 x/y 固定用左上角錨點座標（跟 footprint 計算時的定義一
+        # 致），self.buildings 仍然是「每座建築一筆」，不管 1x1 還是
+        # 2x2；佔地格全部指向同一個 Building 物件參照（而不是各自複製
+        # 一份），這樣不管從 footprint 裡的哪一格讀 tile.building，拿到
+        # 的都是同一個物件、同一份 is_active/is_processing 狀態，跟
+        # toggle_building()/_update_buildings() 既有邏輯（只認
+        # self.buildings 清單、不關心格子數量）完全相容，不用改。
         building = Building(building_type=building_type, x=x, y=y)
-        tile.building = building
+        for ftile in footprint_tiles:
+            ftile.building = building
         self.buildings.append(building)
 
         cost_desc_parts = []
@@ -609,28 +633,47 @@ class GameState:
         reward = crop.config["harvest_reward"]
         if crop.is_moonlight_boosted:
             reward = int(reward * 1.5) # 月光加成 +50%
-            
+
         self.gold += reward
         crop_name = crop.config["name"]
 
         # 訂單系統需要「已採收、還沒交出去」的作物數量可查詢/可扣除，
         # 過去這裡採收完作物就直接消失（只換成金幣），現在額外記一份
         # 到 crop_inventory；找不到對應代稱（理論上不會發生，
-        # ORDER_CROP_ALIASES 涵蓋全部 10 種作物）就靜默略過，不影響
-        # 既有的金幣採收流程。
+        # ORDER_CROP_ALIASES 涵蓋全部 10 種可交易作物）就靜默略過，不
+        # 影響既有的金幣採收流程。系統大重構 Phase 7 新增的 IRON_FLOWER
+        # 刻意不放進 ORDER_CROP_ALIASES（它是原料作物，不是可以交訂單
+        # 的成品），這個 next() 對它一樣會回傳 None、自然落入「靜默略
+        # 過」分支，不需要另外寫特例排除。
         crop_alias = next((a for a, ct in ORDER_CROP_ALIASES.items() if ct == crop.crop_type), None)
         if crop_alias is not None:
             self.crop_inventory[crop_alias] = self.crop_inventory.get(crop_alias, 0) + 1
 
+        # 系統大重構 Phase 7：IRON_FLOWER 是「產出原料、不是產出金幣」
+        # 的特殊作物（取代原本 MINE 建築的角色）——CROP_DATA 給它的
+        # harvest_reward 是 0，上面 self.gold += reward 這一行對它來說
+        # 等於沒加錢，這裡另外用 output_key/output_qty（只有 IRON_FLOWER
+        # 這筆 CROP_DATA 有這兩個欄位，其餘 10 種作物沒有，用 .get()
+        # 讀不到時 output_qty 就是 0，迴圈直接跳過，不影響原本任何作物
+        # 的採收流程）把 metal_ore 加進 self.inventory（跟 FURNACE 消耗
+        # metal_ore 時讀的是同一個背包欄位，接得上生產鏈）。
+        output_key = crop.config.get("output_key")
+        output_qty = crop.config.get("output_qty", 0)
+        output_desc = ""
+        if output_key and output_qty:
+            self.inventory[output_key] = self.inventory.get(output_key, 0) + output_qty
+            output_desc = f"，獲得 {output_qty} 個{self._item_display_name(output_key)}"
+
         tile.crop = None
 
         bonus_str = " (含月光滋養 +50%！)" if crop.is_moonlight_boosted else ""
+        reward_desc = f"獲得 {reward} 金幣{output_desc}" if reward else (output_desc.lstrip("，") if output_desc else "獲得 0 金幣")
         self._emit_event(
             EventType.CROP_HARVESTED,
-            f"🌾 成功採收 {crop_name}{bonus_str}！獲得 {reward} 金幣。",
-            {"x": x, "y": y, "reward": reward, "total_gold": self.gold}
+            f"🌾 成功採收 {crop_name}{bonus_str}！{reward_desc}。",
+            {"x": x, "y": y, "reward": reward, "total_gold": self.gold, "output_key": output_key, "output_qty": output_qty}
         )
-        return True, reward, f"採收成功，獲得 {reward} 金幣！"
+        return True, reward, f"採收成功，{reward_desc}！"
 
     def water_crop(self, x: int, y: int) -> Tuple[bool, str]:
         if self.phase == GamePhase.NIGHT:
@@ -887,8 +930,30 @@ class GameState:
                     self.inventory[item_key] = self.inventory.get(item_key, 0) + item_refund_qty
                 item_refund_parts.append(f"{item_refund_qty} 個{self._item_display_name(item_key)}")
 
-            self.buildings = [b for b in self.buildings if b is not tile.building]
-            tile.building = None
+            # 系統大重構 Phase 7 修正的 bug：2x2 建築（FURNACE/
+            # LUMBERYARD）的四個佔地格全都指向同一個 Building 物件，但
+            # 這裡原本只清空「玩家實際點下去剷除那一格」的 tile.building，
+            # 其餘 3 格會留著一個已經不在 self.buildings 清單裡的物件
+            # 參照——那 3 格會卡死：既無法互動（因為 is_empty 恆為
+            # False），也無法再被剷除一次來清掉它（因為玩家點那 3 格
+            # 進來時 tile.building 指向的物件雖然還在，`b is not
+            # tile.building` 這個過濾條件在物件已被移出 self.buildings
+            # 之後不會再匹配到，等於整段分支邏輯上還能跑，但游戲畫面上
+            # 那格永遠顯示著一座「拆不掉的鬼建築」）。改成用
+            # building.x/building.y（建造時固定寫入的左上角錨點）
+            # 加上 BUILDING_DATA 的 size 重新算出完整 footprint，把
+            # footprint 內每一格的 tile.building 都清成 None，不管玩家
+            # 點的是 2x2 裡的哪一格都能一次拆乾淨。1x1 建築的 size 預設
+            # (1, 1)，footprint 只有自己這一格，行為跟修正前完全相同。
+            removed_building = tile.building
+            b_size_w, b_size_h = config.get("size", (1, 1))
+            for fdx in range(b_size_w):
+                for fdy in range(b_size_h):
+                    ftile = self.get_tile(removed_building.x + fdx, removed_building.y + fdy)
+                    if ftile is not None and ftile.building is removed_building:
+                        ftile.building = None
+
+            self.buildings = [b for b in self.buildings if b is not removed_building]
 
             refund_desc = f"{refund} 金幣"
             if item_refund_parts:

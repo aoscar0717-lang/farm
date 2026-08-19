@@ -821,7 +821,7 @@ class NightwatchFarmApp:
         # rect 先放 Rect(0,0,0,0) 佔位，實際位置由 _layout_shop_tabs()
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
-            ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
+            ("CROPS", "農田耕作 (11)", pygame.Rect(0, 0, 0, 0)),
             ("DECO", "莊園景觀 (20)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
@@ -841,6 +841,10 @@ class NightwatchFarmApp:
                 ("PLANT_BLUEBERRY", "藍莓", "$180 | 24s熟", "blueberry_mature"),
                 ("PLANT_GRAPE", "皇家紫葡萄", "$220 | 26s熟", "grape_mature"),
                 ("PLANT_STARLIGHT", "永恆星光果", "$300 | 30s熟", "starlight_mature"),
+                # 系統大重構 Phase 7：富鐵花，取代原本 DECO 分頁裡的
+                # PLACE_MINE（礦場）卡片——礦場整批移除，改成種在農田
+                # 核心區的作物，所以卡片自然歸在 CROPS 分頁而不是 DECO。
+                ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石", "iron_flower_mature"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -882,8 +886,12 @@ class NightwatchFarmApp:
                 # ——只花金幣，不消耗任何背包物品，所以說明文字維持跟
                 # 一般景觀裝飾一致的「$金額」格式，不用像灑水器/採收機
                 # 那樣特別標注「錠」。
+                # 系統大重構 Phase 7：PLACE_MINE（礦場）卡片整批移除，
+                # 由新增的 PLANT_IRON_FLOWER 作物卡（CROPS 分頁）取代同
+                # 樣的 metal_ore 產出角色。伐木場同一階段改成 2x2 佔地
+                # （BUILDING_DATA[LUMBERYARD]["size"]），卡片說明文字/
+                # 售價/產出不變，只有實際佔地格數變大。
                 ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木頭", "lumberyard"),
-                ("PLACE_MINE", "礦場", "$150 | 每15s產1礦石", "mine"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1549,6 +1557,11 @@ class NightwatchFarmApp:
             success, msg = self.game.plant_crop(gx, gy, CropType.ROYAL_GRAPE)
         elif act == "PLANT_STARLIGHT":
             success, msg = self.game.plant_crop(gx, gy, CropType.STARLIGHT_FRUIT)
+        elif act == "PLANT_IRON_FLOWER":
+            # 系統大重構 Phase 7：富鐵花，種在農田核心區（跟其餘 10 種
+            # 作物一樣走 plant_crop()，place_building() 那套 2x2 佔地
+            # 邏輯跟它無關——它是作物不是建築）。
+            success, msg = self.game.plant_crop(gx, gy, CropType.IRON_FLOWER)
         # 景觀 (13 種)
         elif act == "PLACE_PATH":
             success, msg = self.game.place_decoration(gx, gy, DecorationType.STONE_PATH)
@@ -1596,8 +1609,6 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.AUTO_HARVESTER)
         elif act == "PLACE_LUMBERYARD":
             success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
-        elif act == "PLACE_MINE":
-            success, msg = self.game.place_building(gx, gy, BuildingType.MINE)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1892,11 +1903,15 @@ class NightwatchFarmApp:
             if card.action_id in ("PLANT_CORN", "PLANT_CARROT", "PLANT_STRAWBERRY"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.SWEET_CORN)
                 card.lock_reason = "需莊園等級 Lv.2"
-            elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
+            elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT", "PLANT_IRON_FLOWER"):
+                # 富鐵花 (IRON_FLOWER) 的 unlock_level 在 CROP_DATA 裡跟
+                # MAGIC_PUMPKIN/BLUEBERRY/WHEAT 一樣是 Lv.3（刻意跟
+                # FURNACE 熔爐同一階解鎖，見 game_config.py 的說明），
+                # 歸進同一組鎖卡判定，不用另外寫一個 elif 分支。
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
             elif card.action_id in ("PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
-                                     "PLACE_LUMBERYARD", "PLACE_MINE"):
+                                     "PLACE_LUMBERYARD"):
                 # 熔爐/灑水器/自動採收機/伐木場/礦場的
                 # unlock_level 都直接讀 BUILDING_DATA 定義比對
                 # self.game.farm_level，不用另外走 is_crop_unlocked 那套
@@ -1912,7 +1927,6 @@ class NightwatchFarmApp:
                     "PLACE_SPRINKLER": BuildingType.SPRINKLER,
                     "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
                     "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
-                    "PLACE_MINE": BuildingType.MINE,
                 }[card.action_id]
                 req_lvl = BUILDING_DATA[_card_building_type]["unlock_level"]
                 card.is_locked = self.game.farm_level < req_lvl
@@ -2511,7 +2525,18 @@ class NightwatchFarmApp:
                 # _render_defenses 方法），這裡沿用同一個既有寫法、加在
                 # 同一個迴圈裡，而不是另外拆一個獨立的渲染 pass，跟其餘
                 # 格子物件的繪製順序/風格保持一致。
-                if tile.building:
+                # 系統大重構 Phase 7：2x2 建築（FURNACE/LUMBERYARD）的
+                # 佔地格全部指向同一個 Building 物件（見 game_state.py
+                # place_building()），這個逐格迴圈原本一格就畫一次，
+                # 2x2 建築沒特別處理的話會被畫 4 次、每次都各自用自己
+                # 那一格的 px/py 當錨點，疊出 4 張互相錯位重疊的貼圖。
+                # 加上 (x, y) == (tile.building.x, tile.building.y) 這個
+                # 條件，只有掃到「建築的左上角錨點格」那一格才真正呼叫
+                # _render_building_tile()，確保不管建築是 1x1 還是 2x2
+                # 都只畫一次；_render_building_tile() 內部再自己用
+                # BUILDING_DATA 的 size 算出完整 2x2 範圍置中繪製（見
+                # 該方法內的說明），這裡不用預先算 span。
+                if tile.building and (x, y) == (tile.building.x, tile.building.y):
                     self._render_building_tile(tile.building, px, py)
 
         # 第 1 天未播種時，農田外框呈現金色呼吸引導光效
@@ -2648,12 +2673,15 @@ class NightwatchFarmApp:
     # Sprite Sheet 動畫可以用，不會走到這裡，但保留 FURNACE 這一筆是
     # 為了萬一動畫幀載入失敗（例如 熔爐.png 被移除）時還能有安全字元
     # 可以退回，不會直接壞掉。
+    # 系統大重構 Phase 7：BuildingType.MINE 已從 game_config.py 整批移除
+    # （被 CropType.IRON_FLOWER 取代），這裡同步拿掉 "採礦" 這一筆，避免
+    # 字典裡留著已經不存在的 BuildingType 成員（跟 OVEN/KILN 當初移除
+    # 時的處理方式一致）。
     _BUILDING_ICONS = {
         BuildingType.FURNACE: "熔煉",
         BuildingType.SPRINKLER: "灑水",
         BuildingType.AUTO_HARVESTER: "採收",
         BuildingType.LUMBERYARD: "伐木",
-        BuildingType.MINE: "採礦",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
@@ -2680,6 +2708,18 @@ class NightwatchFarmApp:
         config = building.config
         asset_key = config.get("asset_key")
         img = self.loader.get(asset_key) if asset_key else None
+
+        # 系統大重構 Phase 7：2x2 多格子建築。size 預設 (1, 1)，1x1 機台
+        # （SPRINKLER/AUTO_HARVESTER 等）算出來 span_w == span_h ==
+        # CELL_SIZE，跟改動前完全等價；FURNACE/LUMBERYARD 現在是
+        # size=(2, 2)，span_w/span_h 變成 2*CELL_SIZE，下面所有原本寫死
+        # CELL_SIZE 的定位運算（貼圖置中點、色塊防呆矩形、ON/OFF 指示
+        # 燈座標、進度條寬度）改吃這兩個變數，貼圖/圓點/進度條就會一起
+        # 隨著建築佔地格數放大、並置中對齊在整個 2x2 範圍的正中央，而
+        # 不是只對齊左上角那一格。
+        size_w, size_h = config.get("size", (1, 1))
+        span_w = size_w * CELL_SIZE
+        span_h = size_h * CELL_SIZE
 
         # 視覺升級：Sprite Sheet 特定影格動畫（熔爐/伐木場共用同一套
         # 播放邏輯）。asset_key 對應到有提取好動畫幀的機台時，優先用
@@ -2716,10 +2756,10 @@ class NightwatchFarmApp:
                 cycle_len = max(1, len(anim_frames) - 1)
                 frame_index = 1 + int(self.anim_time / ANIMATION_SPEED) % cycle_len
             frame_img = anim_frames[frame_index]
-            img_rect = frame_img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
+            img_rect = frame_img.get_rect(midbottom=(px + span_w // 2, py + span_h))
             self.screen.blit(frame_img, img_rect)
         elif img:
-            img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
+            img_rect = img.get_rect(midbottom=(px + span_w // 2, py + span_h))
             self.screen.blit(img, img_rect)
         else:
             # 貼圖缺失後備：木箱色塊 + 機台圖示文字。開關式機台 (烤箱/
@@ -2729,7 +2769,7 @@ class NightwatchFarmApp:
             # 下「變亮」再馬上變暗，看起來像故障；改用 is_active 判斷就
             # 只有玩家真的關閉開關時才會變暗。被動機台 (灑水器/自動採收
             # 機) 沒有 is_active 這個概念，永遠用「開啟」的亮色調。
-            body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
+            body_rect = pygame.Rect(px + 6, py + 10, span_w - 12, span_h - 16)
             if building.is_passive:
                 base_col = (94, 66, 50)
             else:
@@ -2744,13 +2784,15 @@ class NightwatchFarmApp:
             # 被動永久生效：一圈穩定的淡科技綠外框，不閃爍、不需要玩家
             # 操作，跟下面「開關式機台」的圓點指示燈明確區分開，避免
             # 誤以為這種機台也有 ON/OFF 兩態。
-            body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
+            body_rect = pygame.Rect(px + 6, py + 10, span_w - 12, span_h - 16)
             pygame.draw.rect(self.screen, (90, 200, 150), body_rect, width=2, border_radius=6)
             return
 
         # ON/OFF 指示燈（只有開關式機台才有）：機台右上角一個小圓點，
         # 開=科技綠、關=暗紅，開啟時再疊一圈淡淡的光暈表示「自動運作中」。
-        dot_center = (px + CELL_SIZE - 12, py + 10)
+        # 座標改用 span_w 對齊到整個 2x2 範圍的右上角，而不是固定停在
+        # 左上角那一格的右上角（1x1 建築 span_w == CELL_SIZE，位置不變）。
+        dot_center = (px + span_w - 12, py + 10)
         if building.is_active:
             pygame.draw.circle(self.screen, (30, 60, 40), dot_center, 7)
             glow_r = 6 + int(math.sin(self.anim_time * 5.0) * 1.5)
@@ -2764,7 +2806,7 @@ class NightwatchFarmApp:
         if building.is_processing:
             total = float(config["process_time"])
             ratio = 0.0 if total <= 0 else max(0.0, min(1.0, 1.0 - building.processing_time_left / total))
-            bar_w = CELL_SIZE - 16
+            bar_w = span_w - 16
             bar_rect = pygame.Rect(px + 8, py + 2, bar_w, 6)
             draw_beveled_rect(self.screen, bar_rect, C_WOOD_BEVEL_DARK, border_radius=3, depth=1, pressed=True)
             if ratio > 0:
