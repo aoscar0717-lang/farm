@@ -449,11 +449,11 @@ class NightwatchFarmApp:
                 ("PLANT_RADISH", "白蘿蔔", "$10 | 4s熟", "radish_mature"),
                 ("PLANT_STRAWBERRY", "鮮甜草莓", "$20 | 6s熟", "strawberry_mature"),
                 ("PLANT_TOMATO", "紅番茄", "$35 | 8s熟", "tomato_mature"),
-                ("PLANT_EGGPLANT", "紫晶茄子", "$55 | 12s熟", "eggplant_mature"),
+                ("PLANT_CARROT", "胡蘿蔔", "$55 | 12s熟", "carrot_mature"),
                 ("PLANT_PUMPKIN", "巨型金南瓜", "$80 | 15s熟", "pumpkin_mature"),
                 ("PLANT_CORN", "香甜玉米", "$110 | 18s熟", "corn_mature"),
-                ("PLANT_SUNFLOWER", "金黃向日葵", "$140 | 20s熟", "sunflower_mature"),
-                ("PLANT_WATERMELON", "冰爽西瓜", "$180 | 24s熟", "watermelon_mature"),
+                ("PLANT_WHEAT", "小麥", "$140 | 20s熟", "sunflower_mature"),
+                ("PLANT_BLUEBERRY", "藍莓", "$180 | 24s熟", "blueberry_mature"),
                 ("PLANT_GRAPE", "皇家紫葡萄", "$220 | 26s熟", "grape_mature"),
                 ("PLANT_STARLIGHT", "永恆星光果", "$300 | 30s熟", "starlight_mature"),
             ],
@@ -808,16 +808,16 @@ class NightwatchFarmApp:
             success, msg = self.game.plant_crop(gx, gy, CropType.RED_TOMATO)
         elif act == "PLANT_CORN":
             success, msg = self.game.plant_crop(gx, gy, CropType.SWEET_CORN)
-        elif act == "PLANT_EGGPLANT":
-            success, msg = self.game.plant_crop(gx, gy, CropType.CRYSTAL_EGGPLANT)
+        elif act == "PLANT_CARROT":
+            success, msg = self.game.plant_crop(gx, gy, CropType.CARROT)
         elif act == "PLANT_STRAWBERRY":
             success, msg = self.game.plant_crop(gx, gy, CropType.SWEET_STRAWBERRY)
         elif act == "PLANT_PUMPKIN":
             success, msg = self.game.plant_crop(gx, gy, CropType.MAGIC_PUMPKIN)
-        elif act == "PLANT_WATERMELON":
-            success, msg = self.game.plant_crop(gx, gy, CropType.CRISP_WATERMELON)
-        elif act == "PLANT_SUNFLOWER":
-            success, msg = self.game.plant_crop(gx, gy, CropType.GOLDEN_SUNFLOWER)
+        elif act == "PLANT_BLUEBERRY":
+            success, msg = self.game.plant_crop(gx, gy, CropType.BLUEBERRY)
+        elif act == "PLANT_WHEAT":
+            success, msg = self.game.plant_crop(gx, gy, CropType.WHEAT)
         elif act == "PLANT_GRAPE":
             success, msg = self.game.plant_crop(gx, gy, CropType.ROYAL_GRAPE)
         elif act == "PLANT_STARLIGHT":
@@ -1074,10 +1074,10 @@ class NightwatchFarmApp:
     def _update_card_states(self):
         for card in self.action_cards:
             # 作物解鎖判定
-            if card.action_id in ("PLANT_CORN", "PLANT_EGGPLANT", "PLANT_STRAWBERRY"):
+            if card.action_id in ("PLANT_CORN", "PLANT_CARROT", "PLANT_STRAWBERRY"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.SWEET_CORN)
                 card.lock_reason = "需莊園等級 Lv.2"
-            elif card.action_id in ("PLANT_PUMPKIN", "PLANT_WATERMELON", "PLANT_SUNFLOWER"):
+            elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
             elif card.action_id == "PLANT_GRAPE":

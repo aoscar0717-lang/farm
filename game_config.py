@@ -21,12 +21,12 @@ class ZoneType(Enum):
 class CropType(Enum):
     WHITE_RADISH = "WHITE_RADISH"        # 白蘿蔔 (Lv.1)
     RED_TOMATO = "RED_TOMATO"            # 紅番茄 (Lv.1)
-    SWEET_CORN = "SWEET_CORN"            # 甜玉米 (Lv.2)
-    CRYSTAL_EGGPLANT = "CRYSTAL_EGGPLANT"# 紫水晶茄子 (Lv.2)
+    SWEET_CORN = "SWEET_CORN"            # 香甜玉米 (Lv.2)
+    CARROT = "CARROT"                    # 胡蘿蔔 (Lv.2)  -- 原 CRYSTAL_EGGPLANT (紫晶茄子) 改名
     SWEET_STRAWBERRY = "SWEET_STRAWBERRY"# 鮮甜草莓 (Lv.2)
     MAGIC_PUMPKIN = "MAGIC_PUMPKIN"      # 魔法南瓜 (Lv.3)
-    CRISP_WATERMELON = "CRISP_WATERMELON"# 冰爽西瓜 (Lv.3)
-    GOLDEN_SUNFLOWER = "GOLDEN_SUNFLOWER"# 金色向日葵 (Lv.3)
+    BLUEBERRY = "BLUEBERRY"              # 藍莓 (Lv.3)     -- 原 CRISP_WATERMELON (冰爽西瓜) 改名
+    WHEAT = "WHEAT"                      # 小麥 (Lv.3)     -- 原 GOLDEN_SUNFLOWER (金黃向日葵) 改名
     ROYAL_GRAPE = "ROYAL_GRAPE"          # 皇家紫葡萄 (Lv.4)
     STARLIGHT_FRUIT = "STARLIGHT_FRUIT"  # 永恆星光果 (Lv.5)
 
@@ -151,10 +151,10 @@ MAP_CONFIG = {
 
 FARM_LEVELS = {
     1: {"name": "初級農莊", "min_prosperity": 0, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO]},
-    2: {"name": "興旺莊園", "min_prosperity": 40, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CRYSTAL_EGGPLANT, CropType.SWEET_STRAWBERRY]},
-    3: {"name": "繁花莊園", "min_prosperity": 100, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CRYSTAL_EGGPLANT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.CRISP_WATERMELON, CropType.GOLDEN_SUNFLOWER]},
-    4: {"name": "璀璨莊園", "min_prosperity": 200, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CRYSTAL_EGGPLANT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.CRISP_WATERMELON, CropType.GOLDEN_SUNFLOWER, CropType.ROYAL_GRAPE]},
-    5: {"name": "傳奇仙境", "min_prosperity": 350, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CRYSTAL_EGGPLANT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.CRISP_WATERMELON, CropType.GOLDEN_SUNFLOWER, CropType.ROYAL_GRAPE, CropType.STARLIGHT_FRUIT]},
+    2: {"name": "興旺莊園", "min_prosperity": 40, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY]},
+    3: {"name": "繁花莊園", "min_prosperity": 100, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT]},
+    4: {"name": "璀璨莊園", "min_prosperity": 200, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.ROYAL_GRAPE]},
+    5: {"name": "傳奇仙境", "min_prosperity": 350, "unlocked_crops": [CropType.WHITE_RADISH, CropType.RED_TOMATO, CropType.SWEET_CORN, CropType.CARROT, CropType.SWEET_STRAWBERRY, CropType.MAGIC_PUMPKIN, CropType.BLUEBERRY, CropType.WHEAT, CropType.ROYAL_GRAPE, CropType.STARLIGHT_FRUIT]},
 }
 
 CROP_DATA = {
@@ -168,7 +168,7 @@ CROP_DATA = {
         "asset_key": "radish",
     },
     CropType.RED_TOMATO: {
-        "name": "金黃小麥",
+        "name": "紅番茄",
         "unlock_level": 1,
         "seed_cost": 20,
         "grow_time": 6.0,
@@ -177,7 +177,7 @@ CROP_DATA = {
         "asset_key": "tomato",
     },
     CropType.SWEET_CORN: {
-        "name": "甜玉米",
+        "name": "香甜玉米",
         "unlock_level": 2,
         "seed_cost": 40,
         "grow_time": 10.0,
@@ -185,14 +185,14 @@ CROP_DATA = {
         "theft_gold_loss": 50,
         "asset_key": "corn",
     },
-    CropType.CRYSTAL_EGGPLANT: {
-        "name": "紫心蘿蔔",
+    CropType.CARROT: {
+        "name": "胡蘿蔔",
         "unlock_level": 2,
         "seed_cost": 55,
         "grow_time": 12.0,
         "harvest_reward": 130,
         "theft_gold_loss": 65,
-        "asset_key": "eggplant",
+        "asset_key": "carrot",
     },
     CropType.SWEET_STRAWBERRY: {
         "name": "漿果灌木",
@@ -212,22 +212,26 @@ CROP_DATA = {
         "theft_gold_loss": 110,
         "asset_key": "pumpkin",
     },
-    CropType.CRISP_WATERMELON: {
-        "name": "秋收金南瓜",
+    CropType.BLUEBERRY: {
+        "name": "藍莓",
         "unlock_level": 3,
         "seed_cost": 110,
         "grow_time": 18.0,
         "harvest_reward": 310,
         "theft_gold_loss": 140,
-        "asset_key": "watermelon",
+        "asset_key": "blueberry",
     },
-    CropType.GOLDEN_SUNFLOWER: {
-        "name": "金色向日葵",
+    CropType.WHEAT: {
+        "name": "小麥",
         "unlock_level": 3,
         "seed_cost": 130,
         "grow_time": 20.0,
         "harvest_reward": 380,
         "theft_gold_loss": 160,
+        # 沒有新的小麥素材，asset_key 先保留 "sunflower"，繼續沿用原本
+        # 向日葵的圖（seed/sprout/growing/mature 都還是舊圖），只有名稱
+        # 顯示改成「小麥」。之後如果有真的小麥素材，把這裡改成新的
+        # asset_key，並在 asset_loader.py 補上對應圖檔即可。
         "asset_key": "sunflower",
     },
     CropType.ROYAL_GRAPE: {

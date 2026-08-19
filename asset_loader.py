@@ -25,6 +25,33 @@ BOSS_DIRECTION_ROWS = {"down": 0, "right": 1, "up": 2}
 # 背景是純黑色去背 (Chroma Key)，不是 alpha 透明。
 BOSS_CHROMA_KEY = (0, 0, 0)
 
+# ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
+# 實測 128x32，4 格橫向排列、每格 32x32，由左至右正好是
+# seed / sprout / growing / mature 4 個生長階段，不用額外挑選。
+# 圖片本身就有真正的 PNG alpha 透明背景（跟 pig_chroma.png 不同，這張
+# 沒有純色背景，也有少量真正不透明的黑色像素是畫作的一部分，比如描邊，
+# 所以不能用 set_colorkey 去背，直接 convert_alpha() 保留原始透明度）。
+CORN_FRAME_WIDTH = 32
+CORN_FRAME_HEIGHT = 32
+CORN_STAGE_COLUMNS = {"seed": 0, "sprout": 1, "growing": 2, "mature": 3}
+
+# ---- 胡蘿蔔/番茄/土豆/藍莓 (assets/crops/胡蘿蔔_番茄_土豆_藍莓.png) --------
+# 實測 224x192，是 7 欄 x 4 列、每格 32x32 的網格：
+#   row 0 = 胡蘿蔔 (carrot)，row 1 = 番茄 (tomato)，
+#   row 2 = 土豆 (potato，目前遊戲沒有這個作物，切圖時直接跳過)，
+#   row 3 = 藍莓 (blueberry)。
+# 每一列裡實際上有 5 組「生長圖示」由左至右依序變大（col 0~4），
+# 每組本身又是兩個並排的小變體（跟 pig_chroma 的站姿雙格類似，是美術
+# 風格，不影響切格——照樣一格 32x32 整組切下來），col 5 是空白，
+# col 6 是「已收成」的道具圖示（不是生長階段，不使用）。
+# 4 個生長階段目前先取 [0, 1, 3, 4]（seed / sprout / growing / mature），
+# 跳過 col 2（變化太小，跟 col1/col3 差異不明顯）——想調整的話改
+# MIX_STAGE_COLUMNS 這個字典就好，不用動切圖邏輯。
+MIX_FRAME_WIDTH = 32
+MIX_FRAME_HEIGHT = 32
+MIX_ROW_CROPS = {"carrot": 0, "tomato": 1, "blueberry": 3}  # row 2 (potato) 略過
+MIX_STAGE_COLUMNS = {"seed": 0, "sprout": 1, "growing": 3, "mature": 4}
+
 
 class AssetLoader:
     def __init__(self, cell_size: int = 50):
@@ -44,6 +71,65 @@ class AssetLoader:
         surf = pygame.Surface(size, pygame.SRCALPHA)
         pygame.draw.rect(surf, (200, 200, 200, 150), (4, 4, size[0] - 8, size[1] - 8), border_radius=4)
         return surf
+
+    def _load_corn_spritesheet(self, size: Tuple[int, int]):
+        """
+        從 assets/crops/玉米.png 切出玉米的 4 個生長階段，直接寫進
+        self.images["corn_seed"] / "corn_sprout" / "corn_growing" /
+        "corn_mature"，跟舊的單檔 {name}_{stage}.png 格式相容，渲染層
+        完全不用改。找不到檔案時，四個 key 都填一個灰色佔位圖，不會
+        讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "crops/玉米.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 crops/玉米.png，corn 將使用灰色佔位圖。")
+            for stage in CORN_STAGE_COLUMNS:
+                self.images[f"corn_{stage}"] = self._load_image("crops/__missing__.png", size)
+            return
+
+        try:
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 crops/玉米.png 失敗: {e}")
+            for stage in CORN_STAGE_COLUMNS:
+                self.images[f"corn_{stage}"] = self._load_image("crops/__missing__.png", size)
+            return
+
+        for stage, col in CORN_STAGE_COLUMNS.items():
+            rect = pygame.Rect(col * CORN_FRAME_WIDTH, 0, CORN_FRAME_WIDTH, CORN_FRAME_HEIGHT)
+            frame = sheet.subsurface(rect).copy()
+            self.images[f"corn_{stage}"] = pygame.transform.scale(frame, size)
+
+    def _load_carrot_tomato_blueberry_spritesheet(self, size: Tuple[int, int]):
+        """
+        從 assets/crops/胡蘿蔔_番茄_土豆_藍莓.png 切出胡蘿蔔/番茄/藍莓
+        各自的 4 個生長階段，寫進 self.images["carrot_seed"] /
+        "tomato_seed" / "blueberry_seed" 等等，跟舊格式相容。
+        土豆 (potato) 那一列目前遊戲用不到，直接跳過不切。
+        找不到檔案時，三種作物、四個階段都填灰色佔位圖。
+        """
+        full_path = os.path.join(ASSET_ROOT, "crops/胡蘿蔔_番茄_土豆_藍莓.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 crops/胡蘿蔔_番茄_土豆_藍莓.png，carrot/tomato/blueberry 將使用灰色佔位圖。")
+            for crop_name in MIX_ROW_CROPS:
+                for stage in MIX_STAGE_COLUMNS:
+                    self.images[f"{crop_name}_{stage}"] = self._load_image("crops/__missing__.png", size)
+            return
+
+        try:
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 crops/胡蘿蔔_番茄_土豆_藍莓.png 失敗: {e}")
+            for crop_name in MIX_ROW_CROPS:
+                for stage in MIX_STAGE_COLUMNS:
+                    self.images[f"{crop_name}_{stage}"] = self._load_image("crops/__missing__.png", size)
+            return
+
+        for crop_name, row in MIX_ROW_CROPS.items():
+            for stage, col in MIX_STAGE_COLUMNS.items():
+                rect = pygame.Rect(col * MIX_FRAME_WIDTH, row * MIX_FRAME_HEIGHT, MIX_FRAME_WIDTH, MIX_FRAME_HEIGHT)
+                frame = sheet.subsurface(rect).copy()
+                self.images[f"{crop_name}_{stage}"] = pygame.transform.scale(frame, size)
 
     def _load_pig_chroma_frames(self):
         """
@@ -100,16 +186,17 @@ class AssetLoader:
         self.images["grass_tile"] = self._load_image("tiles/grass_tile.png", sz)
         self.images["soil_tile"] = self._load_image("tiles/soil_tile.png", sz)
         
-        # 1. 作物 (10 種)
+        # 1. 作物（單檔案 {name}_{stage}.png 讀取方式）
+        # tomato / corn 已經改成從新的整合精靈圖切圖（見下面第 1b 節），
+        # 這裡拿掉，避免先讀一次舊的 tomato_*.png / corn_*.png 再馬上被
+        # 蓋掉的無意義 IO。carrot / blueberry 是全新作物（原本
+        # eggplant / watermelon 改名），本來就沒有 xxx_seed.png 這種單檔，
+        # 只能從新素材切，所以也不放進這個清單。
         crops = [
             ("radish", ["seed", "sprout", "growing", "mature"]),
-            ("tomato", ["seed", "sprout", "growing", "mature"]),
-            ("corn", ["seed", "sprout", "growing", "mature"]),
-            ("eggplant", ["seed", "sprout", "growing", "mature"]),
             ("strawberry", ["seed", "sprout", "growing", "mature"]),
             ("pumpkin", ["seed", "sprout", "growing", "mature"]),
-            ("watermelon", ["seed", "sprout", "growing", "mature"]),
-            ("sunflower", ["seed", "sprout", "growing", "mature"]),
+            ("sunflower", ["seed", "sprout", "growing", "mature"]),  # 小麥 (WHEAT) 目前還沿用這組舊圖
             ("grape", ["seed", "sprout", "growing", "mature"]),
             ("starlight", ["seed", "sprout", "growing", "mature"]),
         ]
@@ -117,6 +204,13 @@ class AssetLoader:
             for st in stages:
                 key = f"{cname}_{st}"
                 self.images[key] = self._load_image(f"crops/{cname}_{st}.png", sz)
+
+        # 1b. 新版整合精靈圖：玉米 (corn) + 胡蘿蔔/番茄/藍莓 (potato 素材
+        # 目前遊戲沒有用到，切圖時略過)。切好的畫格直接塞進
+        # self.images["corn_seed"] 這些跟舊格式相容的 key，渲染層完全
+        # 不用改。
+        self._load_corn_spritesheet(sz)
+        self._load_carrot_tomato_blueberry_spritesheet(sz)
 
         # 2. 景觀 (13 種)
         decos = [
