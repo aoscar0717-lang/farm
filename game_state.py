@@ -236,28 +236,37 @@ class GameState:
         if self.flashlight_cooldown > 0:
             return False, f"強光手電筒充能中（剩餘 {self.flashlight_cooldown:.1f} 秒）！"
 
-        stunned_enemy = None
-        min_dist = 1.8
-
+        # 1. 優先照暈游標附近的敵人（放寬至 3.5 格範圍）
+        stunned_enemies = []
         for enemy in self.enemies:
             if enemy.state in (EnemyState.MOVING, EnemyState.ACTING):
                 dist = math.hypot(enemy.x - target_x, enemy.y - target_y)
-                if dist <= min_dist:
-                    min_dist = dist
-                    stunned_enemy = enemy
+                if dist <= 3.5:
+                    stunned_enemies.append(enemy)
 
-        if stunned_enemy:
+        # 2. 若游標周圍無敵人，自動輔助瞄準全場最近的入侵敵人
+        if not stunned_enemies:
+            active_enemies = [e for e in self.enemies if e.state in (EnemyState.MOVING, EnemyState.ACTING)]
+            if active_enemies:
+                active_enemies.sort(key=lambda e: math.hypot(e.x - target_x, e.y - target_y))
+                if math.hypot(active_enemies[0].x - target_x, active_enemies[0].y - target_y) <= 6.0:
+                    stunned_enemies.append(active_enemies[0])
+
+        if stunned_enemies:
             self.flashlight_cooldown = self.max_flashlight_cooldown
-            stunned_enemy.state = EnemyState.STUNNED
-            stunned_enemy.stun_timer = 2.5
-            self._emit_event(
-                EventType.ENEMY_STUNNED,
-                f"🔦 強光直射！{stunned_enemy.config['name']} 陷入暈眩 2.5 秒！（進入 3s 冷卻）",
-                {"x": stunned_enemy.x, "y": stunned_enemy.y, "enemy_id": stunned_enemy.id}
-            )
-            return True, f"成功照暈 {stunned_enemy.config['name']}！"
+            names = []
+            for e in stunned_enemies:
+                e.state = EnemyState.STUNNED
+                e.stun_timer = 2.5
+                names.append(e.config['name'])
+                self._emit_event(
+                    EventType.ENEMY_STUNNED,
+                    f"🔦 強光直射！{e.config['name']} 陷入暈眩 2.5 秒！（進入 3s 冷卻）",
+                    {"x": e.x, "y": e.y, "enemy_id": e.id}
+                )
+            return True, f"成功照暈 {'、'.join(names)}！"
 
-        return False, "強光照射範圍內沒有敵人！"
+        return False, "視野內暫無可照射的入侵敵人！"
 
     def use_dog_whistle(self, target_x: float, target_y: float) -> Tuple[bool, str]:
         if not self.guard_dog:
@@ -309,8 +318,12 @@ class GameState:
         if not tile:
             return False, "座標無效！"
 
+        if tile.zone != ZoneType.FARM_ZONE:
+            return False, "防禦設施（木柵、捕獸夾、稻草人、蜜蜂塔）只能建造在「中央農田防衛區」！四周請保留給景觀建築。"
+
         if not tile.is_empty:
             return False, "該位置已有物件，無法放置防禦設施！"
+
 
         cost = DEFENSE_DATA[defense_type]["cost"]
         if self.gold < cost:

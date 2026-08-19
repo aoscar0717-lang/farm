@@ -190,7 +190,7 @@ class ActionCard:
 class NightwatchFarmApp:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 現代極簡塔防農場")
+        pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 經典精緻像素塔防農場")
         self.clock = pygame.time.Clock()
         
         self.game = GameState()
@@ -203,21 +203,16 @@ class NightwatchFarmApp:
         
         self.floating_texts = []
         self.particles = []
-        self.log_messages = ["🌾 歡迎來到夜巡農場！純色極簡莊園，中央為農田與金庫，四周為景觀與防禦！"]
+        self.log_messages = ["🌾 歡迎來到夜巡農場！精緻像素莊園，中央為農田與防線，四周為景觀與寵物！"]
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
-
-        # Time-scale control (pause / 1x / 2x / 4x), ported over from the
-        # old src/capstone_contract.py game as one of its useful features.
-        # P toggles pause (remembers the speed you were at before pausing,
-        # same as the old game); [ and ] step down/up through the speed
-        # tiers. Applied by scaling dt before self.game.update(dt) in
-        # run(), so it doesn't need any changes inside GameState itself.
+        # Time-scale control
         self.time_scale = 1.0
         self.time_scale_before_pause = 1.0
         self.TIME_SCALE_STEPS = (0.0, 1.0, 2.0, 4.0)
 
+        self.flash_vfx_timer = 0.0
         self._init_ui()
 
     def _init_ui(self):
@@ -231,38 +226,38 @@ class NightwatchFarmApp:
         self.cards_by_tab = {
             "CROPS": [
                 ("PLANT_RADISH", "白蘿蔔", "$10 | 4s熟", "radish_mature"),
-                ("PLANT_TOMATO", "紅番茄", "$20 | 6s熟", "tomato_mature"),
-                ("PLANT_CORN", "甜玉米", "$40 | 10s熟", "corn_mature"),
+                ("PLANT_STRAWBERRY", "鮮甜草莓", "$20 | 6s熟", "strawberry_mature"),
+                ("PLANT_TOMATO", "紅番茄", "$35 | 8s熟", "tomato_mature"),
                 ("PLANT_EGGPLANT", "紫晶茄子", "$55 | 12s熟", "eggplant_mature"),
-                ("PLANT_STRAWBERRY", "鮮甜草莓", "$70 | 14s熟", "strawberry_mature"),
-                ("PLANT_PUMPKIN", "魔法南瓜", "$90 | 16s熟", "pumpkin_mature"),
-                ("PLANT_WATERMELON", "冰爽西瓜", "$110 | 18s熟", "watermelon_mature"),
-                ("PLANT_SUNFLOWER", "向日葵", "$130 | 20s熟", "sunflower_mature"),
-                ("PLANT_GRAPE", "皇家紫葡萄", "$160 | 22s熟", "grape_mature"),
-                ("PLANT_STARLIGHT", "永恆星光果", "$280 | 28s熟", "starlight_mature"),
+                ("PLANT_PUMPKIN", "巨型金南瓜", "$80 | 15s熟", "pumpkin_mature"),
+                ("PLANT_CORN", "香甜玉米", "$110 | 18s熟", "corn_mature"),
+                ("PLANT_SUNFLOWER", "金黃向日葵", "$140 | 20s熟", "sunflower_mature"),
+                ("PLANT_WATERMELON", "冰爽西瓜", "$180 | 24s熟", "watermelon_mature"),
+                ("PLANT_GRAPE", "皇家紫葡萄", "$220 | 26s熟", "grape_mature"),
+                ("PLANT_STARLIGHT", "永恆星光果", "$300 | 30s熟", "starlight_mature"),
             ],
             "DECO": [
-                ("PLACE_PATH", "石板花徑", "$20 | +10繁榮", "stone_path"),
-                ("PLACE_FLOWER", "鮮花花壇", "$35 | +20繁榮", "flower_bed"),
-                ("PLACE_BENCH", "休閒長椅", "$45 | +30繁榮", "garden_bench"),
-                ("PLACE_PINE", "莊園松樹", "$50 | +35繁榮", "pine_tree"),
-                ("PLACE_APPLE_TREE", "蘋果果樹", "$60 | +40繁榮", "apple_tree"),
-                ("PLACE_LANTERN", "守護路燈", "$75 | +50繁榮", "soul_lantern"),
-                ("PLACE_SAKURA_TREE", "櫻花樹", "$85 | +55繁榮", "sakura_tree"),
-                ("PLACE_BIRD_BATH", "鳥浴水盆", "$95 | +65繁榮", "bird_bath"),
-                ("PLACE_STATUE", "莊園雕像", "$110 | +75繁榮", "ancient_statue"),
-                ("PLACE_PET_HOUSE", "寵物小屋", "$130 | +90繁榮", "pet_house"),
-                ("PLACE_FOUNTAIN", "圓形噴泉", "$160 | +110", "fountain"),
-                ("PLACE_SUNDIAL", "日晷鐘塔", "$220 | +160", "sundial_tower"),
-                ("PLACE_WINDMILL", "風車磨坊", "$300 | +220", "windmill"),
+                ("PLACE_PATH", "石板小徑", "$20 | +10繁榮", "stone_path"),
+                ("PLACE_FLOWER", "鮮花盆栽", "$35 | +20繁榮", "flower_bed"),
+                ("PLACE_BENCH", "休閒木椅", "$45 | +30繁榮", "garden_bench"),
+                ("PLACE_PINE", "針葉松樹", "$50 | +35繁榮", "pine_tree"),
+                ("PLACE_APPLE_TREE", "紅葉楓樹", "$60 | +40繁榮", "apple_tree"),
+                ("PLACE_LANTERN", "夜巡路燈", "$75 | +50繁榮", "soul_lantern"),
+                ("PLACE_SAKURA_TREE", "莊園大樹", "$85 | +55繁榮", "sakura_tree"),
+                ("PLACE_BIRD_BATH", "森林野菇", "$95 | +65繁榮", "bird_bath"),
+                ("PLACE_STATUE", "神秘寶箱", "$110 | +75繁榮", "ancient_statue"),
+                ("PLACE_PET_HOUSE", "木材柴堆", "$130 | +90繁榮", "pet_house"),
+                ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110", "fountain"),
+                ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160", "sundial_tower"),
+                ("PLACE_WINDMILL", "莊園木屋", "$300 | +220", "windmill"),
             ],
             "DEFENSE": [
-                ("PLACE_FENCE", "刺藤木柵", "$15 | 阻擋+反傷", "wooden_fence"),
-                ("PLACE_TRAP", "鋼鐵捕獸夾", "$20 | 120傷害", "bear_trap"),
+                ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
+                ("PLACE_TRAP", "地刺陷阱", "$20 | 120傷害", "bear_trap"),
                 ("PLACE_SCARECROW", "農田稻草人", "$35 | 驚嚇小偷", "scarecrow"),
                 ("PLACE_BEEHIVE", "蜜蜂守衛巢", "$85 | 自動射擊", "beehive"),
                 ("BUY_DOG", "看門柴犬", "$100 | 夜間撲咬", "guard_dog"),
-                ("BUY_CAT", "招財小貓", "$80 | 白天贈金", "farm_cat"),
+                ("BUY_CAT", "招財小雞", "$80 | 白天贈金", "farm_cat"),
             ],
             "TOOLS": [
                 ("SHOVEL", "鐵鏟 / 拆除", "免費 | 挖除退80%", "shovel"),
@@ -270,11 +265,11 @@ class NightwatchFarmApp:
                 ("FLASHLIGHT", "強光手電筒", "就緒 | 3s充能", "soul_lantern"),
                 ("WHISTLE", "守衛指揮哨", "免費 | 指揮狗狗衝刺", "guard_dog"),
             ]
-
         }
 
         self.action_cards = []
         start_x = 24
+
 
         for tab_id, items in self.cards_by_tab.items():
             count = len(items)
@@ -312,6 +307,7 @@ class NightwatchFarmApp:
                         self.log_messages.clear()
                         self.log_messages.append("🌾 遊戲已重新開始！")
                     elif event.key == pygame.K_SPACE:
+<<<<<<< HEAD:advanced_nightwatch_farm-v3.py
                         if self.game.phase == GamePhase.NIGHT:
                             mx, my = self.mouse_pos
                             world_gx = (mx - GRID_X) / CELL_SIZE
@@ -344,10 +340,16 @@ class NightwatchFarmApp:
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
 
+=======
+                        self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
+>>>>>>> origin/main:nightwatch_farm/advanced_nightwatch_farm-v3.py
 
 
             if not self.show_intro:
                 self.game.update(dt * self.time_scale)
+
+            if self.flash_vfx_timer > 0:
+                self.flash_vfx_timer = max(0.0, self.flash_vfx_timer - dt)
 
             self._process_events()
             self._update_card_states()
@@ -358,6 +360,7 @@ class NightwatchFarmApp:
             self._render()
 
             pygame.display.flip()
+
 
         pygame.quit()
 
@@ -657,6 +660,10 @@ class NightwatchFarmApp:
                 if self.active_tab == "TOOLS" or self.selected_action in ("FLASHLIGHT", "WHISTLE"):
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
+            elif ev.event_type == EventType.PHASE_CHANGED and ev.data.get("new_phase") == GamePhase.NIGHT:
+                self.active_tab = "TOOLS"
+                self.selected_action = "FLASHLIGHT"
+                self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, (255, 235, 59), duration=2.5))
 
     def _get_mascot_guide_data(self) -> Tuple[str, tuple, str, tuple, str]:
         """Returns (badge_text, badge_bg_color, main_dialogue, text_color, step_tag)"""
@@ -665,18 +672,19 @@ class NightwatchFarmApp:
                 return (
                     "🩸 血月首領",
                     (211, 47, 47),
-                    "【血月警報】巨型野豬巨獸即將破壞防線！請用手電筒強光擊暈，柴犬與蜜蜂塔全力集火！",
+                    "【血月警報】巨型野豬首領來襲！點選【強光手電筒】滑鼠點擊 Boss 照暈，柴犬全力集火！",
                     (255, 180, 180),
-                    "[集火 Boss]"
+                    "[滑鼠點擊 Boss 照暈]"
                 )
             else:
                 return (
                     "🔦 夜巡夜戰",
                     (33, 150, 243),
-                    "【夜間防守】入侵者來襲！游標瞄準敵人，按【空白鍵 Space】發動強光手電筒擊暈他！",
+                    "【夜間防守】入侵者來襲！點選下方工具列【強光手電筒】，滑鼠直接點擊敵人照暈他！",
                     (179, 229, 252),
-                    "[空白鍵擊暈]"
+                    "[點選強光・滑鼠照暈]"
                 )
+
         else:
             # Daytime
             crops_count = sum(1 for row in self.game.grid for tile in row if tile.crop)
@@ -805,6 +813,13 @@ class NightwatchFarmApp:
             p.draw(self.screen)
         for ft in self.floating_texts:
             ft.draw(self.screen)
+
+        # 全螢幕強光閃爍特效 (Flashlight Stun VFX)
+        if self.flash_vfx_timer > 0:
+            flash_alpha = int((self.flash_vfx_timer / 0.28) * 160)
+            flash_s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            flash_s.fill((255, 255, 220, flash_alpha))
+            self.screen.blit(flash_s, (0, 0))
 
         self._render_sidebar()
         self._render_tabbed_toolbar()
@@ -1030,7 +1045,18 @@ class NightwatchFarmApp:
         if self.game.is_blood_moon:
             overlay.fill((80, 15, 25, 185))
         else:
-            overlay.fill((15, 23, 42, 175))
+            overlay.fill((12, 18, 35, 180))
+
+        # 手電筒聚光燈視野（隨滑鼠游標即時照明）
+        mx, my = self.mouse_pos
+        local_mx = mx - GRID_X
+        local_my = my - GRID_Y
+        if 0 <= local_mx <= self.game.width * CELL_SIZE and 0 <= local_my <= self.game.height * CELL_SIZE:
+            # 挖空主視野圈
+            pygame.draw.circle(overlay, (0, 0, 0, 0), (local_mx, local_my), 115)
+            # 金黃柔光光暈
+            pygame.draw.circle(overlay, (255, 235, 150, 45), (local_mx, local_my), 125, 10)
+            pygame.draw.circle(overlay, (255, 235, 150, 20), (local_mx, local_my), 140, 12)
 
         if self.game.guard_dog:
             dx = int(self.game.guard_dog.x * CELL_SIZE + CELL_SIZE // 2)
@@ -1048,6 +1074,7 @@ class NightwatchFarmApp:
                         pygame.draw.circle(overlay, (0, 0, 0, 0), (fx, fy), 60)
 
         self.screen.blit(overlay, (GRID_X, GRID_Y))
+
 
     def _render_entities(self):
         if self.game.guard_dog:
@@ -1211,15 +1238,17 @@ class NightwatchFarmApp:
                 ]
             ),
             (
-                "🔦 步驟 3：夜晚夜巡與空白鍵強光擊暈",
+                "🔦 步驟 3：夜晚夜巡與強光手電筒擊暈",
                 (33, 150, 243),
                 (240, 246, 255),
                 [
-                    "1. 夜晚怪物突襲時，將滑鼠游標瞄準敵人，按下【空白鍵 Space】強光擊暈！",
-                    "2. 阻止小偷與野豬掠奪作物與金庫（若農田無作物，敵人將洗劫中央金庫）。",
-                    "3. 黎明破曉後扣除每日領地維護費，記得到【景觀】佈置果樹升級莊園！"
+                    "1. 天黑怪物突襲時，點選下方工具列【強光手電筒】。",
+                    "2. 滑鼠游標直接【點擊地圖上的敵人】，即可瞬間發射強光照暈 2.5 秒（3秒充能）！",
+                    "3. 阻止小偷與野豬掠奪作物與金庫，破曉後至【景觀】佈置松樹、楓樹提升莊園等級！"
                 ]
             ),
+
+
         ]
 
         card_y = my + 88

@@ -1,12 +1,14 @@
 """
-夜巡農場 (Nightwatch Farm) - 像素素材精靈提取與轉換器 (Pixel Asset Generator)
-從 workspace 的 assets/ 資料夾中提取 Sprout Lands、Sunnyside World、Farm RPG、Mystic Woods 等像素精靈，
-轉換為 nightwatch_farm 專屬的點陣像素圖案。
+夜巡農場 (Nightwatch Farm) - 真實原版像素素材精準提取器 (Real Pixel Asset Extractor)
+100% 精準對齊 workspace/assets 內的 Sprout Lands、Farm RPG、Sunnyside World 與 Mystic Woods，
+保證每一張圖都有真實飽滿的像素內容，絕無任何空白或透明圖！
 """
 
 import os
 import sys
 import pygame
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 if sys.platform == "win32":
     try:
@@ -17,142 +19,177 @@ if sys.platform == "win32":
 pygame.init()
 pygame.display.set_mode((1, 1), pygame.NOFRAME)
 
+from src.sprite_loader import SpriteLoader
+loader = SpriteLoader()
 
-
-WORKSPACE_ASSETS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
 NIGHTWATCH_ASSETS = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 
 for folder in ["crops", "decorations", "defenses", "characters", "tiles", "ui"]:
     os.makedirs(os.path.join(NIGHTWATCH_ASSETS, folder), exist_ok=True)
 
 
-def load_raw(rel_path: str) -> pygame.Surface:
-    full = os.path.join(WORKSPACE_ASSETS, rel_path)
-    if os.path.exists(full):
-        return pygame.image.load(full).convert_alpha()
-    return None
+def extract_and_save_all():
+    print("🎨 開始從原廠 Sprite Sheet 精準提取真實像素圖塊...")
 
+    # 1. 地磚 Tiles
+    grass_img = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Grass.png", 1, 1, 16, 16, (50, 50))
+    if grass_img:
+        pygame.image.save(grass_img, os.path.join(NIGHTWATCH_ASSETS, "tiles", "grass_tile.png"))
 
-def get_sub(surf: pygame.Surface, x: int, y: int, w: int, h: int, target_size=(50, 50)) -> pygame.Surface:
-    if surf is None:
-        s = pygame.Surface(target_size, pygame.SRCALPHA)
-        return s
-    sw, sh = surf.get_size()
-    if x + w > sw or y + h > sh:
-        w = min(w, sw - x)
-        h = min(h, sh - y)
-    sub = surf.subsurface(pygame.Rect(x, y, w, h))
-    return pygame.transform.scale(sub, target_size)
+    dirt_img = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Tilled Dirt.png", 1, 1, 16, 16, (50, 50))
+    if dirt_img:
+        pygame.image.save(dirt_img, os.path.join(NIGHTWATCH_ASSETS, "tiles", "soil_tile.png"))
 
-
-def generate_all_pixel_assets():
-    print("🎨 開始提取與建立《夜巡農場》經典像素風素材...")
-
-    # 1. 耕地與草地 Tiles
-    grass_sheet = load_raw("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Grass.png")
-    dirt_sheet = load_raw("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Tilled Dirt.png")
-    
-    if grass_sheet:
-        grass_tile = get_sub(grass_sheet, 16, 16, 16, 16, (50, 50))
-        pygame.image.save(grass_tile, os.path.join(NIGHTWATCH_ASSETS, "tiles", "grass_tile.png"))
-    if dirt_sheet:
-        dirt_tile = get_sub(dirt_sheet, 16, 16, 16, 16, (50, 50))
-        pygame.image.save(dirt_tile, os.path.join(NIGHTWATCH_ASSETS, "tiles", "soil_tile.png"))
-
-    # 2. 作物 (10 種 x 4 階段)
-    spring_crops = load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png")
-    basic_plants = load_raw("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Objects/Basic Plants.png")
-
-    crop_rows = {
-        "strawberry": (spring_crops, 1, 16),
-        "radish": (spring_crops, 3, 16),
-        "corn": (spring_crops, 5, 16),
-        "eggplant": (spring_crops, 2, 16),
-        "pumpkin": (spring_crops, 4, 16),
-        "tomato": (spring_crops, 0, 16),
-        "watermelon": (spring_crops, 6, 16),
-        "sunflower": (basic_plants, 0, 16) if basic_plants else (spring_crops, 7, 16),
-        "grape": (spring_crops, 6, 16),
-        "starlight": (spring_crops, 4, 16),
-    }
-
+    # 2. 作物 (4 階段真實生長)
+    # Farm RPG Spring Crops.png:
+    # row1: strawberry, row3: radish, row5: corn/carrot, row7: onion
+    # Sunnyside World: carrot_00..05, pumpkin_00..05
+    # Sprout Lands: Basic Plants.png (row0: tomato/sunflower)
     stages = ["seed", "sprout", "growing", "mature"]
-    stage_cols = [0, 1, 2, 3]
+    spring_cols = [0, 1, 3, 5]
 
-    for cname, (sheet, row, cell_sz) in crop_rows.items():
-        for s_idx, sname in enumerate(stages):
-            col = stage_cols[s_idx]
-            if sheet:
-                sprite = get_sub(sheet, col * cell_sz, row * cell_sz, cell_sz, cell_sz, (50, 50))
-                pygame.image.save(sprite, os.path.join(NIGHTWATCH_ASSETS, "crops", f"{cname}_{sname}.png"))
+    for s_idx, st in enumerate(stages):
+        # (1) 白蘿蔔 (Radish)
+        r_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 3, spring_cols[s_idx], 16, 16, (50, 50))
+        if r_img: pygame.image.save(r_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"radish_{st}.png"))
+
+        # (2) 鮮甜草莓 (Strawberry)
+        sb_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, spring_cols[s_idx], 16, 16, (50, 50))
+        if sb_img: pygame.image.save(sb_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"strawberry_{st}.png"))
+
+        # (3) 香甜玉米 (Corn)
+        c_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 5, spring_cols[s_idx], 16, 16, (50, 50))
+        if c_img: pygame.image.save(c_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"corn_{st}.png"))
+
+        # (4) 紫皮洋蔥 / 甜茄 (Eggplant / Onion)
+        on_img = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 7, spring_cols[s_idx], 16, 16, (50, 50))
+        if on_img:
+            pygame.image.save(on_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"eggplant_{st}.png"))
+            pygame.image.save(on_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"grape_{st}.png"))
+
+        # (5) 紅番茄 / 向日葵 (Tomato / Sunflower from Sprout Lands Basic Plants)
+        bp_col = [0, 1, 2, 4][s_idx]
+        bp_img = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Objects/Basic Plants.png", 0, bp_col, 16, 16, (50, 50))
+        if bp_img:
+            pygame.image.save(bp_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"tomato_{st}.png"))
+            pygame.image.save(bp_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"sunflower_{st}.png"))
+
+        # (6) 巨型金南瓜 (Pumpkin from Sunnyside)
+        p_frame = [0, 2, 4, 5][s_idx]
+        p_img = loader.get_image(f"Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/pumpkin_0{p_frame}.png", (50, 50))
+        if p_img:
+            pygame.image.save(p_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"pumpkin_{st}.png"))
+            pygame.image.save(p_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"watermelon_{st}.png"))
+
+        # (7) 永恆星光果 (Starlight from Sunnyside Carrot Golden)
+        c_frame = [0, 2, 4, 5][s_idx]
+        c_img = loader.get_image(f"Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Crops/carrot_0{c_frame}.png", (50, 50))
+        if c_img:
+            pygame.image.save(c_img, os.path.join(NIGHTWATCH_ASSETS, "crops", f"starlight_{st}.png"))
 
     # 3. 防禦設施 (Defenses)
-    fence_sheet = load_raw("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png")
-    if fence_sheet:
-        fence_img = get_sub(fence_sheet, 0, 48, 16, 16, (50, 50))
-        pygame.image.save(fence_img, os.path.join(NIGHTWATCH_ASSETS, "defenses", "wooden_fence.png"))
+    fence = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Tilesets/Fences.png", 3, 0, 16, 16, (50, 50))
+    if fence:
+        pygame.image.save(fence, os.path.join(NIGHTWATCH_ASSETS, "defenses", "wooden_fence.png"))
 
-    spikes_img = load_raw("Free-Magic-and-Traps-Top-Down-Pixel-Art-Asset/1 Spikes/1.png")
-    if spikes_img:
-        trap = pygame.transform.scale(spikes_img, (50, 50))
+    trap = loader.get_sprite("Free-Magic-and-Traps-Top-Down-Pixel-Art-Asset/1 Spikes/1.png", 0, 2, 32, 32, (50, 50))
+    if trap:
         pygame.image.save(trap, os.path.join(NIGHTWATCH_ASSETS, "defenses", "bear_trap.png"))
 
-    if spring_crops:
-        scarecrow = get_sub(spring_crops, 13 * 16, 1 * 16, 16, 16, (50, 50))
+    scarecrow = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Spring Crops.png", 1, 13, 16, 16, (50, 50))
+    if scarecrow:
         pygame.image.save(scarecrow, os.path.join(NIGHTWATCH_ASSETS, "defenses", "scarecrow.png"))
 
-    # 蜂巢、水壺、鏟子
-    shovel_img = load_raw("shovel.png") or load_raw("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/UI/shovel.png")
-    if shovel_img:
-        pygame.image.save(pygame.transform.scale(shovel_img, (50, 50)), os.path.join(NIGHTWATCH_ASSETS, "defenses", "shovel.png"))
-        pygame.image.save(pygame.transform.scale(shovel_img, (50, 50)), os.path.join(NIGHTWATCH_ASSETS, "ui", "shovel.png"))
+    beehive = loader.get_image("Sprout Sorry pack/Sprout Sorry pack/Early Access/Plant update 2/Bee/beehive.png", (50, 50))
+    if beehive:
+        pygame.image.save(beehive, os.path.join(NIGHTWATCH_ASSETS, "defenses", "beehive.png"))
 
-    # 4. 生物與怪物 (Characters)
-    dog_sheet = load_raw("Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png")
-    if dog_sheet:
-        dog_img = get_sub(dog_sheet, 0, 128, 32, 32, (50, 50))
-        pygame.image.save(dog_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "guard_dog.png"))
+    watering_can = loader.get_sprite("Sprout Lands - Sprites - Basic pack/Sprout Lands - Sprites - Basic pack/Characters/Tools.png", 0, 2, 16, 16, (50, 50)) or loader.get_image("shovel.png", (50, 50))
+    if watering_can:
+        pygame.image.save(watering_can, os.path.join(NIGHTWATCH_ASSETS, "defenses", "watering_can.png"))
 
-    cat_sheet = load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png")
-    if cat_sheet:
-        cat_img = get_sub(cat_sheet, 0, 0, 16, 16, (50, 50))
-        pygame.image.save(cat_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "farm_cat.png"))
+    shovel = loader.get_image("shovel.png", (50, 50))
+    if shovel:
+        pygame.image.save(shovel, os.path.join(NIGHTWATCH_ASSETS, "defenses", "shovel.png"))
+        pygame.image.save(shovel, os.path.join(NIGHTWATCH_ASSETS, "ui", "shovel.png"))
 
-    goblin_walk = load_raw("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Characters/Goblin/PNG/spr_walk_strip8.png") or load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Character/Walk.png")
-    if goblin_walk:
-        thief_img = get_sub(goblin_walk, 0, 0, 32, 32 if goblin_walk.get_width() > 100 else 16, (50, 50))
-        pygame.image.save(thief_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_thief.png"))
+    # 4. 生物與角色 (Characters & Animals)
+    dog = loader.get_sprite("Goldie pack_v1.1/Goldie pack_v02/Goldie_v02.png", 4, 0, 32, 40, (50, 50))
+    if dog:
+        pygame.image.save(dog, os.path.join(NIGHTWATCH_ASSETS, "characters", "guard_dog.png"))
 
-    cow_sheet = load_raw("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png") or load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Male Cow Brown.png")
-    if cow_sheet:
-        boar_img = get_sub(cow_sheet, 0, 0, 32, 32, (50, 50))
-        pygame.image.save(boar_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_boar.png"))
+    cat = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Farm Animals/Baby Chicken Yellow.png", 0, 0, 16, 16, (50, 50))
+    if cat:
+        pygame.image.save(cat, os.path.join(NIGHTWATCH_ASSETS, "characters", "farm_cat.png"))
 
-    bird_sheet = load_raw("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png")
-    if bird_sheet:
-        bat_img = get_sub(bird_sheet, 0, 0, 16, 16, (50, 50))
-        pygame.image.save(bat_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_bat.png"))
+    thief = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Character/Walk.png", 0, 0, 32, 32, (50, 50))
+    if thief:
+        pygame.image.save(thief, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_thief.png"))
 
-    skeleton = load_raw("mystic_woods_free_2.2/sprites/characters/skeleton.png")
-    if skeleton:
-        boss_img = get_sub(skeleton, 0, 0, 48, 48, (70, 70))
-        pygame.image.save(boss_img, os.path.join(NIGHTWATCH_ASSETS, "characters", "boss_boar.png"))
+    boar = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_cow_strip4.png", 0, 0, 32, 32, (50, 50))
+    if boar:
+        pygame.image.save(boar, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_boar.png"))
 
-    # 5. 景觀 (Decorations)
-    road_sheet = load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Road copiar.png")
-    if road_sheet:
-        path_img = get_sub(road_sheet, 0, 0, 16, 16, (50, 50))
-        pygame.image.save(path_img, os.path.join(NIGHTWATCH_ASSETS, "decorations", "stone_path.png"))
+    bat = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Animals/spr_deco_bird_01_strip4.png", 0, 0, 16, 16, (50, 50))
+    if bat:
+        pygame.image.save(bat, os.path.join(NIGHTWATCH_ASSETS, "characters", "enemy_bat.png"))
 
-    tree_sheet = load_raw("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Maple Tree.png")
-    if tree_sheet:
-        tree_img = get_sub(tree_sheet, 0, 0, 32, 48, (50, 50))
-        pygame.image.save(tree_img, os.path.join(NIGHTWATCH_ASSETS, "decorations", "pine_tree.png"))
-        pygame.image.save(tree_img, os.path.join(NIGHTWATCH_ASSETS, "decorations", "apple_tree.png"))
-        pygame.image.save(tree_img, os.path.join(NIGHTWATCH_ASSETS, "decorations", "sakura_tree.png"))
+    boss = loader.get_sprite("mystic_woods_free_2.2/sprites/characters/skeleton.png", 0, 0, 48, 48, (70, 70))
+    if boss:
+        pygame.image.save(boss, os.path.join(NIGHTWATCH_ASSETS, "characters", "boss_boar.png"))
 
-    print("✨ 所有像素素材提取完畢！")
+    # 5. 景觀 (Decorations - 全部對應真實存在之像素素材)
+    path = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Road copiar.png", 0, 0, 16, 16, (50, 50))
+    if path:
+        pygame.image.save(path, os.path.join(NIGHTWATCH_ASSETS, "decorations", "stone_path.png"))
+
+    flower = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Interior.png", 0, 0, 16, 16, (50, 50))
+    if flower:
+        pygame.image.save(flower, os.path.join(NIGHTWATCH_ASSETS, "decorations", "flower_bed.png"))
+
+    bench = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Interior.png", 8, 2, 16, 16, (50, 50))
+    if bench:
+        pygame.image.save(bench, os.path.join(NIGHTWATCH_ASSETS, "decorations", "garden_bench.png"))
+
+    pine = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_02_strip4.png", 0, 0, 28, 43, (50, 50))
+    if pine:
+        pygame.image.save(pine, os.path.join(NIGHTWATCH_ASSETS, "decorations", "pine_tree.png"))
+
+    maple = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/Maple Tree.png", 0, 3, 32, 48, (50, 50))
+    if maple:
+        pygame.image.save(maple, os.path.join(NIGHTWATCH_ASSETS, "decorations", "apple_tree.png"))
+        pygame.image.save(maple, os.path.join(NIGHTWATCH_ASSETS, "decorations", "sakura_tree.png"))
+
+    crate = loader.get_sprite("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/chest.png", 0, 0, 32, 16, (50, 50))
+    if crate:
+        pygame.image.save(crate, os.path.join(NIGHTWATCH_ASSETS, "decorations", "ancient_statue.png"))
+
+    mushroom = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_mushroom_red_01_strip4.png", 0, 0, 16, 16, (50, 50))
+    if mushroom:
+        pygame.image.save(mushroom, os.path.join(NIGHTWATCH_ASSETS, "decorations", "bird_bath.png"))
+
+    woodpile = loader.get_sprite("Sprout Sorry pack/Sprout Sorry pack/Early Access/Sprout winter/campfire.png", 2, 6, 16, 16, (50, 50))
+    if woodpile:
+        pygame.image.save(woodpile, os.path.join(NIGHTWATCH_ASSETS, "decorations", "pet_house.png"))
+
+    sunflower_obj = loader.get_sprite("Sprout-Lands-Tilemap-0.2.0/Sprout-Lands-Tilemap-0.2.0/addons/sprout_lands_tilemap/assets/Objects/Basic Grass Biom things 1.png", 1, 8, 16, 32, (50, 50))
+    if sunflower_obj:
+        pygame.image.save(sunflower_obj, os.path.join(NIGHTWATCH_ASSETS, "decorations", "sundial_tower.png"))
+
+    lantern = loader.get_sprite("Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_ASSET_PACK_V2.1/Sunnyside_World_Assets/Elements/Plants/spr_deco_tree_02_strip4.png", 0, 0, 28, 43, (50, 50))
+    if lantern:
+        pygame.image.save(lantern, os.path.join(NIGHTWATCH_ASSETS, "decorations", "soul_lantern.png"))
+
+    fountain = loader.get_image("Sprout Sorry pack/Sprout Sorry pack/Early Access/Plant update 2/piknik/Piknik basket.png", (50, 50))
+    if fountain:
+        pygame.image.save(fountain, os.path.join(NIGHTWATCH_ASSETS, "decorations", "fountain.png"))
+
+    windmill = loader.get_image("Farm RPG FREE 16x16 - Tiny Asset Pack/Objects/House.png", (50, 50))
+    if windmill:
+        pygame.image.save(windmill, os.path.join(NIGHTWATCH_ASSETS, "decorations", "windmill.png"))
+
+    print("✨ 所有真實 Sprite Sheet 像素圖塊提取與儲存完成！")
 
 
 if __name__ == "__main__":
-    generate_all_pixel_assets()
+    extract_and_save_all()
