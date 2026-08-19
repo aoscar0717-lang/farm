@@ -252,20 +252,56 @@ def blit_text_with_shadow(surface, font, text, color, topleft=None, center=None,
 # 隨便一個系統預設字型（通常是 Arial 之類的西方字型），完全不含中文字形，
 # 於是遊戲畫面上的中文字全部變成「□」豆腐塊，而且不會有任何錯誤訊息。
 #
-# 新寫法分兩層 Fallback，優先順序如下：
-#   1. 專案自帶字型：assets/fonts/ 底下第一個 .ttf/.ttc/.otf 檔（最可靠，
-#      不依賴玩家電腦裝了什麼系統字型，換一台機器也保證看得到中文）。
-#      要掛載開源中文字體，只要把 .ttf 檔案丟進 assets/fonts/ 資料夾即可，
-#      不用改任何程式碼，例如思源黑體 Traditional Chinese (Noto Sans TC)：
-#      https://fonts.google.com/noto/specimen/Noto+Sans+TC
-#   2. 系統字型：改用 pygame.font.get_fonts() 列出「這台機器真的偵測到」的
-#      字型名單，再跟一份跨平台的中文字型名稱清單取交集，而不是像舊寫法
-#      直接盲猜 match_font 一定會成功。
+# 技術債清理（系統字型 Fallback 版本）：這個開發/沙箱環境沒辦法放置完整
+# 的外部字型檔（前一個階段規劃要換用的 Cubic_11.ttf 檔案本身一直沒有
+# 實際放進 assets/fonts/），先前綁定的 NotoSansTC-GameSubset.otf 又是裁
+# 切過的殘缺子集（Phase 4.75 調查發現 140+ 常用字缺字），這兩個因素疊
+# 在一起，代表「專案自帶字型」這個管道在目前的開發環境裡實質上是失效
+# 的。這次把優先順序整個反過來：
+#   1. 系統字型（新的第一優先）：用 pygame.font.get_fonts() 列出「這台
+#      機器真的偵測到」的字型名單，跟一份跨平台中文字型名稱清單取交
+#      集，只在確認系統真的裝了某個中文字型時才使用它——玩家自己的電
+#      腦（Windows 幾乎都有微軟正黑體、macOS 幾乎都有蘋方、大多數
+#      Linux 桌面環境也會有 Noto Sans CJK 之類的套件），這些系統字型
+#      通常是「完整字集」，不會有子集裁切缺字的問題，比目前殘缺的專案
+#      自帶字型更可靠。
+#   2. 專案自帶字型（次要 fallback）：assets/fonts/ 底下的字型檔，只有
+#      系統偵測不到任何中文字型時才會用到——保留這一層是為了在「完全
+#      沒有中文系統字型」的極端環境（例如某些精簡過的 Linux 容器）下，
+#      至少還有機會顯示出部分中文，好過整個環境完全沒有字型可用直接
+#      崩潰；即使目前這個檔案（NotoSansTC-GameSubset.otf）字集不完整，
+#      「顯示大部分常用字、少數字變豆腐塊」也優於「完全沒有中文字型、
+#      滿螢幕豆腐塊」。
 #   3. 都找不到才退回 Arial，並在終端機印出明確警告，而不是默默顯示豆腐塊。
+#
+# 【這個環境沒辦法驗證的部分，如實揭露】這個沙箱是 headless 環境，沒有
+# 安裝任何桌面版中文字型，pygame 本身在這裡甚至無法 import（整個 session
+# 都是這樣，見先前幾個階段的說明），所以 pygame.font.get_fonts() 實際
+# 會偵測到什麼字型、match_font() 找不找得到，完全沒辦法在這裡執行驗證
+# ——這個新的系統字型優先邏輯，需要使用者在自己真的裝了中文字型的電腦
+# 上執行才能驗證是否正確運作。
 # ------------------------------------------------------------------
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
 
-_CJK_SYSTEM_FONT_HINTS = [
+# 上一個技術債清理階段留下的常數：assets/fonts/ 資料夾裡如果有這個檔
+# 案（完整字庫），次要 fallback（_find_bundled_font_path()）會優先選
+# 它，而不是掃到什麼字型檔就用什麼。這次系統字型變成第一優先之後，這
+# 個常數的實際影響範圍縮小了（只在系統完全沒有中文字型時才會用到），
+# 但不刪除它——如果之後使用者真的把 Cubic_11.ttf 放進資料夾，這裡還
+# 是能在「系統字型優先」失效的極端情況下正確選到它，而不是選到舊的
+# NotoSansTC-GameSubset.otf。
+PREFERRED_FONT_FILENAME = "Cubic_11.ttf"
+
+# 系統中文字型優先清單。原本 _CJK_SYSTEM_FONT_HINTS 這份清單已經涵蓋
+# Windows/macOS/Linux 常見中文字型，這次額外併入使用者這次指定的清單
+# （'pingfang' 泛用別名、'stheiti'、'arialunicodems'——'microsoftjhenghei'
+# 已經在原本清單裡，'simhei' 也是），用 dict.fromkeys() 去重但保留原本
+# 的優先順序（原清單在前，新增項目接在後面，不會打亂既有的比對順序）。
+_USER_SUPPLIED_CJK_HINTS = [
+    "microsoftjhenghei", "pingfang", "stheiti", "simhei", "arialunicodems",
+]
+
+_CJK_SYSTEM_FONT_HINTS = list(dict.fromkeys([
     # Windows
     "microsoftjhenghei", "microsoftjhengheiui", "microsoftjhengheiuibold",
     "microsoftyahei", "microsoftyaheiui", "simhei", "simsun", "mingliu", "dfkaisb",
@@ -274,29 +310,19 @@ _CJK_SYSTEM_FONT_HINTS = [
     # Linux
     "notosanscjktc", "notosanscjksc", "notosanscjk", "wqymicrohei", "wqyzenhei",
     "droidsansfallback",
-]
-
-
-# 技術債清理：原本的 NotoSansTC-GameSubset.otf 是裁切過的子集字型，
-# Phase 4.75 調查發現實際顯示文字裡有 140+ 個字不在這個子集的收錄範圍
-# 內，這次直接換成完整繁體中文字庫的字型檔，從根本解決缺字豆腐塊，
-# 不用再逐字排查/替換現有文字。
-#
-# PREFERRED_FONT_FILENAME 是「明確指定優先使用哪個檔名」，而不是沿用
-# 舊版 _find_bundled_font_path() 那種「掃資料夾，按檔名排序抓第一個副
-# 檔名符合的字型檔」的隱式規則——舊規則其實不用改任何程式碼、只要把
-# Cubic_11.ttf 丟進 assets/fonts/ 資料夾，因為 "C" 排序在 "N" 前面，
-# 舊邏輯本來就會自動抓到新字型；但這樣的行為完全取決於檔名字母順序，
-# 使用者/未來的人不容易一眼看出「現在到底在用哪個字型檔」，而且如果
-# 資料夾裡日後又多放了其他字型檔，排序結果可能悄悄變動、行為跟著跑掉
-# 而不容易發現。明確寫一個「優先檔名」常數，配合下面的判斷邏輯（有這
-# 個檔案就一定用它；沒有的話才退回舊的自動掃描邏輯），行為清楚、可預
-# 期，也保留了「使用者還沒放新字型檔進去之前，遊戲至少還能用舊字型跑
-# 起來」這個容錯後備，不會突然完全沒有中文字型可用。
-PREFERRED_FONT_FILENAME = "Cubic_11.ttf"
+    # 這次使用者額外指定、上面尚未涵蓋到的名稱
+    *_USER_SUPPLIED_CJK_HINTS,
+]))
 
 
 def _find_bundled_font_path() -> Optional[str]:
+    """只在系統偵測不到任何中文字型時才會被呼叫到的次要 fallback。
+    PREFERRED_FONT_FILENAME 沿用上一個技術債清理階段的設計——如果
+    assets/fonts/ 資料夾裡有 Cubic_11.ttf（完整字庫），優先用它；沒有
+    的話才退回掃資料夾抓第一個字型檔（目前資料夾裡實際存在的是舊的
+    NotoSansTC-GameSubset.otf 子集字型）。這一層邏輯保留但不再是主要
+    路徑——現在系統字型才是第一優先，這裡只在系統完全沒有中文字型時
+    才會派上用場。"""
     if not os.path.isdir(FONT_DIR):
         return None
 
@@ -304,10 +330,6 @@ def _find_bundled_font_path() -> Optional[str]:
     if os.path.isfile(preferred_path):
         return preferred_path
 
-    # 後備：PREFERRED_FONT_FILENAME 還沒放進資料夾時，退回舊版「掃資料
-    # 夾抓第一個字型檔」的行為，維持向下相容（例如目前資料夾裡還留著
-    # 的 NotoSansTC-GameSubset.otf 會被抓到，遊戲不會因為新字型檔案還
-    # 沒就位就完全沒有中文字型可用）。
     for fn in sorted(os.listdir(FONT_DIR)):
         if fn.lower().endswith((".ttf", ".ttc", ".otf")):
             return os.path.join(FONT_DIR, fn)
@@ -315,6 +337,15 @@ def _find_bundled_font_path() -> Optional[str]:
 
 
 def _find_system_cjk_font_path() -> Optional[str]:
+    """用 pygame.font.get_fonts() 取得這台機器真的偵測到的字型名單，跟
+    _CJK_SYSTEM_FONT_HINTS 取交集，只在確認系統真的裝了某個中文字型時
+    才呼叫 match_font() 取得實際路徑——刻意不直接呼叫
+    pygame.font.SysFont(name_list, size)，因為 SysFont() 內部一樣是用
+    match_font() 模糊比對，清單裡的名字全部比對失敗時一樣可能默默退回
+    某個不含中文字形的西方字型，而不是老實回傳「找不到」，跟上面文件
+    開頭那段「舊寫法的問題」講的是同一個陷阱，用這裡的寫法可以在
+    「系統字型清單裡沒有真的找到中文字型」時明確得到 None，而不是一個
+    看似成功、實際上顯示豆腐塊的字型物件。"""
     try:
         available = set(pygame.font.get_fonts())
     except Exception:
@@ -327,16 +358,16 @@ def _find_system_cjk_font_path() -> Optional[str]:
     return None
 
 
-_BUNDLED_FONT_PATH = _find_bundled_font_path()
-_SYSTEM_CJK_FONT_PATH = None if _BUNDLED_FONT_PATH else _find_system_cjk_font_path()
-_RESOLVED_FONT_PATH = _BUNDLED_FONT_PATH or _SYSTEM_CJK_FONT_PATH
+_SYSTEM_CJK_FONT_PATH = _find_system_cjk_font_path()
+_BUNDLED_FONT_PATH = None if _SYSTEM_CJK_FONT_PATH else _find_bundled_font_path()
+_RESOLVED_FONT_PATH = _SYSTEM_CJK_FONT_PATH or _BUNDLED_FONT_PATH
 
 if _RESOLVED_FONT_PATH is None:
     print(
         "[字型警告] 找不到可顯示中文的字型，UI 文字可能會顯示「□」。"
-        f"請把一個中文 .ttf/.ttc/.otf 字型檔放進 {FONT_DIR} 資料夾"
-        "（例如思源黑體 Noto Sans TC），程式下次啟動會自動優先使用它，"
-        "不需要改任何程式碼。"
+        f"請安裝一套系統中文字型（例如微軟正黑體/蘋方/Noto Sans CJK），"
+        f"或把一個中文 .ttf/.ttc/.otf 字型檔放進 {FONT_DIR} 資料夾"
+        "，程式下次啟動會自動偵測使用，不需要改任何程式碼。"
     )
 
 
@@ -419,28 +450,38 @@ def get_font(size: int, bold: bool = False):
             pass
     return _SafeFont(pygame.font.SysFont('arial', size, bold=bold))
 
-# 技術債清理：換成 Cubic_11.ttf 這類點陣風格 (pixel font) 字型後，這裡
-# 有兩件事這個環境沒辦法用 pygame 實際渲染驗證，需要換好字型後麻煩
-# 實機肉眼確認：
-#   1. 字級大小——點陣字型通常是照固定像素網格設計的（Cubic 11 顧名思
-#      義是 11px 網格，Zpix 是 12px 網格），用非網格倍數的字級渲染時，
-#      SDL_ttf 還是能正常畫出來，但字形可能因為縮放而變得模糊、不像
-#      原本設計的那麼銳利。下面 FONT_XS/SM/MD/LG 的字級 (12/14/16/20)
-#      是照原本 Noto Sans TC（向量字型，任何字級都清晰）調的，換成點
-#      陣字型後如果肉眼看起來模糊，建議把這四個數字都調整成新字型網
-#      格大小的整數倍（例如 Cubic 11 可以試 11/22/33），再依畫面實際
-#      排版空間微調。
-#   2. 粗體 (bold=True，FONT_MD/FONT_LG 目前有用到)——pygame/SDL_ttf 的
-#      粗體是用「加粗筆畫」的方式模擬出來的合成粗體，對向量字型效果
-#      通常沒問題，但對點陣字型可能會讓字形糊成一團、可讀性下降。如果
-#      換字型後 FONT_MD/FONT_LG 顯示的粗體文字看起來模糊或變形，可以
-#      考慮把對應的 bold=True 拿掉，改用其他方式做視覺區分（例如字級
-#      加大或顏色加強)。
-FONT_XS = get_font(12)
-FONT_SM = get_font(14)
-FONT_MD = get_font(16, bold=True)
-FONT_LG = get_font(20, bold=True)
-FONT_TITLE = get_font(26, bold=True)
+# 技術債清理（系統字型 Fallback 版本）：拔除合成粗體 + 微調字級。
+#
+# 拔除合成粗體：pygame/SDL_ttf 的 bold=True 是用「加粗筆畫」模擬出來的
+# 合成粗體（不是字型檔案裡真的有一份粗體字形），對系統字型或點陣風格
+# 字型常常會讓筆畫糊成一團、邊緣不銳利，這次照要求把 FONT_MD/FONT_LG/
+# FONT_TITLE 的 bold=True 全部拿掉，改成用字級大小做視覺區分（原本就
+# 是 XS < SM < MD < LG < TITLE 這個遞增的階層，拿掉粗體之後這個字級落
+# 差本身就足以做出視覺層級，不需要額外再疊加顏色或其他手段）。
+#
+# 字級微調：拿掉粗體後純用字級撐視覺重量，加上系統字型的字重普遍比原
+# 本綁定的 Noto Sans TC 更輕盈纖細，這裡把四級字級統一調大，確保拿掉
+# 粗體後可讀性不會下降。改成 FONT_SIZE_* 具名常數（而不是直接把數字寫
+# 在 get_font() 呼叫裡）是刻意的：使用者提到「保留變數彈性讓我能在本
+# 地端測試時快速調整」，具名常數集中在這裡，之後要微調只要改這幾行數
+# 字，不用在整份檔案裡到處找 get_font() 呼叫。
+#
+# 【這個環境沒辦法驗證的部分，如實揭露】這個沙箱沒辦法執行 pygame 渲
+# 染，這幾個字級數字是「合理的起始值」，不是實測校準過的最終值——麻
+# 煩使用者在本機用真正的系統中文字型跑起來後，依照畫面實際排版空間
+# （尤其是商店卡片、HUD 數字這些空間比較緊的地方會不會因為字變大而
+# 溢出/换行跑版）微調這幾個常數。
+FONT_SIZE_XS = 13     # 原本 12
+FONT_SIZE_SM = 15     # 原本 14
+FONT_SIZE_MD = 18     # 原本 16（且拿掉了 bold=True）
+FONT_SIZE_LG = 22     # 原本 20（且拿掉了 bold=True）
+FONT_SIZE_TITLE = 28  # 原本 26（且拿掉了 bold=True）
+
+FONT_XS = get_font(FONT_SIZE_XS)
+FONT_SM = get_font(FONT_SIZE_SM)
+FONT_MD = get_font(FONT_SIZE_MD)
+FONT_LG = get_font(FONT_SIZE_LG)
+FONT_TITLE = get_font(FONT_SIZE_TITLE)
 
 
 # ==========================================
