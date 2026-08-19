@@ -62,6 +62,17 @@ class DefenseType(Enum):
     BEEHIVE = "BEEHIVE"                  # 蜜蜂守衛巢
 
 
+class BuildingType(Enum):
+    """【Phase 1 預留】生產線建築常數。這一階段只先把「有哪些建築」的
+    類型定義出來，讓 game_state.py 的訂單/資源系統可以先假設這些建築
+    未來會存在；實際「怎麼把它們放到農田/莊園格子上、怎麼把原料轉換成
+    產物」的邏輯（例如 FURNACE 把 metal_ore 煉成 metal_ingot）刻意
+    不在本次改動範圍內，留給下一階段的建築放置系統一起做。"""
+    FURNACE = "FURNACE"                  # 熔爐：金屬礦 -> 金屬錠（下一階段）
+    OVEN = "OVEN"                        # 烤箱：小麥 -> 麵包（下一階段）
+    HAMSTER_WHEEL = "HAMSTER_WHEEL"      # 倉鼠滾輪：消耗糧食產生電池/科技點數（下一階段）
+
+
 class EnemyType(Enum):
     THIEF = "THIEF"                      # 敏捷小偷
     WILD_BOAR = "WILD_BOAR"              # 狂暴野豬
@@ -124,7 +135,10 @@ class EventType(Enum):
     FENCE_ATTACKED = "FENCE_ATTACKED"
     FENCE_DESTROYED = "FENCE_DESTROYED"
     TILE_CLEARED = "TILE_CLEARED"
-    
+
+    ORDERS_GENERATED = "ORDERS_GENERATED"
+    ORDER_FULFILLED = "ORDER_FULFILLED"
+
     GAME_OVER = "GAME_OVER"
 
 
@@ -153,6 +167,53 @@ MAP_CONFIG = {
     "PROSPERITY_DIVIDEND_RATE": 0.3,  # 每點繁榮度、每天清晨結算發放的分紅金幣
 
     "FLASHLIGHT_COOLDOWN": 3.0,  # 3 秒強光手電筒冷卻時間
+}
+
+
+# ==========================================
+# 生產線 / 科技樹 終局系統 (Phase 1：資源背包 + 每日訂單)
+# ==========================================
+
+# 除了金幣以外的原料/半成品資源種類。這一階段只先建立「有這些資源、
+# 數量從 0 開始」的背包欄位，實際「怎麼取得 wood/charcoal/metal_ore」
+# （採集？副產物？）與「怎麼用 FURNACE/OVEN 把它們加工成
+# metal_ingot/bread」的邏輯是下一階段建築放置系統要做的事，本次不實作。
+RESOURCE_KEYS = ["wood", "charcoal", "metal_ore", "metal_ingot", "bread", "battery"]
+
+# 訂單需求裡用來指定「要交多少個某種作物」的簡短代稱，對應到實際的
+# CropType。用簡短代稱（而不是直接用 CropType.value，例如 RED_TOMATO）
+# 是因為訂單資料本來就該是「玩家看得懂的簡單字串」，且部分作物的
+# enum 名稱跟中文顯示名稱其實對不太上（例如 CARROT 顯示成「紅蘿蔔」、
+# ROYAL_GRAPE 顯示成「櫻桃小蘿蔔」——歷史命名緣故），直接用 enum 名稱
+# 當訂單 key 反而更容易搞混，所以額外建一份對照表。
+ORDER_CROP_ALIASES: Dict[str, "CropType"] = {
+    "radish": CropType.WHITE_RADISH,
+    "tomato": CropType.RED_TOMATO,
+    "corn": CropType.SWEET_CORN,
+    "carrot": CropType.CARROT,
+    "strawberry": CropType.SWEET_STRAWBERRY,
+    "pumpkin": CropType.MAGIC_PUMPKIN,
+    "blueberry": CropType.BLUEBERRY,
+    "wheat": CropType.WHEAT,
+    "grape": CropType.ROYAL_GRAPE,
+    "starlight": CropType.STARLIGHT_FRUIT,
+}
+
+ORDER_CONFIG = {
+    "MIN_ORDERS_PER_DAY": 1,
+    "MAX_ORDERS_PER_DAY": 3,
+    "MIN_ITEM_KINDS": 1,          # 每張訂單最少要求幾種不同的作物
+    "MAX_ITEM_KINDS": 2,          # 每張訂單最多要求幾種不同的作物
+    "MIN_QTY_PER_ITEM": 2,
+    "MAX_QTY_PER_ITEM": 6,
+    # reward_gold 的算法：Σ(單項數量 × 該作物 harvest_reward) × 這個比例，
+    # 四捨五入取整。比例故意設在 1.0 以下（訂單換算成金幣比直接採收
+    # 賣掉的報酬略低），這樣訂單系統的價值主要來自 reward_tech（科技
+    # 點數只能透過訂單取得，形成「用作物換終局進度」的核心迴圈），而不
+    # 是變成比直接採收還划算的純金幣農場，破壞既有的採收經濟平衡。
+    "GOLD_REWARD_RATIO": 0.55,
+    "TECH_REWARD_BASE": 5,        # 每張訂單至少給的科技點數
+    "TECH_REWARD_PER_ITEM_KIND": 4,  # 每多一種需求作物，科技點數額外 +N（含隨機微調）
 }
 
 
@@ -673,3 +734,17 @@ class GameEvent:
     message: str
     data: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = 0.0
+
+
+@dataclass
+class Order:
+    """一張每日訂單。requirements 的 key 是 ORDER_CROP_ALIASES 裡的簡短
+    代稱字串（例如 "wheat"、"tomato"），value 是需要的數量；未來如果
+    訂單也能要求 wood/bread 這類加工資源，一樣是同一個 requirements
+    字典裡多加一個 key（RESOURCE_KEYS 裡的名稱），fulfill_order() 的
+    檢查/扣除邏輯已經是通用的，不用改資料結構。"""
+    order_id: int
+    requirements: Dict[str, int]
+    reward_gold: int
+    reward_tech: int
+    is_fulfilled: bool = False

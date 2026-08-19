@@ -10,10 +10,11 @@ from typing import List, Tuple, Optional, Dict, Any
 
 from game_config import (
     GamePhase, ZoneType, CropType, CropStage, DecorationType,
-    DefenseType, EnemyType, EnemyState, DogState, EventType,
+    DefenseType, BuildingType, EnemyType, EnemyState, DogState, EventType,
     MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA,
     DOG_CONFIG, CAT_CONFIG, ENEMY_DATA,
-    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent,
+    RESOURCE_KEYS, ORDER_CROP_ALIASES, ORDER_CONFIG,
+    Crop, Decoration, DefenseStructure, Tile, GuardDog, FarmCat, Enemy, GameEvent, Order,
     direction_from_delta
 )
 from pathfinding import GridBFS
@@ -32,6 +33,28 @@ class GameState:
         self.prosperity_score: int = 0
         self.farm_level: int = 1
         self.day_count: int = 1
+
+        # === 生產線 / 科技樹 終局系統 (Phase 1) ===
+        # 原料/半成品背包：wood、charcoal、metal_ore、metal_ingot、bread、
+        # battery，全部從 0 開始。目前還沒有任何地方會增加這些數量（要
+        # 等下一階段的建築放置/加工邏輯），這裡先把欄位建好。
+        self.inventory: Dict[str, int] = {key: 0 for key in RESOURCE_KEYS}
+        # 已採收但還沒交訂單的作物庫存，key 是 ORDER_CROP_ALIASES 的簡短
+        # 代稱（"wheat"/"tomato"/...）。過去 harvest_crop() 只會把作物
+        # 直接換成金幣、作物本身就消失，訂單系統需要「交出 N 個某作物」
+        # 這種可累積、可查詢的數量，所以額外加這個字典；金幣獎勵維持
+        # 完全不變，這是在原有金幣收益之外「附加」記錄下來的採收數量，
+        # 不會讓玩家變相損失原本的採收金幣。
+        self.crop_inventory: Dict[str, int] = {alias: 0 for alias in ORDER_CROP_ALIASES}
+        # 科技點數：終局進度貨幣，目前只有 fulfill_order() 這個管道可以
+        # 取得，下一階段的科技樹系統會消耗它來解鎖 FURNACE/OVEN/
+        # HAMSTER_WHEEL 等建築。
+        self.tech_points: int = 0
+        # 每日訂單：進入白天時 (_start_day / __init__ 的第 1 天) 呼叫
+        # _generate_daily_orders() 產生 1~3 張新訂單，取代前一天沒交完
+        # 的舊訂單（見該方法內註解說明為何選擇「不跨日累積」）。
+        self.active_orders: List[Order] = []
+        self._next_order_id: int = 1
         
         self.phase: GamePhase = GamePhase.DAY
         self.time_in_phase: float = 0.0
@@ -69,6 +92,9 @@ class GameState:
             f"☀️ 第 {self.day_count} 天開始！在中央耕種，四周建造防禦與景觀吧！",
             {"day": self.day_count, "gold": self.gold}
         )
+
+        # 第 1 天一開局也要有訂單可以交，不用等到隔天 _start_day() 才生成。
+        self._generate_daily_orders()
 
     def _init_grid(self):
         self.grid = []
@@ -140,6 +166,131 @@ class GameState:
         return self.farm_level >= required_lvl
 
     # =========================================================================
+    # 每日訂單系統 (Order System) —— Phase 1
+    # =========================================================================
+
+    def _get_item_count(self, item_key: str) -> int:
+        """統一查詢某個訂單品項目前持有的數量。item_key 可能是
+        ORDER_CROP_ALIASES 裡的作物代稱（查 crop_inventory），也可能是
+        RESOURCE_KEYS 裡的原料/半成品名稱（查 inventory）——未來加工
+        資源真的能被生產出來之後，訂單就能直接混合要求兩種來源，這裡
+        不用再改。查不到的 key 一律當成 0，不會噴例外。"""
+        if item_key in self.crop_inventory:
+            return self.crop_inventory[item_key]
+        if item_key in self.inventory:
+            return self.inventory[item_key]
+        return 0
+
+    def _consume_item(self, item_key: str, qty: int) -> None:
+        if item_key in self.crop_inventory:
+            self.crop_inventory[item_key] = max(0, self.crop_inventory[item_key] - qty)
+        elif item_key in self.inventory:
+            self.inventory[item_key] = max(0, self.inventory[item_key] - qty)
+
+    def _generate_daily_orders(self) -> None:
+        """每天早上（進入 GamePhase.DAY 時）呼叫，隨機產生 1~3 張新訂單。
+
+        設計決定：新的一天會直接「換掉」active_orders，而不是累加保留
+        前一天沒交的舊訂單——理由是訂單需求的作物種類取決於當時已解鎖
+        的作物（is_crop_unlocked），舊訂單若跨天保留，玩家會被要求交出
+        「今天已經買不到種子」的過期作物組合；而且不清空的話 active_orders
+        會隨天數無限增長。這個行為之後如果想改成「舊訂單保留、只是新
+        增而非取代，並讓過期訂單顯示逾期」，只要把下面這行
+        `self.active_orders = []` 改成有條件的淘汰邏輯即可，其餘生成
+        程式碼不用動。
+        """
+        self.active_orders = []
+
+        unlocked_aliases = [
+            alias for alias, crop_type in ORDER_CROP_ALIASES.items()
+            if self.is_crop_unlocked(crop_type)
+        ]
+        if not unlocked_aliases:
+            return  # 理論上不會發生（Lv.1 就解鎖 2 種作物），保險起見不硬生成訂單
+
+        order_count = random.randint(ORDER_CONFIG["MIN_ORDERS_PER_DAY"], ORDER_CONFIG["MAX_ORDERS_PER_DAY"])
+        generated = []
+        for _ in range(order_count):
+            kind_count = min(
+                len(unlocked_aliases),
+                random.randint(ORDER_CONFIG["MIN_ITEM_KINDS"], ORDER_CONFIG["MAX_ITEM_KINDS"])
+            )
+            chosen_aliases = random.sample(unlocked_aliases, kind_count)
+
+            requirements: Dict[str, int] = {}
+            gold_value = 0
+            for alias in chosen_aliases:
+                qty = random.randint(ORDER_CONFIG["MIN_QTY_PER_ITEM"], ORDER_CONFIG["MAX_QTY_PER_ITEM"])
+                requirements[alias] = qty
+                crop_type = ORDER_CROP_ALIASES[alias]
+                gold_value += qty * CROP_DATA[crop_type]["harvest_reward"]
+
+            reward_gold = max(1, round(gold_value * ORDER_CONFIG["GOLD_REWARD_RATIO"]))
+            reward_tech = (
+                ORDER_CONFIG["TECH_REWARD_BASE"]
+                + kind_count * ORDER_CONFIG["TECH_REWARD_PER_ITEM_KIND"]
+                + random.randint(0, 3)
+            )
+
+            order = Order(
+                order_id=self._next_order_id,
+                requirements=requirements,
+                reward_gold=reward_gold,
+                reward_tech=reward_tech,
+            )
+            self._next_order_id += 1
+            generated.append(order)
+
+        self.active_orders = generated
+
+        req_summary = "；".join(
+            "、".join(f"{ORDER_CROP_ALIASES[a].value} x{q}" for a, q in o.requirements.items())
+            for o in generated
+        )
+        self._emit_event(
+            EventType.ORDERS_GENERATED,
+            f"📋 今日新訂單共 {len(generated)} 張：{req_summary}",
+            {"order_ids": [o.order_id for o in generated]}
+        )
+
+    def fulfill_order(self, order_id: int) -> Tuple[bool, str]:
+        """檢查玩家背包(crop_inventory/inventory)是否滿足指定訂單的
+        requirements；全部滿足才會真的扣除物品並發放 reward_gold/
+        reward_tech，任何一項不足都不會扣任何東西（全有或全無，不會
+        扣一半）。成功後該訂單會從 active_orders 移除（視為已交付）。"""
+        order = next((o for o in self.active_orders if o.order_id == order_id), None)
+        if order is None:
+            return False, "找不到這張訂單（可能已經交付或過期）！"
+        if order.is_fulfilled:
+            return False, "這張訂單已經交付過了！"
+
+        missing = []
+        for item_key, need_qty in order.requirements.items():
+            have_qty = self._get_item_count(item_key)
+            if have_qty < need_qty:
+                display_name = ORDER_CROP_ALIASES[item_key].value if item_key in ORDER_CROP_ALIASES else item_key
+                missing.append(f"{display_name} 還差 {need_qty - have_qty} 個")
+
+        if missing:
+            return False, f"物資不足，無法交付訂單！（{'、'.join(missing)}）"
+
+        for item_key, need_qty in order.requirements.items():
+            self._consume_item(item_key, need_qty)
+
+        order.is_fulfilled = True
+        self.gold += order.reward_gold
+        self.tech_points += order.reward_tech
+        self.active_orders = [o for o in self.active_orders if o.order_id != order_id]
+
+        self._emit_event(
+            EventType.ORDER_FULFILLED,
+            f"📦 訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 科技點數。",
+            {"order_id": order_id, "reward_gold": order.reward_gold, "reward_tech": order.reward_tech,
+             "total_gold": self.gold, "total_tech": self.tech_points}
+        )
+        return True, f"訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 科技點數。"
+
+    # =========================================================================
     # 玩家操作行為 API
     # =========================================================================
 
@@ -192,6 +343,16 @@ class GameState:
             
         self.gold += reward
         crop_name = crop.config["name"]
+
+        # 訂單系統需要「已採收、還沒交出去」的作物數量可查詢/可扣除，
+        # 過去這裡採收完作物就直接消失（只換成金幣），現在額外記一份
+        # 到 crop_inventory；找不到對應代稱（理論上不會發生，
+        # ORDER_CROP_ALIASES 涵蓋全部 10 種作物）就靜默略過，不影響
+        # 既有的金幣採收流程。
+        crop_alias = next((a for a, ct in ORDER_CROP_ALIASES.items() if ct == crop.crop_type), None)
+        if crop_alias is not None:
+            self.crop_inventory[crop_alias] = self.crop_inventory.get(crop_alias, 0) + 1
+
         tile.crop = None
 
         bonus_str = " (含月光滋養 +50%！)" if crop.is_moonlight_boosted else ""
@@ -521,7 +682,9 @@ class GameState:
             f"☀️ 第 {self.day_count} 天黎明破曉！殘餘敵人已散去，請把握白天耕作！",
             {"day": self.day_count, "gold": self.gold, "prosperity": self.prosperity_score}
         )
-        
+
+        self._generate_daily_orders()
+
         self.check_game_over()
 
     # =========================================================================
