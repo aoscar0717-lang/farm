@@ -347,10 +347,27 @@ class ActionCard:
         pygame.draw.rect(surface, icon_tint if not self.is_locked else (232, 232, 232), icon_bg, border_radius=10)
         icon_surf = loader.get(self.asset_key)
         if icon_surf:
-            if self.is_locked:
-                icon_surf = icon_surf.copy()
-                icon_surf.set_alpha(110)
-            surface.blit(icon_surf, icon_bg.topleft)
+            # 商店 UI 的圖示縮放邏輯要跟農田渲染完全獨立：農田那邊改成
+            # 等比例縮放後（asset_loader.py 的 _scale_keep_aspect），部分
+            # 作物圖片（胡蘿蔔、玉米...）已經不是正方形，可能比 icon_bg
+            # 這個 50x50 的圖示框還要高。如果直接用 topleft blit 原圖，
+            # 長條形的圖會往下溢出圖示框、蓋到下面的文字。
+            # 這裡用「等比例縮小塞進框內 (Contain)」：寬高各自算一個縮放
+            # 倍率，取較小的那個，確保縮放後的圖無論長寬都不會超出
+            # icon_bg，再用 center 對齊（不是 midbottom，UI 列表不需要
+            # 「站在格子上」的視覺語意，置中最自然）。
+            orig_w, orig_h = icon_surf.get_size()
+            if orig_w > 0 and orig_h > 0:
+                scale_factor = min(icon_bg.width / orig_w, icon_bg.height / orig_h)
+                new_w = max(1, int(orig_w * scale_factor))
+                new_h = max(1, int(orig_h * scale_factor))
+                ui_img = pygame.transform.scale(icon_surf, (new_w, new_h))
+                if self.is_locked:
+                    ui_img = ui_img.copy()
+                    ui_img.set_alpha(110)
+                img_rect = ui_img.get_rect()
+                img_rect.center = icon_bg.center
+                surface.blit(ui_img, img_rect)
 
         text_x = icon_bg.right + 12
         lbl_col = C_TEXT_MUTED if self.is_locked else C_TEXT_MAIN
