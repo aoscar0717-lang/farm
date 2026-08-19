@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 
 ASSET_ROOT = os.path.join(os.path.dirname(__file__), "assets")
 
-# ---- 血月首領 / 野豬王共用的 pig_chroma.png 精靈圖設定 --------------------
+# ---- 血月首領 / 野豬王共用的 pig.png 精靈圖設定 --------------------
 # 確認過的實際規格：1024x1024、5 欄 x 5 列 (SPRITE_COLS x SPRITE_ROWS)
 # 的網格，每格 204x204，背景全黑 (0,0,0)。
 SPRITE_COLS = 5
@@ -125,9 +125,9 @@ class AssetLoader:
                 frame = sheet.subsurface(rect).copy()
                 self.images[f"{crop_name}_{stage}"] = pygame.transform.scale(frame, size)
 
-    def _load_pig_chroma_frames(self):
+    def _load_pig_frames(self):
         """
-        切出 pig_chroma.png 的 4 方向步行循環 (每方向 4 幀)，回傳
+        切出 pig.png 的 4 方向步行循環 (每方向 4 幀)，回傳
         Dict[str, List[Surface]] (key 是 'down'/'right'/'up'/'left')，
         畫格維持精靈圖原始尺寸 (204x204)，縮放留給呼叫端依用途處理
         （血月首領跟野豬王要縮成不同大小，見 load_all()）。
@@ -135,9 +135,9 @@ class AssetLoader:
         找不到檔案 / 切不出畫格時回傳 {}，呼叫端要自己 fallback 回
         原本的靜態圖片，不要讓遊戲直接壞掉。
         """
-        full_path = os.path.join(ASSET_ROOT, "characters/pig_chroma.png")
+        full_path = os.path.join(ASSET_ROOT, "characters/pig.png")
         if not os.path.exists(full_path):
-            print("[AssetLoader] 找不到 characters/pig_chroma.png，血月首領/野豬王動畫將退回靜態圖片。")
+            print("[AssetLoader] 找不到 characters/pig.png，血月首領/野豬王動畫將退回靜態圖片。")
             return {}
 
         try:
@@ -146,7 +146,7 @@ class AssetLoader:
             # 烤成真正的 per-pixel alpha。
             sheet = pygame.image.load(full_path).convert()
         except Exception as e:
-            print(f"[AssetLoader] 載入 pig_chroma.png 失敗: {e}")
+            print(f"[AssetLoader] 載入 pig.png 失敗: {e}")
             return {}
 
         sheet.set_colorkey(BOSS_CHROMA_KEY, pygame.RLEACCEL)
@@ -155,7 +155,7 @@ class AssetLoader:
         frame_width = sheet_w // SPRITE_COLS
         frame_height = sheet_h // SPRITE_ROWS
         if frame_width <= 0 or frame_height <= 0:
-            print(f"[AssetLoader] pig_chroma.png 尺寸 {sheet.get_size()} 切不出 {SPRITE_COLS}x{SPRITE_ROWS} 的畫格。")
+            print(f"[AssetLoader] pig.png 尺寸 {sheet.get_size()} 切不出 {SPRITE_COLS}x{SPRITE_ROWS} 的畫格。")
             return {}
 
         def _cut(row: int, col: int) -> pygame.Surface:
@@ -251,9 +251,9 @@ class AssetLoader:
         for key, path in chars:
             self.images[key] = self._load_image(path, sz if key != "boss_boar" else (int(sz[0]*1.4), int(sz[1]*1.4)))
 
-        # 5. 血月首領 / 野豬王的移動動畫 (共用同一張 pig_chroma.png，
+        # 5. 血月首領 / 野豬王的移動動畫 (共用同一張 pig.png，
         # 差別只有縮放後的大小 -- 野豬王用一般格子大小，血月首領放大 1.4x)
-        pig_frames_native = self._load_pig_chroma_frames()
+        pig_frames_native = self._load_pig_frames()
         boss_size = (int(sz[0] * 1.4), int(sz[1] * 1.4))
         if pig_frames_native:
             self.boss_frames: Dict[str, list] = {
@@ -265,7 +265,7 @@ class AssetLoader:
                 for d, frames in pig_frames_native.items()
             }
         else:
-            # pig_chroma.png 還沒放進 assets/characters/，或切圖失敗時，
+            # pig.png 還沒放進 assets/characters/，或切圖失敗時，
             # 兩個字典都是空的——渲染層要檢查並退回 boss_boar / enemy_boar
             # 靜態圖，不會讓遊戲壞掉。
             self.boss_frames: Dict[str, list] = {}
