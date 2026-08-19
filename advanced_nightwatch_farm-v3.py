@@ -156,6 +156,88 @@ def draw_beveled_rect(surface, rect, base_color, border_radius=8, depth=2, press
     pygame.draw.line(surface, dark, (rect.right - 2, rect.top + inset), (rect.right - 2, rect.bottom - inset), depth)
 
 
+def draw_9_slice(surface, rect, texture, border=16):
+    """真正的九宮格 (9-slice) 貼圖繪製：把 `texture` 切成四角 + 四邊 + 中央
+    共 9 塊，四角原尺寸貼上不變形，四邊只沿單一軸縮放拉伸，中央兩軸都縮放
+    填滿 `rect` 內部——這樣不管 `rect` 被撐多大/多小，貼圖四個角落的雕花
+    /圓角都不會被拉伸走樣，只有中間的素色/紋理區域會被拉伸，是遊戲 UI
+    最常見的「木牌/面板貼圖可任意縮放」處理方式。
+
+    `texture` 必須是已經載入好的 pygame.Surface（例如
+    `self.loader.get("ui_wood_panel")`）；呼叫端要自行確認它不是 None，
+    這個函式本身不處理貼圖缺失的後備方案——缺圖後備邏輯統一寫在
+    `draw_wood_panel()` 裡（見下方），這裡只單純負責「有貼圖的話怎麼切」。
+    """
+    tw, th = texture.get_size()
+    b = max(1, min(border, tw // 2 - 1, th // 2 - 1))
+    rw, rh = rect.width, rect.height
+    if rw < 2 * b or rh < 2 * b:
+        # 目標矩形比貼圖的邊框還小，九宮格切法會出錯，退化成整張貼圖
+        # 直接等比例縮放貼滿，勉強堪用總比噴例外好。
+        scaled = pygame.transform.smoothscale(texture, (max(1, rw), max(1, rh)))
+        surface.blit(scaled, rect.topleft)
+        return
+
+    tl = texture.subsurface((0, 0, b, b))
+    tr = texture.subsurface((tw - b, 0, b, b))
+    bl = texture.subsurface((0, th - b, b, b))
+    br = texture.subsurface((tw - b, th - b, b, b))
+    top = texture.subsurface((b, 0, tw - 2 * b, b))
+    bottom = texture.subsurface((b, th - b, tw - 2 * b, b))
+    left = texture.subsurface((0, b, b, th - 2 * b))
+    right = texture.subsurface((tw - b, b, b, th - 2 * b))
+    center = texture.subsurface((b, b, tw - 2 * b, th - 2 * b))
+
+    cw, ch = rw - 2 * b, rh - 2 * b
+    surface.blit(tl, rect.topleft)
+    surface.blit(tr, (rect.right - b, rect.top))
+    surface.blit(bl, (rect.left, rect.bottom - b))
+    surface.blit(br, (rect.right - b, rect.bottom - b))
+    if cw > 0:
+        surface.blit(pygame.transform.scale(top, (cw, b)), (rect.left + b, rect.top))
+        surface.blit(pygame.transform.scale(bottom, (cw, b)), (rect.left + b, rect.bottom - b))
+    if ch > 0:
+        surface.blit(pygame.transform.scale(left, (b, ch)), (rect.left, rect.top + b))
+        surface.blit(pygame.transform.scale(right, (b, ch)), (rect.right - b, rect.top + b))
+    if cw > 0 and ch > 0:
+        surface.blit(pygame.transform.scale(center, (cw, ch)), (rect.left + b, rect.top + b))
+
+
+def draw_wood_panel(surface, rect, loader, texture_key, base_color, border_radius=14, depth=3,
+                     pressed=False, border=16):
+    """面板/按鈕背景繪製的統一入口。優先嘗試從 `loader.get(texture_key)`
+    拿到真正的木紋九宮格貼圖並用 `draw_9_slice()` 繪製；如果貼圖還沒放進
+    `assets/ui/`（`loader.get()` 回傳 None，就跟 `grass_img =
+    self.loader.get("grass_tile")` 這種既有寫法遇到缺圖時一樣），就自動
+    退回目前已經在商店面板/頂部狀態列驗證過可行的 `draw_beveled_rect()`
+    立體木頭色塊畫法。呼叫端完全不用關心貼圖存不存在，兩種畫法在這裡
+    無縫切換；未來只要把 `wood_panel.png` / `wood_button.png` 放進
+    `assets/ui/`，畫面會自動改用真正的九宮格貼圖，不用再改呼叫端程式碼。
+    """
+    texture = loader.get(texture_key) if loader is not None else None
+    if texture is not None:
+        draw_9_slice(surface, rect, texture, border=border)
+    else:
+        draw_beveled_rect(surface, rect, base_color, border_radius=border_radius, depth=depth, pressed=pressed)
+
+
+def blit_text_with_shadow(surface, font, text, color, topleft=None, center=None,
+                           shadow_color=(20, 20, 20)):
+    """畫帶有四方向黑色描邊/陰影的文字，確保在木紋（偏棕/偏暗）背景上
+    仍然清楚可讀——跟 FloatingText/鎖定商品卡片既有的描邊寫法同一套
+    技巧，這裡抽成共用函式給彈窗（暫停選單、遊戲結束畫面）使用。
+    回傳最終文字的 Rect，方便呼叫端接著算後續版面位置。
+    """
+    shadow_surf = font.render(text, True, shadow_color)
+    main_surf = font.render(text, True, color)
+    if center is not None:
+        r = main_surf.get_rect(center=center)
+    else:
+        r = main_surf.get_rect(topleft=topleft)
+    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        surface.blit(shadow_surf, (r.x + dx, r.y + dy))
+    surface.blit(main_surf, r)
+    return r
 
 
 # ------------------------------------------------------------------
@@ -1405,37 +1487,45 @@ class NightwatchFarmApp:
         my = (SCREEN_HEIGHT - modal_h) // 2
         modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
 
-        pygame.draw.rect(self.screen, C_WHITE, modal_rect, border_radius=14)
-        pygame.draw.rect(self.screen, C_BLUE, modal_rect, width=3, border_radius=14)
+        # 彈窗底框：跟商店面板/頂部狀態列同一套「先試貼圖、沒有就退回
+        # 立體木頭色塊」邏輯 (draw_wood_panel)。目前 assets/ui/ 底下還沒有
+        # wood_panel.png，所以現在畫出來的是 draw_beveled_rect() 版本，
+        # 深木色底 + 立體刻痕邊框，跟主畫面風格一致；以後放了真的貼圖，
+        # 這裡會自動改貼圖，不用再改這段程式碼。
+        draw_wood_panel(self.screen, modal_rect, self.loader, "ui_wood_panel",
+                         C_WOOD_DARK, border_radius=14, depth=3)
 
-        t1 = FONT_TITLE.render("⏸ 遊戲暫停", True, C_TEXT_MAIN)
-        self.screen.blit(t1, (mx + (modal_w - t1.get_width()) // 2, my + 40))
+        blit_text_with_shadow(self.screen, FONT_TITLE, "⏸ 遊戲暫停", C_GOLD,
+                               center=(mx + modal_w // 2, my + 48))
 
-        r1 = FONT_SM.render(f"第 {self.game.day_count} 天・繁榮度 {self.game.prosperity_score}", True, C_TEXT_MUTED)
-        self.screen.blit(r1, (mx + (modal_w - r1.get_width()) // 2, my + 90))
+        blit_text_with_shadow(
+            self.screen, FONT_SM,
+            f"第 {self.game.day_count} 天・繁榮度 {self.game.prosperity_score}",
+            C_TEXT_ON_DARK, center=(mx + modal_w // 2, my + 96))
+
+        def _draw_menu_button(rect, label, base_color):
+            hovered = rect.collidepoint(self.mouse_pos)
+            draw_wood_panel(self.screen, rect, self.loader, "ui_wood_button",
+                             base_color, border_radius=8, depth=2, pressed=hovered)
+            blit_text_with_shadow(self.screen, FONT_MD, label, C_TEXT_ON_DARK, center=rect.center)
 
         btn_resume = pygame.Rect(mx + (modal_w - 220) // 2, my + 150, 220, 52)
-        pygame.draw.rect(self.screen, C_GREEN, btn_resume, border_radius=8)
         # 用「恢復」而非「繼續」：後者的「繼」字不在專案自帶的精簡字型子集
         # (assets/fonts/NotoSansTC-GameSubset.otf) 收錄範圍內，會顯示成缺字
         # 方塊「□」。P 鍵暫停/恢復本來就用「恢復」這個詞（見上方 run() 的
         # K_p 處理），這裡沿用同一個詞，語意一致，也保證字型一定有收錄。
-        resume_txt = FONT_MD.render("▶ 恢復", True, C_WHITE)
-        self.screen.blit(resume_txt, (btn_resume.centerx - resume_txt.get_width() // 2, btn_resume.centery - resume_txt.get_height() // 2))
+        _draw_menu_button(btn_resume, "▶ 恢復", (90, 122, 74))
 
         btn_restart = pygame.Rect(mx + (modal_w - 220) // 2, my + 216, 220, 52)
-        pygame.draw.rect(self.screen, C_ORANGE, btn_restart, border_radius=8)
-        restart_txt = FONT_MD.render("🔄 重新開始", True, C_WHITE)
-        self.screen.blit(restart_txt, (btn_restart.centerx - restart_txt.get_width() // 2, btn_restart.centery - restart_txt.get_height() // 2))
+        _draw_menu_button(btn_restart, "🔄 重新開始", (150, 96, 56))
 
         # 靜音只影響背景音樂，不影響採收/建造等音效；標籤跟按鈕顏色都會
         # 依目前狀態切換，不用另外開對話框確認就能立刻看到生效與否。
         # 用「靜音」而不加「音樂」二字：「樂」不在精簡字型子集裡。
         btn_mute = pygame.Rect(mx + (modal_w - 220) // 2, my + 282, 220, 52)
         muted = self.sound.music_muted
-        pygame.draw.rect(self.screen, (120, 130, 140) if muted else (69, 90, 100), btn_mute, border_radius=8)
-        mute_txt = FONT_MD.render("🔊 取消靜音" if muted else "🔇 靜音", True, C_WHITE)
-        self.screen.blit(mute_txt, (btn_mute.centerx - mute_txt.get_width() // 2, btn_mute.centery - mute_txt.get_height() // 2))
+        _draw_menu_button(btn_mute, "🔊 取消靜音" if muted else "🔇 靜音",
+                           (96, 88, 78) if muted else C_WOOD_MID)
 
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)
@@ -2114,25 +2204,34 @@ class NightwatchFarmApp:
         my = (SCREEN_HEIGHT - modal_h) // 2
         modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
 
-        pygame.draw.rect(self.screen, (255, 255, 255), modal_rect, border_radius=14)
+        # 跟暫停選單同一套 draw_wood_panel：沒有真的 wood_panel.png 貼圖時
+        # 退回深木色 draw_beveled_rect()，維持跟主畫面一致的木紋風格；
+        # 外框改用略帶血紅色調的深木色，暗示「結束/失敗」，但不再是刺眼
+        # 的純白底 + 純紅描邊。
+        draw_wood_panel(self.screen, modal_rect, self.loader, "ui_wood_panel",
+                         (58, 34, 30), border_radius=14, depth=3)
         pygame.draw.rect(self.screen, C_RED, modal_rect, width=3, border_radius=14)
 
-        t1 = FONT_TITLE.render("💀 遊戲結束 (GAME OVER)", True, C_RED)
-        self.screen.blit(t1, (mx + (modal_w - t1.get_width()) // 2, my + 30))
+        blit_text_with_shadow(self.screen, FONT_TITLE, "💀 遊戲結束 (GAME OVER)", C_RED,
+                               center=(mx + modal_w // 2, my + 38))
 
-        r1 = FONT_MD.render("農場資金斷絕，破產淘汰！", True, C_TEXT_MAIN)
-        self.screen.blit(r1, (mx + (modal_w - r1.get_width()) // 2, my + 80))
+        blit_text_with_shadow(self.screen, FONT_MD, "農場資金斷絕，破產淘汰！", C_TEXT_ON_DARK,
+                               center=(mx + modal_w // 2, my + 84))
 
-        r2 = FONT_SM.render(self.game.game_over_reason, True, C_RED)
-        self.screen.blit(r2, (mx + (modal_w - r2.get_width()) // 2, my + 112))
+        blit_text_with_shadow(self.screen, FONT_SM, self.game.game_over_reason, C_LOCK_TEXT_RED,
+                               center=(mx + modal_w // 2, my + 116))
 
-        d1 = FONT_SM.render(f"生存天數: {self.game.day_count} 天 | 最終繁榮度: {self.game.prosperity_score}", True, C_TEXT_MUTED)
-        self.screen.blit(d1, (mx + (modal_w - d1.get_width()) // 2, my + 148))
+        blit_text_with_shadow(
+            self.screen, FONT_SM,
+            f"生存天數: {self.game.day_count} 天 | 最終繁榮度: {self.game.prosperity_score}",
+            C_TEXT_ON_DARK, center=(mx + modal_w // 2, my + 150))
 
         btn_restart = pygame.Rect(mx + (modal_w - 200) // 2, my + 215, 200, 48)
-        pygame.draw.rect(self.screen, C_GREEN, btn_restart, border_radius=8)
-        btn_txt = FONT_MD.render("🔄 重新挑戰農場", True, C_WHITE)
-        self.screen.blit(btn_txt, (btn_restart.centerx - btn_txt.get_width() // 2, btn_restart.centery - btn_txt.get_height() // 2))
+        hovered = btn_restart.collidepoint(self.mouse_pos)
+        draw_wood_panel(self.screen, btn_restart, self.loader, "ui_wood_button",
+                         (90, 122, 74), border_radius=8, depth=2, pressed=hovered)
+        blit_text_with_shadow(self.screen, FONT_MD, "🔄 重新挑戰農場", C_TEXT_ON_DARK,
+                               center=btn_restart.center)
 
 
 if __name__ == "__main__":

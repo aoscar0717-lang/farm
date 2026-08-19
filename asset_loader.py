@@ -520,5 +520,31 @@ class AssetLoader:
         # 7. 柵欄 (Fences.png) 的 16 種 4-bit bitmask 自動連接畫格。
         self.fence_tiles: Dict[int, pygame.Surface] = self._load_fence_tiles(sz)
 
+        # 8. 彈窗 (暫停選單/遊戲結束畫面) 用的木紋九宮格 (9-slice) 貼圖。
+        # 這兩張圖目前 (assets/ui/ 底下只有 flashlight.png / shovel.png)
+        # 還不存在，所以以下只是「先把載入邏輯寫好、貼圖一放進去就自動
+        # 生效」的預留鉤子——不存在時保持原尺寸不做 _load_image 的
+        # cell_size 強制縮放 (九宮格繪製函式 draw_9_slice() 需要吃原始
+        # 解析度的貼圖自己去切邊角，如果先被縮到跟格子一樣大，九宮格的
+        # 邊框比例會跑掉)，且完全不寫進 self.images，讓呼叫端
+        # `loader.get("ui_wood_panel")` 拿到 None，自動觸發
+        # draw_wood_panel() 裡的 draw_beveled_rect() 後備方案，不會讓
+        # 遊戲壞掉或噴例外。
+        for ui_key, ui_rel_path in (
+            ("ui_wood_panel", "ui/wood_panel.png"),
+            ("ui_wood_button", "ui/wood_button.png"),
+        ):
+            ui_full_path = os.path.join(ASSET_ROOT, ui_rel_path)
+            if os.path.exists(ui_full_path):
+                try:
+                    self.images[ui_key] = pygame.image.load(ui_full_path).convert_alpha()
+                except Exception as e:
+                    print(f"[AssetLoader] 警告：{ui_rel_path} 載入失敗（{e}），"
+                          f"彈窗將退回立體木頭色塊繪製。")
+            else:
+                print(f"[AssetLoader] 提示：{ui_rel_path} 尚未放進 assets/ui/，"
+                      f"彈窗將先用立體木頭色塊 (draw_beveled_rect) 繪製，"
+                      f"之後放上真的九宮格貼圖會自動生效，不用改程式碼。")
+
     def get(self, key: str) -> pygame.Surface:
         return self.images.get(key)
