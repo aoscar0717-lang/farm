@@ -385,14 +385,14 @@ DEFENSE_DATA = {
     DefenseType.SCARECROW: {
         "name": "農田稻草人",
         "cost": 35,
-        "scare_radius": 3.0,
+        "scare_radius": 1.5,  # 原本 3.0，縮小為一半
         "walkable": False,
         "asset_key": "scarecrow",
     },
     DefenseType.BEEHIVE: {
         "name": "蜜蜂守衛巢",
         "cost": 85,
-        "attack_range": 4.0,
+        "attack_range": 2.0,  # 原本 4.0，縮小為一半
         "attack_power": 18,
         "attack_cooldown": 1.2,
         "walkable": False,
@@ -402,7 +402,9 @@ DEFENSE_DATA = {
 
 DOG_CONFIG = {
     "cost": 100,
-    "speed": 3.0,
+    "speed": 1.8,  # 原本 3.0，調降為 0.6 倍 -- 追擊/指揮衝刺/返回崗位
+                   # 三種移動都是從這個值乘出來的 (game_state.py 的
+                   # _update_dog())，改這一個數字就整體等比例變慢。
     "detection_radius": 5.5,
     "attack_range": 0.9,
     "attack_power": 50,
@@ -590,6 +592,9 @@ class GuardDog:
     state: DogState = DogState.PATROL
     target_enemy_id: Optional[str] = None
     attack_cooldown_timer: float = 0.0
+    facing_direction: str = "down"  # 'down'/'left'/'right'/'up' -- 跟
+    # Enemy.facing_direction 同一套慣例，由 game_state.py 在移動時透過
+    # direction_from_delta() 更新，供渲染層播放對應方向的走路動畫用。
     
     @property
     def speed(self) -> float:

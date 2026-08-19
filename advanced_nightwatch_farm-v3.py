@@ -1620,7 +1620,20 @@ class NightwatchFarmApp:
             dog = self.game.guard_dog
             px = int(GRID_X + dog.x * CELL_SIZE)
             py = int(GRID_Y + dog.y * CELL_SIZE)
-            img = self.loader.get("guard_dog")
+            # 白天狗不用出去咬人，改播坐姿待機動畫；晚上依
+            # facing_direction 選方向、每 200ms 換下一幀播放走路動畫，
+            # 跟野豬/血月首領共用同一套播放邏輯。guard_dog_walk.png 還沒
+            # 放進 assets/characters/ 或切圖失敗時兩組動畫都是空的，
+            # 自動退回原本的靜態 guard_dog 圖，不會壞掉。
+            if self.game.phase == GamePhase.DAY:
+                frames = self.loader.dog_sit_frames
+            else:
+                frames = self.loader.dog_walk_frames.get(dog.facing_direction, [])
+            if frames:
+                frame_index = (pygame.time.get_ticks() // 200) % len(frames)
+                img = frames[frame_index]
+            else:
+                img = self.loader.get("guard_dog")
             if img:
                 self.screen.blit(img, (px, py))
             if dog.state in (DogState.CHASING, DogState.COMMANDED):

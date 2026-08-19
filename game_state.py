@@ -1040,6 +1040,7 @@ class GameState:
                 step = dog.speed * 1.3 * dt
                 dog.x += (dx / dist) * step
                 dog.y += (dy / dist) * step
+                dog.facing_direction = direction_from_delta(dx, dy)
             return
 
         active_enemies = [e for e in self.enemies if e.state in (EnemyState.MOVING, EnemyState.ACTING, EnemyState.STUNNED, EnemyState.FLEEING)]
@@ -1090,6 +1091,7 @@ class GameState:
                 step = dog.speed * dt
                 dog.x += (dx / dist) * step
                 dog.y += (dy / dist) * step
+                dog.facing_direction = direction_from_delta(dx, dy)
 
         else:
             if dog.state != DogState.PATROL:
@@ -1099,8 +1101,11 @@ class GameState:
             dist_to_home = math.hypot(home_x - dog.x, home_y - dog.y)
             if dist_to_home > 0.5:
                 step = (dog.speed * 0.7) * dt
-                dog.x += ((home_x - dog.x) / dist_to_home) * step
-                dog.y += ((home_y - dog.y) / dist_to_home) * step
+                dx_home = (home_x - dog.x) / dist_to_home
+                dy_home = (home_y - dog.y) / dist_to_home
+                dog.x += dx_home * step
+                dog.y += dy_home * step
+                dog.facing_direction = direction_from_delta(dx_home, dy_home)
 
     # =========================================================================
     # 結束條件判定

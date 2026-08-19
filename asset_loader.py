@@ -103,6 +103,25 @@ BITMASK_MAP = {
 }
 
 
+# ---- 看門柴犬走路動畫 (assets/characters/guard_dog_walk.png) --------------
+# 實測 128x320，是 4 欄 x 8 列、每格 32x40 的網格。用透明間隙分析確認過
+# 實際切割線，不是憑格數硬除。整張圖其實有兩組風格：第 0-3 列是「坐姿」
+# 姿勢（含一頂派對帽的裝飾變體），第 4-7 列才是乾淨的四方向走路循環，
+# 這裡只取第 4-7 列。
+DOG_WALK_COLS = 4
+DOG_WALK_ROWS_TOTAL = 8
+DOG_WALK_FRAME_W = 32
+DOG_WALK_FRAME_H = 40
+# 每個方向對應精靈圖的第幾「列」。row4=面對鏡頭(down)、row5=背對鏡頭
+# (up，看不到臉、只看得到尾巴)、row6=頭朝右(right)、row7=頭朝左(left)，
+# 都是用 PIL 把每一列放大檢視、目視確認過朝向才定案，不是用格數猜的。
+DOG_WALK_DIRECTION_ROWS = {"down": 4, "up": 5, "right": 6, "left": 7}
+# 白天狗不用出去咬人，改播「坐姿面對鏡頭」的待機動畫，跟第 4 列
+# (走路動畫的 down 方向) 不是同一列——第 4 列有戴一頂派對帽，這裡改用
+# 第 2 列：沒有帽子、純坐姿的前視角，看起來更像「安靜坐著休息」。
+DOG_DAY_SIT_ROW = 2
+
+
 class AssetLoader:
     def __init__(self, cell_size: int = 50):
         self.cell_size = cell_size
@@ -289,6 +308,52 @@ class AssetLoader:
 
         return frames
 
+    def _load_dog_walk_frames(self):
+        """
+        切出 guard_dog_walk.png 的 4 方向走路動畫 + 白天坐姿待機動畫，
+        回傳 (walk_frames, sit_frames) 兩個值：
+          walk_frames: Dict[str, List[Surface]]，key 是 'down'/'right'/
+            'left'/'up'，晚上依移動方向播放。
+          sit_frames: List[Surface]，4 幀坐姿面對鏡頭，白天播放（狗不用
+            出去咬人，改坐著待機）。
+        兩組動畫共用同一張精靈圖，只讀一次檔案。畫格維持精靈圖原始尺寸
+        (32x40)，縮放留給呼叫端依格子大小處理。
+
+        找不到檔案 / 切不出畫格時兩者都回傳空值 ({}, [])，呼叫端要自己
+        fallback 回原本的靜態 guard_dog.png，不要讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "characters/guard_dog_walk.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 characters/guard_dog_walk.png，看門狗動畫將退回靜態圖片。")
+            return {}, []
+
+        try:
+            # 背景是真透明 (alpha=0)，直接 convert_alpha() 讀取即可，
+            # 不套用 colorkey（跟 theif.png 是同一種去背方式）。
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 guard_dog_walk.png 失敗: {e}")
+            return {}, []
+
+        sheet_w, sheet_h = sheet.get_size()
+        frame_width = sheet_w // DOG_WALK_COLS
+        frame_height = sheet_h // DOG_WALK_ROWS_TOTAL
+        if frame_width <= 0 or frame_height <= 0:
+            print(f"[AssetLoader] guard_dog_walk.png 尺寸 {sheet.get_size()} 切不出 {DOG_WALK_COLS}x{DOG_WALK_ROWS_TOTAL} 的畫格。")
+            return {}, []
+
+        def _cut(row: int, col: int) -> pygame.Surface:
+            rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+            return sheet.subsurface(rect).copy()
+
+        walk_frames = {}
+        for direction, row in DOG_WALK_DIRECTION_ROWS.items():
+            walk_frames[direction] = [_cut(row, col) for col in range(DOG_WALK_COLS)]
+
+        sit_frames = [_cut(DOG_DAY_SIT_ROW, col) for col in range(DOG_WALK_COLS)]
+
+        return walk_frames, sit_frames
+
     def _load_fence_tiles(self, size: Tuple[int, int]) -> Dict[int, pygame.Surface]:
         """
         切出 assets/Fences.png 的 16 種 4-bit bitmask 連接狀態，回傳
@@ -435,6 +500,22 @@ class AssetLoader:
             # theif.png 還沒放進 assets/characters/，或切圖失敗時，
             # 空字典——渲染層要檢查並退回 enemy_thief 靜態圖，不會讓遊戲壞掉。
             self.thief_frames: Dict[str, list] = {}
+
+        # 6.5 看門柴犬 (guard_dog_walk.png) 的 4 方向走路動畫 (晚上用) +
+        # 坐姿待機動畫 (白天用)，縮放成一般格子大小，寫法跟上面的小偷
+        # 動畫對稱。
+        dog_walk_frames_native, dog_sit_frames_native = self._load_dog_walk_frames()
+        if dog_walk_frames_native:
+            self.dog_walk_frames: Dict[str, list] = {
+                d: [pygame.transform.scale(f, sz) for f in frames]
+                for d, frames in dog_walk_frames_native.items()
+            }
+        else:
+            # guard_dog_walk.png 還沒放進 assets/characters/，或切圖失敗
+            # 時，空字典——渲染層要檢查並退回 guard_dog 靜態圖，不會讓
+            # 遊戲壞掉。
+            self.dog_walk_frames: Dict[str, list] = {}
+        self.dog_sit_frames: list = [pygame.transform.scale(f, sz) for f in dog_sit_frames_native]
 
         # 7. 柵欄 (Fences.png) 的 16 種 4-bit bitmask 自動連接畫格。
         self.fence_tiles: Dict[int, pygame.Surface] = self._load_fence_tiles(sz)
