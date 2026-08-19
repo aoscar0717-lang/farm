@@ -236,8 +236,7 @@ SHOP_TAB_LABELS = {"seed": "種子", "def": "防禦", "pet": "景觀"}
 # actually represents.
 SHOP_ITEM_IDS = {
     "seed": ["radish", "carrot", "pumpkin"],
-    "def": ["fence", "trap", "dog", "cat", "goose", "sheep", "bull", "owl"],
-
+    "def": ["fence", "trap", "dog"],
     # Landscape expansion round 1: 4 original + 7 (scarecrow/crate/bush/
     # rock/sunflower/pine_tree/big_tree). shop_column_rects has no hard cap
     # on count, so growing this list lays out automatically -- no geometry
@@ -327,6 +326,87 @@ def shop_column_rects(count, is_sell, column):
     page_w = shop_page_geometry()["page_w"]
     row_h = 75
     return [pygame.Rect(page_x, start_y + i * row_h, page_w, 65) for i in range(count)]
+
+
+# ---------------------------------------------------------------------------
+# Shared geometry: shop pagination
+# ---------------------------------------------------------------------------
+# Bug this fixes: a card column has no built-in limit, so a tab with enough
+# items (originally: 佈置/pet's 19 items, or a sell page with more than 12
+# sellable grades) lays out MORE rows than shop_column_start's fixed
+# start_y + row_h*count can fit above the shop panel's bottom edge -- the
+# extra cards still get real Rects and still draw, they just draw past the
+# panel background, "hanging" over whatever is behind the shop. Pagination
+# caps how many items shop_column_rects is ever asked to lay out at once,
+# so that structurally can't happen again regardless of how many items a
+# future tab/sell-grade list grows to.
+#
+# SHOP_ITEMS_PER_PAGE=10 (5 rows per column at row_h=75) is deliberately
+# under the ~6-row ceiling the panel's height (700px) allows for the
+# tightest case (buy page's left column, which starts lower than the
+# others at shop_y+210 to leave room for the seed/def/pet sub-tabs) --
+# that slack is what the Prev/Next bar below is drawn into, instead of
+# competing with the last row of cards for the same pixels.
+SHOP_ITEMS_PER_PAGE = 10
+
+
+def shop_page_key(active_tab):
+    """Which slot of state["shop_page"] a given active_tab's page cursor
+    lives under. Each buy sub-tab (seed/def/pet) and the sell tab remember
+    their own page independently, so switching tabs and switching back
+    doesn't lose your place -- a plain naming decision, not geometry, but
+    kept here (not duplicated in ui.py/input_handler.py/thought.py) so all
+    four can never disagree about which key means what."""
+    return active_tab if active_tab == "sell" else f"buy_{active_tab}"
+
+
+def shop_page_count(item_count):
+    """How many pages `item_count` items need at SHOP_ITEMS_PER_PAGE per
+    page. Always >= 1 -- an empty list is still "page 1 of 1", not "page 1
+    of 0", so callers (the Prev/Next bar, the "第 X / Y 頁" label) never
+    have to special-case zero items."""
+    return max(1, -(-item_count // SHOP_ITEMS_PER_PAGE))  # ceil division
+
+
+def shop_clamp_page(page, item_count):
+    """Clamps a possibly-stale page index (e.g. the player paged to page 3
+    of a tab, then a sale emptied their inventory back down to 1 page)
+    into [0, shop_page_count(item_count) - 1]."""
+    return max(0, min(page, shop_page_count(item_count) - 1))
+
+
+def shop_page_slice(items, page):
+    """The (<= SHOP_ITEMS_PER_PAGE) items visible on `page` (0-indexed,
+    already clamped). Single source of truth for "what's on this page" --
+    drawing, click hit-testing, and F-Hover hit-testing all slice through
+    this instead of each re-deriving their own start/stop math, so they
+    can never disagree about which item a given card position represents."""
+    page = shop_clamp_page(page, len(items))
+    start = page * SHOP_ITEMS_PER_PAGE
+    return items[start:start + SHOP_ITEMS_PER_PAGE]
+
+
+def shop_pagination_rects():
+    """Prev/Next button Rects plus the center point for a "第 X / Y 頁"
+    label, spanning the full card-column width (both the left and right
+    page columns together -- buy and sell each lay their cards out as ONE
+    2-column grid across that combined width, not two independently-paged
+    halves), anchored to the shop panel's own bottom edge so it can never
+    need updating if shop_panel_rect's size changes."""
+    geo = shop_page_geometry()
+    shop = geo["shop_rect"]
+    left_page_x = geo["left_page_x"]
+    right_page_x = geo["right_page_x"]
+    page_w = geo["page_w"]
+    content_left = left_page_x
+    content_right = right_page_x + page_w
+    btn_w, btn_h = 90, 34
+    y = shop.bottom - btn_h - 14
+    return {
+        "prev": pygame.Rect(content_left, y, btn_w, btn_h),
+        "next": pygame.Rect(content_right - btn_w, y, btn_w, btn_h),
+        "label_center": ((content_left + content_right) // 2, y + btn_h // 2),
+    }
 
 
 # ---------------------------------------------------------------------------

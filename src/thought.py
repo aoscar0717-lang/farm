@@ -257,15 +257,17 @@ def _hover_is_mature_crop(state, ctx):
     return hc["kind"] == "crop" and hc["crop_mature"]
 
 
-def _hovering_entity(state, ctx, kind):
-    """True when the hover cell is EXACTLY on an entity of `kind` ("fences"/"traps"/"dogs") in the active zone.
+def _hovering_entity(state, ctx, kind, radius=25):
+    """True when the hover cell is within `radius` world units of any
+    existing entity of `kind` ("fences"/"traps"/"dogs") in the active zone.
     Entities are stored as (x, y, ...) tuples -- only x/y are position."""
     pos = ctx.get("hover_pos")
     if pos is None:
         return False
     zone = state[ctx["active_zone"]]
     for entity in zone.get(kind, []):
-        if pos[0] == entity[0] and pos[1] == entity[1]:
+        ex, ey = entity[0], entity[1]
+        if math.hypot(pos[0] - ex, pos[1] - ey) <= radius:
             return True
     return False
 
@@ -405,8 +407,14 @@ def _hovered_shop_buy_item(state, ctx):
         return None
     active_tab = ctx.get("active_tab") or "seed"
     ids = _ui_layout.SHOP_ITEM_IDS.get(active_tab, [])
-    left_ids = ids[:(len(ids) + 1) // 2]
-    right_ids = ids[(len(ids) + 1) // 2:]
+    # Only the current PAGE's ids -- must match exactly what ui.py actually
+    # drew (and what input_handler.py would click), or Hover would describe
+    # a card that isn't even the one on screen once pagination is past
+    # page 1 (see ui_layout.shop_page_slice/shop_page_key).
+    page = state.get("shop_page", {}).get(_ui_layout.shop_page_key(active_tab), 0)
+    page_ids = _ui_layout.shop_page_slice(ids, page)
+    left_ids = page_ids[:(len(page_ids) + 1) // 2]
+    right_ids = page_ids[(len(page_ids) + 1) // 2:]
     for col_ids, column in [(left_ids, "left"), (right_ids, "right")]:
         rects = _ui_layout.shop_column_rects(len(col_ids), is_sell=False, column=column)
         for item_id, card_rect in zip(col_ids, rects):
@@ -422,7 +430,9 @@ def _hovered_shop_sell_item(state, ctx):
     if mp is None:
         return None
     sellable = _ui_layout.build_sellable_list(state, CROP_INFO)
-    left_items, right_items = sellable[:6], sellable[6:12]
+    page = state.get("shop_page", {}).get(_ui_layout.shop_page_key("sell"), 0)
+    page_items = _ui_layout.shop_page_slice(sellable, page)
+    left_items, right_items = page_items[:(len(page_items) + 1) // 2], page_items[(len(page_items) + 1) // 2:]
     for col_items, column in [(left_items, "left"), (right_items, "right")]:
         rects = _ui_layout.shop_column_rects(len(col_items), is_sell=True, column=column)
         for item, card_rect in zip(col_items, rects):
@@ -498,7 +508,7 @@ def _hovering_rect(ctx, rect):
     return pos is not None and rect.collidepoint(pos)
 
 
-def _hovering_decor(state, ctx, decor_type):
+def _hovering_decor(state, ctx, decor_type, radius=25):
     """Like _hovering_entity, but for one specific decoration sub-type.
     Unlike fences/traps/dogs (each its own list), every placed decoration --
     regardless of sub-type -- lives together in zone["decorations"] as
@@ -510,7 +520,7 @@ def _hovering_decor(state, ctx, decor_type):
     zone = state[ctx["active_zone"]]
     for d in zone.get("decorations", []):
         dx, dy, dtype, _hp = d
-        if dtype == decor_type and pos[0] == dx and pos[1] == dy:
+        if dtype == decor_type and math.hypot(pos[0] - dx, pos[1] - dy) <= radius:
             return True
     return False
 
@@ -583,8 +593,10 @@ THOUGHT_ENTRIES = [
             ctx.get("hover_pos") is not None
             and state["farm"].get("thief_ai_state") == "attacking_fence"
             and state["farm"].get("thief_attack_target_fence") is not None
-            and ctx["hover_pos"][0] == state["farm"]["thief_attack_target_fence"][0]
-            and ctx["hover_pos"][1] == state["farm"]["thief_attack_target_fence"][1]
+            and math.hypot(
+                ctx["hover_pos"][0] - state["farm"]["thief_attack_target_fence"][0],
+                ctx["hover_pos"][1] - state["farm"]["thief_attack_target_fence"][1],
+            ) <= 25
         ),
         "required_map": "farm",
         "required_phase": "night",
@@ -666,56 +678,9 @@ THOUGHT_ENTRIES = [
         "required_phase": "day",
         "required_tutorial": "dog",
     },
-
-    {
-        "id": "action_cat_place",
-        "text": "招財小貓跑速極快，爪擊能減速敵人 50%，白天還能定期為農場摸出金幣！",
-        "priority": 13,
-        "trigger": "hover",
-        "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
-        "required_item": "cat",
-        "required_phase": "day",
-    },
-    {
-        "id": "action_goose_place",
-        "text": "警戒鵝領域意識極強，憤怒衝撞能將入侵的敵人強力向後擊退！",
-        "priority": 13,
-        "trigger": "hover",
-        "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
-        "required_item": "goose",
-        "required_phase": "day",
-    },
-    {
-        "id": "action_sheep_place",
-        "text": "棉花守護羊擁有 10 點厚實羊毛護盾，能主動吸引周圍敵人仇恨以保護作物。",
-        "priority": 13,
-        "trigger": "hover",
-        "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
-        "required_item": "sheep",
-        "required_phase": "day",
-    },
-    {
-        "id": "action_bull_place",
-        "text": "鐵壁戰鬥牛威嚴強大，巨角挑擊能造成雙倍重擊傷害（2點傷害）！",
-        "priority": 13,
-        "trigger": "hover",
-        "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
-        "required_item": "bull",
-        "required_phase": "day",
-    },
-    {
-        "id": "action_owl_place",
-        "text": "夜行守護鳥飛行極快，遠程空中俯衝啄擊，有機會直接將敵人嚇得原地僵直！",
-        "priority": 13,
-        "trigger": "hover",
-        "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
-        "required_item": "owl",
-        "required_phase": "day",
-    },
     {
         "id": "action_shovel_use",
-        "text": "鐵鏟可以移除這裡的農田、圍欄、景觀、陷阱或守護動物。",
-
+        "text": "鐵鏟可以移除這裡的農田、圍欄、景觀、陷阱或狗。",
         "priority": 14,
         "trigger": "hover",
         "condition": lambda state, ctx: ctx.get("hover_pos") is not None,
@@ -973,7 +938,6 @@ THOUGHT_ENTRIES = [
     },
     {
         "id": "action_sell_crops",
-
         "text": "背包裡有收成了，按 B 打開商店可以賣掉換錢。",
         "priority": _demote_once_learned(15, 34, "shop_sell"),
         "trigger": "state",
@@ -1002,6 +966,7 @@ THOUGHT_ENTRIES = [
         "priority": 20,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "move"),
+        "required_tutorial": "move",
     },
     {
         "id": "learn_shop_intro",
@@ -1009,6 +974,7 @@ THOUGHT_ENTRIES = [
         "priority": 20,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "shop_sell") and not ctx["shop_open"],
+        "required_tutorial": "shop_sell",
     },
     {
         "id": "learn_night_start",
@@ -1017,6 +983,7 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "night_start"),
         "required_phase": "night",
+        "required_tutorial": "night_start",
     },
     {
         "id": "learn_night_end",
@@ -1025,6 +992,7 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "night_end") and state.get("day_count", 1) >= 2,
         "required_phase": "day",
+        "required_tutorial": "night_end",
     },
     {
         "id": "learn_zone_switch",
@@ -1032,6 +1000,7 @@ THOUGHT_ENTRIES = [
         "priority": 22,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "zone_switch"),
+        "required_tutorial": "zone_switch",
     },
     {
         "id": "learn_decor_place",
@@ -1040,6 +1009,7 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "decor_place"),
         "required_map": "decor",
+        "required_tutorial": "decor_place",
     },
     {
         "id": "learn_prosperity",
@@ -1047,6 +1017,7 @@ THOUGHT_ENTRIES = [
         "priority": 24,
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "prosperity") and state.get("prosperity_score", 0) > 0,
+        "required_tutorial": "prosperity",
     },
     {
         "id": "learn_farm_level",
@@ -1054,6 +1025,7 @@ THOUGHT_ENTRIES = [
         "priority": 24,
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "farm_level") and state.get("farm_level", 1) >= 2,
+        "required_tutorial": "farm_level",
     },
     {
         "id": "learn_carrot",
@@ -1063,6 +1035,7 @@ THOUGHT_ENTRIES = [
         "condition": lambda state, ctx: (
             not _learned(state, "carrot") and state.get("farm_level", 1) >= 2 and ctx["shop_open"]
         ),
+        "required_tutorial": "carrot",
     },
     {
         "id": "learn_pumpkin",
@@ -1072,6 +1045,7 @@ THOUGHT_ENTRIES = [
         "condition": lambda state, ctx: (
             not _learned(state, "pumpkin") and state.get("farm_level", 1) >= 3 and ctx["shop_open"]
         ),
+        "required_tutorial": "pumpkin",
     },
     {
         "id": "learn_advanced_defense",
@@ -1080,6 +1054,7 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "advanced_defense") and state.get("day_count", 1) >= 5,
         "required_phase": "day",
+        "required_tutorial": "advanced_defense",
     },
 
     # -----------------------------------------------------------------
@@ -1137,7 +1112,7 @@ THOUGHT_ENTRIES = [
         "text": "這隻狗會主動攻擊靠近的敵人。",
         "priority": 31,
         "trigger": "hover",
-        "condition": lambda state, ctx: _hovering_entity(state, ctx, "dogs"),
+        "condition": lambda state, ctx: _hovering_entity(state, ctx, "dogs", radius=15),
     },
     {
         "id": "info_stone_path_nearby",

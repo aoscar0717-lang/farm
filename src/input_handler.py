@@ -5,11 +5,61 @@ from src.tutorial import note_event
 from src import ui_layout
 
 
+def _shop_page(state, active_tab):
+    """Reads the current (already-clamped) page for `active_tab` out of
+    state["shop_page"] -- a plain dict field on state, same convention as
+    state["debug_show_grid"]/state["debug_scale_idx"] (a UI cursor that
+    doesn't need capstone_contract.py's new_game()/apply_action() to know
+    about it, just like current_tool/shop_open/active_tab already don't
+    live in state at all). Not itself a geometry decision -- ui_layout.py
+    still owns SHOP_ITEMS_PER_PAGE/shop_clamp_page/shop_page_key."""
+    return state.get("shop_page", {}).get(ui_layout.shop_page_key(active_tab), 0)
+
+
+def _set_shop_page(state, active_tab, page, item_count):
+    pages = state.setdefault("shop_page", {})
+    pages[ui_layout.shop_page_key(active_tab)] = ui_layout.shop_clamp_page(page, item_count)
+
+
+def _handle_shop_pagination_click(state, mx, my, active_tab, item_count):
+    """True if (mx, my) hit the Prev/Next bar -- and if so, already
+    advanced/retreated state["shop_page"] for the current tab."""
+    rects = ui_layout.shop_pagination_rects()
+    page = _shop_page(state, active_tab)
+    total_pages = ui_layout.shop_page_count(item_count)
+    if rects["prev"].collidepoint(mx, my) and page > 0:
+        _set_shop_page(state, active_tab, page - 1, item_count)
+        return True
+    if rects["next"].collidepoint(mx, my) and page < total_pages - 1:
+        _set_shop_page(state, active_tab, page + 1, item_count)
+        return True
+    # Still swallow clicks anywhere on the pagination bar even when the
+    # button is disabled (first/last page) -- a click on a greyed-out
+    # "上一頁" shouldn't fall through and buy whatever card happens to
+    # occupy that same screen real estate on some other tab's layout.
+    return rects["prev"].collidepoint(mx, my) or rects["next"].collidepoint(mx, my)
+
+
+def _handle_shop_wheel(state, button, active_tab):
+    """Mouse wheel while the shop is open pages the currently visible
+    tab/sell list -- button 4 = scroll up = previous page, button 5 =
+    scroll down = next page (pygame's classic wheel-as-button convention;
+    main.py already forwards every MOUSEBUTTONDOWN, wheel included, to
+    handle_mouse_click without filtering by button number)."""
+    if active_tab == "sell":
+        item_count = len(ui_layout.build_sellable_list(state, CROP_INFO))
+    else:
+        item_count = len(ui_layout.SHOP_ITEM_IDS.get(active_tab, []))
+    delta = -1 if button == 4 else 1
+    _set_shop_page(state, active_tab, _shop_page(state, active_tab) + delta, item_count)
+    return state
+
+
 def _handle_shop_click(state, mx, my, shop_open, active_tab, current_tool):
     """Everything that can happen from a left-click while the shop is open:
-    closing it, switching buy/sell or seed/def/pet tabs, buying an item, or
-    selling one. Returns the (possibly) updated (state, current_tool,
-    shop_open, active_tab)."""
+    closing it, switching buy/sell or seed/def/pet tabs, paging, buying an
+    item, or selling one. Returns the (possibly) updated (state,
+    current_tool, shop_open, active_tab)."""
     geo = ui_layout.shop_page_geometry()
     shop_rect = geo["shop_rect"]
     left_page_x = geo["left_page_x"]
@@ -33,8 +83,18 @@ def _handle_shop_click(state, mx, my, shop_open, active_tab, current_tool):
         elif subtabs["pet"].collidepoint(mx, my): active_tab = "pet"
         else:
             ids = ui_layout.SHOP_ITEM_IDS.get(active_tab, [])
-            left_ids = ids[:(len(ids)+1)//2]
-            right_ids = ids[(len(ids)+1)//2:]
+            if _handle_shop_pagination_click(state, mx, my, active_tab, len(ids)):
+                return state, current_tool, shop_open, active_tab
+
+            # Only the current PAGE's ids get hit-tested -- this is what
+            # actually fixes the original overflow bug's other half: cards
+            # that would have drawn past the panel background used to
+            # still be clickable (they had real, if off-panel, Rects), and
+            # now they simply aren't laid out at all until the player pages
+            # to them.
+            page_ids = ui_layout.shop_page_slice(ids, _shop_page(state, active_tab))
+            left_ids = page_ids[:(len(page_ids)+1)//2]
+            right_ids = page_ids[(len(page_ids)+1)//2:]
 
             clicked = False
             for col_ids, column in [(left_ids, "left"), (right_ids, "right")]:
@@ -57,8 +117,12 @@ def _handle_shop_click(state, mx, my, shop_open, active_tab, current_tool):
                 if clicked: break
     else:
         sellable = ui_layout.build_sellable_list(state, CROP_INFO)
-        left_items = sellable[:6]
-        right_items = sellable[6:12]
+        if _handle_shop_pagination_click(state, mx, my, "sell", len(sellable)):
+            return state, current_tool, shop_open, active_tab
+
+        page_items = ui_layout.shop_page_slice(sellable, _shop_page(state, "sell"))
+        left_items = page_items[:(len(page_items)+1)//2]
+        right_items = page_items[(len(page_items)+1)//2:]
 
         clicked = False
         for col_items, column in [(left_items, "left"), (right_items, "right")]:
@@ -152,13 +216,11 @@ def _handle_world_click(state, mx, my, current_tool, camera_x, camera_y, active_
             state = apply_action(state, f"build_fence_{gx}_{gy}", active_zone)
         elif current_tool == "trap":
             state = apply_action(state, f"place_trap_{gx}_{gy}", active_zone)
-        elif current_tool in ["dog", "cat", "goose", "sheep", "bull", "owl"]:
-            state = apply_action(state, f"place_{current_tool}_{gx}_{gy}", active_zone)
+        elif current_tool == "dog":
+            state = apply_action(state, f"place_dog_{gx}_{gy}", active_zone)
     else:
-        gx = world_x / CELL_SIZE
-        gy = world_y / CELL_SIZE
+        gx, gy = world_x, world_y
         state = apply_action(state, f"click_{gx}_{gy}", active_zone)
-
 
     return state
 
@@ -170,6 +232,18 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
     dispatch order between them -- mechanical extraction, same behavior."""
     if is_terminal(state):
         return state, current_tool, shop_open, active_tab, active_zone
+
+    # Mouse wheel (pygame's classic wheel-as-button convention: button 4 =
+    # up, 5 = down) pages the shop's current tab/sell list -- checked
+    # before the generic "button != 1 -> ignore" fallthrough below, which
+    # would otherwise swallow it the same way it already swallows every
+    # other non-left/right button.
+    if shop_open and event.button in (4, 5):
+        state = _handle_shop_wheel(state, event.button, active_tab)
+        return state, current_tool, shop_open, active_tab, active_zone
+
+    if event.button == 3:  # Right click to cancel tool
+        return state, None, shop_open, active_tab, active_zone
 
     if event.button != 1:
         return state, current_tool, shop_open, active_tab, active_zone
@@ -184,6 +258,14 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
     if hotbar_handled:
         return state, current_tool, shop_open, active_tab, active_zone
 
+    # The Tutorial Sidebar (src/ui.py::draw_tutorial_sidebar) sits on top of
+    # the right edge of the world -- without this check, a click meant to
+    # land on the sidebar panel would fall through to _handle_world_click
+    # and use whatever tool is equipped on the world tile underneath it
+    # (section 一's explicit "側欄區域不可讓滑鼠點擊穿透到世界" requirement).
+    # The sidebar itself has no interactive elements yet, so "handled" here
+    # just means "swallowed, do nothing" -- same shape as hotbar padding
+    # clicks above.
     if ui_layout.tutorial_sidebar_rect().collidepoint(mx, my):
         return state, current_tool, shop_open, active_tab, active_zone
 
@@ -193,7 +275,6 @@ def handle_mouse_click(state, event, current_tool, shop_open, active_tab, camera
 
     state = _handle_world_click(state, mx, my, current_tool, camera_x, camera_y, active_zone)
     return state, current_tool, shop_open, active_tab, active_zone
-
 
 
 def handle_keyboard_events(state, event, current_tool, shop_open, active_zone):

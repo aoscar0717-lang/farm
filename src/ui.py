@@ -92,19 +92,23 @@ def _draw_top_panel_stats(screen, state, active_zone):
     text_surf = font_large.render(phase_text, True, text_color)
     screen.blit(text_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_PRIMARY_Y))
 
-    # ── SECONDARY: zone defender count ─────────────────────────────────────────
-    zone_data = state.get(active_zone, {})
-    total_defenders = len(zone_data.get('dogs', [])) + len(zone_data.get('cats', [])) + len(zone_data.get('geese', [])) + len(zone_data.get('sheeps', [])) + len(zone_data.get('bulls', [])) + len(zone_data.get('owls', []))
-    dog_stats = f"守護動物 ({'農田區' if active_zone == 'farm' else '佈置區'}): {total_defenders}/15"
+    # ── SECONDARY: zone dog count ─────────────────────────────────────────
+    # The one stat actually worth checking during play (how well-guarded
+    # is the zone I'm looking at), so it keeps its own line and a brighter
+    # color instead of being buried mid-string among lifetime totals.
+    zone_dogs = len(state.get(active_zone, {}).get('dogs', []))
+    dog_stats = f"狗 ({'農田區' if active_zone == 'farm' else '佈置區'}): {zone_dogs}/10"
     dog_surf = font_small.render(dog_stats, True, ui_layout.COLOR_STAT_SECONDARY)
     screen.blit(dog_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_SECONDARY_Y))
 
     # ── TERTIARY: prosperity / farm level / lifetime totals ────────────────
+    # Low-emphasis background info -- there's no rent/Game Over anymore, so
+    # "累積擊退敵人數" is one of the long-run numbers that keeps climbing
+    # across an endless run instead of resetting; it doesn't need PRIMARY
+    # or SECONDARY visual weight to be useful.
     lifetime_stats = f"繁榮度: {state.get('prosperity_score',0)}   農場等級: Lv{state.get('farm_level',1)}   累積擊退敵人: {state.get('enemies_defeated',0)}"
     lifetime_surf = font_tiny.render(lifetime_stats, True, ui_layout.COLOR_STAT_TERTIARY)
     screen.blit(lifetime_surf, (ui_layout.TOP_PANEL_TEXT_X, ui_layout.TOP_PANEL_TERTIARY_Y))
-
-
 
     # Money (top-right) -- no more rent, so this is just the current balance.
     # Anchored below the shop button (ui_layout.money_label_pos) instead of
@@ -258,14 +262,8 @@ SHOP_ITEM_DETAILS = {
     # here. Descriptions rewritten to match each item's real behavior
     # instead of a generic placeholder.
     "fence": {"name": "木圍欄", "price": 20, "desc": "HP100，阻擋敵人，受損後被突破"},
-    "trap":  {"name": "捕獸夾", "price": 50, "desc": "敵人踩到觸發，一次性重創"},
-    "dog":   {"name": "看門狗", "price": 200, "desc": "自動巡邏追擊，均衡型守護者"},  # price overridden below when free_dog
-    "cat":   {"name": "招財小貓", "price": 150, "desc": "極速爪擊減速敵人，白天產金幣"},
-    "goose": {"name": "暴躁警戒鵝", "price": 220, "desc": "領地意識極強，憤怒衝撞擊退敵人"},
-    "sheep": {"name": "棉花守護羊", "price": 260, "desc": "10HP羊毛護盾，主動吸引敵人仇恨"},
-    "bull":  {"name": "鐵壁戰鬥牛", "price": 350, "desc": "體型巨大威嚴，巨角挑擊雙倍重傷"},
-    "owl":   {"name": "夜行守護鳥", "price": 280, "desc": "空中高速俯衝，有機會嚇停敵人"},
-
+    "trap":  {"name": "地刺陷阱", "price": 50, "desc": "敵人踩到觸發，一次性"},
+    "dog":   {"name": "看門狗", "price": 200, "desc": "自動攻擊靠近敵人，不會陣亡"},  # price overridden below when free_dog
     "stone_path": {"name": "石板路",   "price": 20,  "desc": "繁榮度 +5"},
     "flower":     {"name": "鮮花盆栽", "price": 50,  "desc": "繁榮度 +15"},
     "bench":      {"name": "木製長椅", "price": 100, "desc": "繁榮度 +35"},
@@ -358,6 +356,34 @@ def _draw_shop_frame(screen, geo, active_tab):
     screen.blit(ts_surf, (tab_sell.centerx - ts_surf.get_width()//2, tab_sell.centery - ts_surf.get_height()//2))
 
 
+def _draw_shop_pagination_bar(screen, state, active_tab, item_count, mouse_pos):
+    """Prev/Next buttons + "第 X / Y 頁" label, only drawn when there's
+    more than one page -- a single-page tab (the common case for most buy
+    sub-tabs) stays exactly as uncluttered as before this feature existed."""
+    total_pages = ui_layout.shop_page_count(item_count)
+    if total_pages <= 1:
+        return
+    page = ui_layout.shop_clamp_page(state.get("shop_page", {}).get(ui_layout.shop_page_key(active_tab), 0), item_count)
+    rects = ui_layout.shop_pagination_rects()
+
+    for key, label, enabled in (
+        ("prev", "< 上一頁", page > 0),
+        ("next", "下一頁 >", page < total_pages - 1),
+    ):
+        rect = rects[key]
+        hovered = enabled and rect.collidepoint(mouse_pos)
+        color = (100, 150, 255) if enabled else (200, 200, 200)
+        if hovered:
+            color = (140, 180, 255)
+        pygame.draw.rect(screen, color, rect, border_radius=8)
+        txt = font_tiny.render(label, True, WHITE if enabled else (150, 150, 150))
+        screen.blit(txt, (rect.centerx - txt.get_width() // 2, rect.centery - txt.get_height() // 2))
+
+    label_surf = font_tiny.render(f"第 {page + 1} / {total_pages} 頁", True, BLACK)
+    lx, ly = rects["label_center"]
+    screen.blit(label_surf, (lx - label_surf.get_width() // 2, ly - label_surf.get_height() // 2))
+
+
 def _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo):
     subtab_rects = ui_layout.shop_subtab_rects()
     for tab_id in ui_layout.SHOP_TABS:
@@ -368,8 +394,10 @@ def _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo):
         screen.blit(txt, (tab_rect.centerx - txt.get_width()//2, tab_rect.centery - txt.get_height()//2))
 
     ids = ui_layout.SHOP_ITEM_IDS.get(active_tab, [])
-    left_ids  = ids[:(len(ids)+1)//2]
-    right_ids = ids[(len(ids)+1)//2:]
+    page = state.get("shop_page", {}).get(ui_layout.shop_page_key(active_tab), 0)
+    page_ids = ui_layout.shop_page_slice(ids, page)
+    left_ids  = page_ids[:(len(page_ids)+1)//2]
+    right_ids = page_ids[(len(page_ids)+1)//2:]
 
     for column, col_ids in [("left", left_ids), ("right", right_ids)]:
         rects = ui_layout.shop_column_rects(len(col_ids), is_sell=False, column=column)
@@ -380,6 +408,8 @@ def _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo):
             price_color = (200, 30, 30) if price != "FREE" else (50, 220, 50)
             hovered = card_rect.collidepoint(mouse_pos)
             _draw_shop_card(screen, card_rect, item_id, details["name"], details["desc"], price_display, price_color, hovered)
+
+    _draw_shop_pagination_bar(screen, state, active_tab, len(ids), mouse_pos)
 
 
 def _draw_shop_sell_tab(screen, state, mouse_pos, geo):
@@ -392,10 +422,9 @@ def _draw_shop_sell_tab(screen, state, mouse_pos, geo):
         screen.blit(empty_surf, (left_page_x + page_w // 2 - empty_surf.get_width() // 2, shop_y + 300))
         return
 
-    # Sell page is a fixed 6-per-column, 12-item cap (no scrolling) --
-    # this slicing (not a 50/50 split like the buy page) matches what
-    # shop_column_rects' "sell" column-start heights are laid out for.
-    left_items, right_items = sellable[:6], sellable[6:12]
+    page = state.get("shop_page", {}).get(ui_layout.shop_page_key("sell"), 0)
+    page_items = ui_layout.shop_page_slice(sellable, page)
+    left_items, right_items = page_items[:(len(page_items)+1)//2], page_items[(len(page_items)+1)//2:]
 
     for column, col_items in [("left", left_items), ("right", right_items)]:
         rects = ui_layout.shop_column_rects(len(col_items), is_sell=True, column=column)
@@ -407,6 +436,8 @@ def _draw_shop_sell_tab(screen, state, mouse_pos, geo):
                 screen, card_rect, item["id"], f"{item['name']} x{item['count']}", "點擊賣出 1 個",
                 f"+${item['price']}", (50, 205, 50), hovered,
             )
+
+    _draw_shop_pagination_bar(screen, state, "sell", len(sellable), mouse_pos)
 
 
 def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
@@ -423,7 +454,6 @@ def draw_shop(screen, state, shop_open, active_tab, mouse_pos):
         _draw_shop_sell_tab(screen, state, mouse_pos, geo)
     else:
         _draw_shop_buy_tab(screen, state, active_tab, mouse_pos, geo)
-
 
 
 def _wrap_line_to_width(text, max_width):
