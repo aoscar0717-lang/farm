@@ -205,8 +205,9 @@ class GameState:
 
     def _check_recipe_shortfall(self, requirements: Dict[str, int]) -> List[str]:
         """回傳每一項數量不足的物品描述（例如「小麥 還差 2 個」）的
-        列表；全部足夠時回傳空列表。訂單交付 (fulfill_order) 跟建築
-        投料 (interact_building) 共用同一份檢查邏輯，不用各寫一份。"""
+        列表；全部足夠時回傳空列表。訂單交付 (fulfill_order)、建築開關
+        (toggle_building) 跟自動投料 (_update_buildings) 共用同一份檢查
+        邏輯，不用各寫一份。"""
         missing = []
         for item_key, need_qty in requirements.items():
             have_qty = self._get_item_count(item_key)
@@ -367,14 +368,27 @@ class GameState:
         )
         return True, f"{config['name']} 建造成功！"
 
-    def interact_building(self, x: int, y: int) -> Tuple[bool, str]:
-        """玩家點擊地圖上的機台格子時呼叫，對應需求裡的狀況 A/B/C：
-        A. 閒置中：檢查配方原料是否足夠，足夠就扣除原料、開始運作
-           （對應 Building.start_processing()）。
-        B. 運作中：忽略，回傳失敗訊息（不會噴例外，UI 層可以直接把
-           回傳的 msg 拿去跳浮動文字）。
-        C. 已完成 (ready_to_collect)：把產出加進 self.inventory，機台
-           重置回閒置狀態（Building.collect()）。"""
+    def toggle_building(self, x: int, y: int) -> Tuple[bool, str]:
+        """Phase 3：玩家點擊機台改成單純「切換開關」，不再是投料/採收
+        兩種手動操作。
+
+        關閉 -> 開啟：呼叫 Building.toggle() 把 is_active 設成 True 之前，
+        先用 _check_recipe_shortfall() 幫玩家「預檢查」一次原料夠不夠——
+        嚴格照使用者的字面規格，這個預檢查其實可以省略（純粹
+        `self.is_active = not self.is_active`，交給下一幀
+        _update_buildings() 的自動投料邏輯去發現原料不足、自動關閉、
+        emit BUILDING_STOPPED），但那樣玩家點下去的當下畫面會先顯示
+        「開啟」一瞬間，下一幀又立刻被系統改回「關閉」，體驗上會有一
+        次觀感閃爍，而且這中間如果原料本來就有但不夠一整輪，玩家會誤
+        以為自己點擊沒生效。這裡選擇「開啟當下立刻檢查、不夠就直接
+        拒絕這次切換」，讓失敗訊息即時、明確，且不會產生開啟-立刻被
+        關閉的閃爍——這是唯一跟字面規格不同的地方，其餘（is_active 的
+        切換本身、「這一輪跑完才停工」的行為）完全照規格實作。
+
+        開啟 -> 關閉：純粹 `Building.toggle()`，不打斷正在跑的這一輪
+        （tick() 只認 is_processing），也不退還已經投入的原料——這是
+        使用者要求的「完成當前這輪再停工」優雅做法，不是「立刻中斷並
+        退還原料」那個選項。"""
         tile = self.get_tile(x, y)
         if not tile or tile.building is None:
             return False, "此處沒有加工機台！"
@@ -382,59 +396,93 @@ class GameState:
         building = tile.building
         config = building.config
 
-        # 狀況 C：優先判斷完成，不管玩家目前選的是什麼工具，點下去就是採收
-        # ——跟「點成熟作物一律直接採收」的既有手感一致。
-        if building.ready_to_collect:
-            output_key = config["output_key"]
-            output_qty = config["output_qty"]
-            if output_key in self.crop_inventory:
-                self.crop_inventory[output_key] = self.crop_inventory.get(output_key, 0) + output_qty
-            else:
-                self.inventory[output_key] = self.inventory.get(output_key, 0) + output_qty
-            building.collect()
-
+        if not building.is_active:
+            # 準備開啟：閒置中才需要預檢查原料（如果這一輪其實還在跑，
+            # 例如玩家先關閉又立刻反悔重新打開，直接放行，讓它自然接
+            # 續 tick() 倒數，不用重新檢查/重新扣一次原料）。
+            if not building.is_processing:
+                missing = self._check_recipe_shortfall(config["recipe"])
+                if missing:
+                    return False, f"原料不足，無法啟動 {config['name']}！（{'、'.join(missing)}）"
+            building.toggle()
             self._emit_event(
-                EventType.BUILDING_COLLECTED,
-                f"📦 {config['name']} 完成！獲得 {output_qty} 個 {self._item_display_name(output_key)}。",
-                {"x": x, "y": y, "building_type": building.building_type.value,
-                 "output_key": output_key, "output_qty": output_qty}
+                EventType.BUILDING_TOGGLED,
+                f"🟢 {config['name']} 已開啟自動運作！",
+                {"x": x, "y": y, "building_type": building.building_type.value, "is_active": True}
             )
-            return True, f"獲得 {output_qty} 個 {self._item_display_name(output_key)}！"
-
-        # 狀況 B：運作中，忽略
-        if building.is_processing:
-            return False, f"{config['name']} 運作中，還要等 {building.processing_time_left:.1f} 秒！"
-
-        # 狀況 A：閒置中，檢查配方原料並開始運作
-        recipe = config["recipe"]
-        missing = self._check_recipe_shortfall(recipe)
-        if missing:
-            return False, f"原料不足，無法啟動 {config['name']}！（{'、'.join(missing)}）"
-
-        for item_key, need_qty in recipe.items():
-            self._consume_item(item_key, need_qty)
-        building.start_processing()
-
-        self._emit_event(
-            EventType.BUILDING_STARTED,
-            f"⚙️ {config['name']} 開始運作，預計 {config['process_time']:.0f} 秒後完成。",
-            {"x": x, "y": y, "building_type": building.building_type.value}
-        )
-        return True, f"{config['name']} 開始運作！"
+            return True, f"{config['name']} 已開啟！"
+        else:
+            building.toggle()
+            if building.is_processing:
+                self._emit_event(
+                    EventType.BUILDING_TOGGLED,
+                    f"🟡 {config['name']} 將在這一輪運作完成後停工。",
+                    {"x": x, "y": y, "building_type": building.building_type.value, "is_active": False}
+                )
+                return True, f"{config['name']} 將在這一輪結束後停工。"
+            else:
+                self._emit_event(
+                    EventType.BUILDING_TOGGLED,
+                    f"🔴 {config['name']} 已關閉。",
+                    {"x": x, "y": y, "building_type": building.building_type.value, "is_active": False}
+                )
+                return True, f"{config['name']} 已關閉。"
 
     def _update_buildings(self, dt: float) -> None:
-        """每幀扣減所有正在運作的機台的 processing_time_left；時間歸零
-        的那一幀（Building.tick() 回傳 True）才 emit 一次完成事件，不會
-        每幀重複送。跟作物生長 (_update_crops_growth) 一樣，日夜都會
-        持續運作——機台不是防禦設施，沒有「只在晚上生效」的理由。"""
+        """Phase 3 自動化循環：每幀對每座機台做兩件事，順序不能反：
+
+        1. 如果正在運作 (is_processing)，呼叫 Building.tick(dt) 扣減
+           倒數計時；剛好倒數完成的那一幀，直接把產出物加進玩家背包
+           （crop_inventory 或 inventory，用 key 是否存在於 crop_inventory
+           判斷該寫哪邊——這兩個系統的物品命名空間互斥不重複，Phase 1
+           就已經是這樣設計）並 emit BUILDING_COLLECTED，不用等玩家
+           點擊採收。
+
+        2. 接著（故意不用 elif）：如果 is_active 為 True 且現在沒有在
+           運作中（可能是本來就閒置，也可能是上一步剛跑完一輪），嘗試
+           自動投料開始下一輪——原料夠就扣除、開始計時；原料不夠就把
+           is_active 強制設回 False 並 emit BUILDING_STOPPED 提示玩家。
+           這個「不用 elif」是刻意的：同一幀「跑完一輪」後緊接著判斷
+           能不能開始下一輪，玩家觀感上就是完全連續自動運作，不會因為
+           一幀的時間差而看起來卡了一下，也不會漏判。
+        """
         for building in self.buildings:
-            if building.tick(dt):
-                config = building.config
-                self._emit_event(
-                    EventType.BUILDING_READY,
-                    f"✨ {config['name']} 已經完成，可以點擊採收 {self._item_display_name(config['output_key'])}！",
-                    {"x": building.x, "y": building.y, "building_type": building.building_type.value}
-                )
+            config = building.config
+
+            if building.is_processing:
+                if building.tick(dt):
+                    output_key = config["output_key"]
+                    output_qty = config["output_qty"]
+                    if output_key in self.crop_inventory:
+                        self.crop_inventory[output_key] = self.crop_inventory.get(output_key, 0) + output_qty
+                    else:
+                        self.inventory[output_key] = self.inventory.get(output_key, 0) + output_qty
+                    self._emit_event(
+                        EventType.BUILDING_COLLECTED,
+                        f"📦 {config['name']} 自動產出 {output_qty} 個 {self._item_display_name(output_key)}！",
+                        {"x": building.x, "y": building.y, "building_type": building.building_type.value,
+                         "output_key": output_key, "output_qty": output_qty}
+                    )
+
+            if building.is_active and not building.is_processing:
+                recipe = config["recipe"]
+                missing = self._check_recipe_shortfall(recipe)
+                if missing:
+                    building.is_active = False
+                    self._emit_event(
+                        EventType.BUILDING_STOPPED,
+                        f"⏸️ {config['name']} 原料不足，已自動關閉！（{'、'.join(missing)}）",
+                        {"x": building.x, "y": building.y, "building_type": building.building_type.value}
+                    )
+                else:
+                    for item_key, need_qty in recipe.items():
+                        self._consume_item(item_key, need_qty)
+                    building.start_processing()
+                    self._emit_event(
+                        EventType.BUILDING_STARTED,
+                        f"⚙️ {config['name']} 開始運作，預計 {config['process_time']:.0f} 秒後完成。",
+                        {"x": building.x, "y": building.y, "building_type": building.building_type.value}
+                    )
 
     # =========================================================================
     # 玩家操作行為 API

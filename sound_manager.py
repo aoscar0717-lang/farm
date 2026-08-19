@@ -187,9 +187,23 @@ class SoundManager:
         elif t == EventType.BUILDING_STARTED:
             self.play("build")
         elif t == EventType.BUILDING_READY:
+            # Phase 3 開始，這個事件已經不會再被 emit（機台改成開關式自動
+            # 化，完成的當下直接自動採收，沒有「等待手動採收」這個中間
+            # 狀態了），這個分支留著純粹是防呆，避免萬一有舊程式碼還在
+            # emit 這個 enum 值時噴例外。
             self.play("water")
         elif t == EventType.BUILDING_COLLECTED:
             self.play("harvest")
+        elif t == EventType.BUILDING_TOGGLED:
+            # 玩家手動點擊切換開關，用跟其他 UI 操作一致、比較輕的
+            # "ui_click"，跟「build」（放置/開始運作）的聲音區分開，避免
+            # 玩家頻繁開關時聽起來太吵或太重。
+            self.play("ui_click")
+        elif t == EventType.BUILDING_STOPPED:
+            # 系統因為原料不足自動關閉機台，屬於「非玩家主動」的意外停
+            # 機，用 "error" 給一點警示感，跟玩家自己點擊關閉（ui_click）
+            # 的音效區分開。
+            self.play("error")
         elif t == EventType.CROP_STOLEN:
             self.play("stolen")
         elif t == EventType.DAY_STARTED:

@@ -1157,25 +1157,27 @@ class NightwatchFarmApp:
                 return
 
         # 1b. 若點擊格子上有「加工機台」，同樣無論目前選了什麼工具，一律
-        # 直接跟機台互動（啟動運作 / 採收成品 / 運作中提示），不用先切到
-        # 某個特定工具才能操作已經蓋好的機台——跟上面「成熟作物優先直接
-        # 採收」是同一種手感。crop 跟 building 不會同時存在同一格
-        # (Tile.is_empty 的定義)，兩個判斷不會互相搶著處理同一格。
+        # 直接跟機台互動，不用先切到某個特定工具才能操作已經蓋好的機台
+        # ——跟上面「成熟作物優先直接採收」是同一種手感。crop 跟 building
+        # 不會同時存在同一格 (Tile.is_empty 的定義)，兩個判斷不會互相搶著
+        # 處理同一格。
+        # Phase 3：點擊不再是「投料/採收」兩種手動操作，而是單純「切換
+        # 開關」——toggle_building() 內部會處理開啟時的原料預檢查。
         if self.hovered_grid:
             gx, gy = self.hovered_grid
             tile = self.game.get_tile(gx, gy)
             if tile and tile.building is not None:
-                success, msg = self.game.interact_building(gx, gy)
+                success, msg = self.game.toggle_building(gx, gy)
                 if not success:
                     px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
                     py = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
                     self.log_messages.append(f"⚙️ {msg}")
                     self.floating_texts.append(FloatingText(f"❌ {msg}", px - 60, py - 12, C_RED))
                     self.sound.play("error")
-                # 成功（啟動運作 / 採收成品）的音效跟浮動文字交給
-                # BUILDING_STARTED / BUILDING_COLLECTED 事件在
-                # _process_events() 裡統一處理，這裡不重複播，跟訂單
-                # 交付、採收成功是同一套既有模式。
+                # 成功切換開/關的音效跟浮動文字交給 BUILDING_TOGGLED /
+                # BUILDING_STARTED / BUILDING_COLLECTED / BUILDING_STOPPED
+                # 事件在 _process_events() 裡統一處理，這裡不重複播，跟
+                # 訂單交付、採收成功是同一套既有模式。
                 return
 
         # 2. 第二優先權：主動戰術工具 (指揮哨；手電筒的夜晚情境已在最上面
@@ -1424,14 +1426,36 @@ class NightwatchFarmApp:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
                 self.floating_texts.append(FloatingText("⚙️ 開始運作...", px - 35, py - 14, (200, 190, 178)))
-            elif ev.event_type == EventType.BUILDING_READY:
-                # 被動完成通知（玩家不用點什麼就會觸發）：機台上方已經有
-                # _render_building_tile() 畫的跳動「❗」了，這裡再補一條
-                # 浮動文字加強提醒，音效交給 sound_manager 統一映射播放。
+            # 注意：EventType.BUILDING_READY（Phase 2 的「完成待手動採收」
+            # 通知）在 Phase 3 已經不會再被 emit——機台改成開關式自動化，
+            # 完成的當下直接自動採收、併進 BUILDING_COLLECTED，不再有
+            # 「等待玩家點擊採收」這個中間狀態，所以這裡原本對應的 elif
+            # 分支已經移除（原本會畫一條「✨ 可以採收了！」浮動文字，現在
+            # 用不到了）。
+            elif ev.event_type == EventType.BUILDING_TOGGLED:
+                # 玩家手動點擊切換開關的即時回饋。ev.data["is_active"] 是
+                # 切換後的新狀態；「關閉但這一輪還在跑」跟「已經完全關閉」
+                # 在 toggle_building() 回傳的 msg 裡文字不同，但事件資料本身
+                # 只帶 is_active，這裡用顏色區分開/關即可，細節文字已經在
+                # 點擊當下由 toggle_building() 的回傳值決定（未來如需要更
+                # 精細的「本輪結束後停工」提示，可以在 event data 裡加一個
+                # will_finish_current_round 欄位，目前先用最簡單的開/關
+                # 二元呈現）。
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
-                self.floating_texts.append(FloatingText("✨ 可以採收了！", px - 40, py - 14, C_TECH_GREEN))
-                self._spawn_particles(px, py, C_TECH_GREEN, count=10)
+                if ev.data.get("is_active"):
+                    self.floating_texts.append(FloatingText("🟢 已開啟", px - 25, py - 14, C_TECH_GREEN))
+                    self._spawn_particles(px, py, C_TECH_GREEN, count=6)
+                else:
+                    self.floating_texts.append(FloatingText("🔴 已關閉", px - 25, py - 14, (200, 120, 110)))
+            elif ev.event_type == EventType.BUILDING_STOPPED:
+                # 被動通知：機台因為原料不足被系統自動關閉（不是玩家手動
+                # 點擊），用偏警告色的紅字提醒，跟上面玩家主動關閉的
+                # 「🔴 已關閉」文字內容不同，讓玩家一眼看出這次是「原料
+                # 用完了」而不是自己點的。
+                px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_Y + ev.data["y"] * CELL_SIZE
+                self.floating_texts.append(FloatingText("⏸️ 原料不足，已自動停工", px - 55, py - 14, C_RED))
             elif ev.event_type == EventType.BUILDING_COLLECTED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
@@ -2174,11 +2198,16 @@ class NightwatchFarmApp:
         self.screen.blit(overlay, (GRID_X, GRID_Y))
 
     def _render_building_tile(self, building, px: int, py: int):
-        """畫一座加工機台（烤箱/熔爐），含運作中的進度條跟完成待採收的
-        跳動提示圖示。asset_loader 目前沒有載入 "oven"/"furnace" 這兩個
-        asset_key（assets/ 底下還沒有對應圖片），所以一律會走 else 分支
-        的退回色塊 + 圖示文字，等以後真的放圖片進去，loader.get() 就會
-        自動抓到、不用改這裡的邏輯（跟專案其他地方的貼圖後備模式一致）。
+        """畫一座加工機台（烤箱/熔爐）。Phase 3 改成開關式自動化後，機台
+        不再有「完成待手動採收」這個中間狀態（ready_to_collect 已經從
+        Building 移除），所以這裡不再畫跳動的驚嘆號；取而代之的是一個
+        明確的 ON/OFF 小圓點指示燈（右上角，開=科技綠、關=暗紅），讓玩家
+        一眼看出這座機台目前是否處於自動運作中，運作中的倒數進度用既有
+        的小進度條表示（Phase 2 就有，這裡保留）。asset_loader 目前沒有
+        載入 "oven"/"furnace" 這兩個 asset_key（assets/ 底下還沒有對應
+        圖片），所以一律會走 else 分支的退回色塊 + 圖示文字，等以後真的
+        放圖片進去，loader.get() 就會自動抓到、不用改這裡的邏輯（跟專案
+        其他地方的貼圖後備模式一致）。
         """
         config = building.config
         asset_key = config.get("asset_key")
@@ -2187,19 +2216,34 @@ class NightwatchFarmApp:
             img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
             self.screen.blit(img, img_rect)
         else:
-            # 貼圖缺失後備：木箱色塊 + 機台圖示文字，運作中時稍微變暗
-            # 表示「正在忙」，完成待採收時改用科技綠外框吸引注意力。
+            # 貼圖缺失後備：木箱色塊 + 機台圖示文字。這裡的明暗改成看
+            # is_active 而不是 is_processing——一座「開啟中」的機台在
+            # 兩輪配方之間會有短暫一幀 is_processing=False（剛收完、還沒
+            # 開始下一輪），如果明暗跟著 is_processing 走，畫面會在這一幀
+            # 閃一下「變亮」再馬上變暗，看起來像故障；改用 is_active 判斷
+            # 就只有玩家真的關閉開關時才會變暗，運作循環中间的過渡幀
+            # 看起來完全連續，不會閃爍。
             body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
-            base_col = (94, 66, 50) if not building.is_processing else (70, 50, 38)
+            base_col = (94, 66, 50) if building.is_active else (55, 48, 44)
             draw_beveled_rect(self.screen, body_rect, base_col, border_radius=6, depth=2,
                                pressed=building.is_processing)
             icon = "🔥" if building.building_type == BuildingType.FURNACE else "🍞"
             icon_surf = FONT_MD.render(icon, True, C_TEXT_ON_DARK)
             self.screen.blit(icon_surf, icon_surf.get_rect(center=body_rect.center))
-            if building.ready_to_collect:
-                pygame.draw.rect(self.screen, C_TECH_GREEN, body_rect, width=2, border_radius=6)
 
-        # 運作中：機台上方畫一條小小的進度條。
+        # ON/OFF 指示燈：機台右上角一個小圓點，開=科技綠、關=暗紅，
+        # 開啟時再疊一圈淡淡的光暈表示「自動運作中」。
+        dot_center = (px + CELL_SIZE - 12, py + 10)
+        if building.is_active:
+            pygame.draw.circle(self.screen, (30, 60, 40), dot_center, 7)
+            glow_r = 6 + int(math.sin(self.anim_time * 5.0) * 1.5)
+            pygame.draw.circle(self.screen, C_TECH_GREEN, dot_center, max(3, glow_r))
+        else:
+            pygame.draw.circle(self.screen, (40, 20, 18), dot_center, 7)
+            pygame.draw.circle(self.screen, (200, 70, 60), dot_center, 5)
+
+        # 運作中：機台上方畫一條小小的進度條，這是「運作動畫」的主要
+        # 呈現方式，跟 Phase 2 一樣保留。
         if building.is_processing:
             total = float(config["process_time"])
             ratio = 0.0 if total <= 0 else max(0.0, min(1.0, 1.0 - building.processing_time_left / total))
@@ -2208,15 +2252,6 @@ class NightwatchFarmApp:
             draw_beveled_rect(self.screen, bar_rect, C_WOOD_BEVEL_DARK, border_radius=3, depth=1, pressed=True)
             if ratio > 0:
                 pygame.draw.rect(self.screen, C_TECH_GREEN, (bar_rect.x, bar_rect.y, int(bar_w * ratio), bar_rect.height), border_radius=3)
-
-        # 完成待採收：一個跟著 sin 波跳動的驚嘆號，吸引玩家點擊——跟這個
-        # 專案既有的「懸停高光/範圍預覽」一樣用 self.anim_time 驅動動畫，
-        # 不用另外自己管一個計時器。
-        if building.ready_to_collect:
-            bounce = int(math.sin(self.anim_time * 6.0) * 4)
-            mark_surf = FONT_LG.render("❗", True, C_TECH_GREEN)
-            mark_pos = mark_surf.get_rect(center=(px + CELL_SIZE // 2, py - 6 + bounce))
-            self.screen.blit(mark_surf, mark_pos)
 
     def _render_entities(self):
         if self.game.guard_dog:

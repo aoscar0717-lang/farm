@@ -141,8 +141,14 @@ class EventType(Enum):
 
     BUILDING_PLACED = "BUILDING_PLACED"
     BUILDING_STARTED = "BUILDING_STARTED"
-    BUILDING_READY = "BUILDING_READY"
     BUILDING_COLLECTED = "BUILDING_COLLECTED"
+    # Phase 3：開關式自動化新增的事件。BUILDING_READY（Phase 2 的「完成
+    # 待手動採收」通知）已經不會再被 emit——完成的當下直接自動採收，
+    # 併進 BUILDING_COLLECTED 裡了，但列舉值本身保留不刪，避免任何
+    # 還沒重新載入的舊程式碼/測試對到不存在的 enum 成員而噴例外。
+    BUILDING_READY = "BUILDING_READY"
+    BUILDING_TOGGLED = "BUILDING_TOGGLED"
+    BUILDING_STOPPED = "BUILDING_STOPPED"
 
     GAME_OVER = "GAME_OVER"
 
@@ -688,13 +694,26 @@ class Building:
     採用「tile.building 反向參照 + self.buildings 陣列直接持有」雙軌
     並存的寫法：擺放/拆除時兩邊要同步增減，這件事全部封裝在
     GameState.place_building()/demolish_tile() 裡，UI 層跟其他呼叫端
-    不用自己操心兩邊同步的問題。"""
+    不用自己操心兩邊同步的問題。
+
+    Phase 3 改成「開關式自動化」：is_active 是玩家點擊切換的開關，
+    is_processing 是「這一輪配方是否正在倒數」——兩者刻意分開，這樣
+    「玩家關閉開關時，正在跑的這一輪會自然跑完才真正停工」不需要額外
+    的第三個旗標：tick() 完全不看 is_active，只看 is_processing 決定
+    要不要繼續倒數；is_active 只在「這一輪跑完之後，還要不要自動開始
+    下一輪」這件事上發揮作用，而這個判斷留給 GameState._update_buildings()
+    做（因為要不要開始下一輪，取決於玩家背包夠不夠原料，這件事只有
+    GameState 才查得到，Building 這個資料結構本身不持有、也不該持有
+    inventory 的參照——維持這個專案從 Phase 1 就一路遵守的分工：
+    game_config.py 的資料結構只管自己的狀態機，不碰玩家背包）。
+    已經移除舊版 Phase 2 的 ready_to_collect「等待手動採收」狀態卡點；
+    完成的當下由 GameState._update_buildings() 直接把產出加進背包。"""
     building_type: BuildingType
     x: int
     y: int
-    is_processing: bool = False
+    is_active: bool = False        # 開關：True=自動運作中，False=關閉（預設關閉）
+    is_processing: bool = False    # 目前這一輪配方是否正在倒數
     processing_time_left: float = 0.0
-    ready_to_collect: bool = False
 
     @property
     def config(self) -> dict:
@@ -706,28 +725,32 @@ class Building:
 
     def start_processing(self):
         self.is_processing = True
-        self.ready_to_collect = False
         self.processing_time_left = float(self.config["process_time"])
 
     def tick(self, dt: float) -> bool:
-        """回傳這一幀是否剛好完成（True）。只有真的從「還在跑」變成
-        「跑完了」的那一幀回傳 True，之後即使還沒被玩家點擊採收、
-        ready_to_collect 一直是 True，也不會重複回傳 True，呼叫端
-        (GameState._update_buildings()) 就能安全地只在這一幀 emit 一次
-        「完成」事件，不會每幀狂送重複事件。"""
+        """只管這一輪的倒數計時，完全不碰任何背包邏輯（原料夠不夠、
+        扣原料、把產出加進背包，這些全部留給 GameState._update_buildings()
+        處理，因為只有那裡才拿得到 crop_inventory/inventory）。回傳
+        這一幀是否剛好倒數完成（True）；沒有在跑 (is_processing=False)
+        的時候呼叫，直接回傳 False，不會報錯也不會誤觸發。"""
         if not self.is_processing:
             return False
         self.processing_time_left -= dt
         if self.processing_time_left <= 0.0:
             self.processing_time_left = 0.0
             self.is_processing = False
-            self.ready_to_collect = True
             return True
         return False
 
-    def collect(self) -> None:
-        self.ready_to_collect = False
-        self.processing_time_left = 0.0
+    def toggle(self) -> bool:
+        """切換開關並回傳切換後的新狀態。刻意只改 is_active，完全不去
+        動 is_processing/processing_time_left——如果玩家在機台正在跑的
+        當下點擊關閉，這一輪不會被打斷，會自然跑完（tick() 只認
+        is_processing，不認 is_active），下一幀 _update_buildings() 看到
+        is_active 已經是 False 就不會再啟動下一輪，效果就是「優雅地在
+        這一輪結束後停工」，不用額外的 pending_shutdown 旗標。"""
+        self.is_active = not self.is_active
+        return self.is_active
 
 
 @dataclass
