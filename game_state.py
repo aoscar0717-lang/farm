@@ -6,7 +6,7 @@
 import math
 import random
 import uuid
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Set
 
 from game_config import (
     GamePhase, ZoneType, CropType, CropStage, DecorationType,
@@ -350,20 +350,42 @@ class GameState:
 
         cost_gold = config["build_cost_gold"]
         cost_tech = config["build_cost_tech"]
+        # Phase 4：SPRINKLER/AUTO_HARVESTER 這類自動化科技機台改用背包
+        # 物品 (metal_ingot) 當建造成本，不是單純金幣/科技點數。這裡用
+        # 通用寫法而不是為這兩種機台開專用分支——任何建築只要在
+        # BUILDING_DATA 填了 build_cost_items，都會被這段檢查/扣除，
+        # 沿用跟訂單交付/機台配方投料同一份 _check_recipe_shortfall()/
+        # _consume_item()，物品命名空間跟數量不足的措辭也保持一致。
+        cost_items = config.get("build_cost_items", {})
         if self.gold < cost_gold:
             return False, f"金幣不足！建造 {config['name']} 需要 {cost_gold} 金幣。"
         if self.tech_points < cost_tech:
             return False, f"科技點數不足！建造 {config['name']} 需要 {cost_tech} 科技點數（目前 {self.tech_points} 點）。"
+        if cost_items:
+            missing = self._check_recipe_shortfall(cost_items)
+            if missing:
+                return False, f"材料不足，無法建造 {config['name']}！（{'、'.join(missing)}）"
 
         self.gold -= cost_gold
         self.tech_points -= cost_tech
+        for item_key, need_qty in cost_items.items():
+            self._consume_item(item_key, need_qty)
         building = Building(building_type=building_type, x=x, y=y)
         tile.building = building
         self.buildings.append(building)
 
+        cost_desc_parts = []
+        if cost_gold:
+            cost_desc_parts.append(f"{cost_gold} 金幣")
+        if cost_tech:
+            cost_desc_parts.append(f"{cost_tech} 科技點數")
+        for item_key, need_qty in cost_items.items():
+            cost_desc_parts.append(f"{need_qty} 個{self._item_display_name(item_key)}")
+        cost_desc = "、".join(cost_desc_parts) if cost_desc_parts else "0 成本"
+
         self._emit_event(
             EventType.BUILDING_PLACED,
-            f"🏭 已建造 {config['name']}，花費 {cost_gold} 金幣、{cost_tech} 科技點數。",
+            f"🏭 已建造 {config['name']}，花費 {cost_desc}。",
             {"x": x, "y": y, "building_type": building_type.value, "cost_gold": cost_gold, "cost_tech": cost_tech}
         )
         return True, f"{config['name']} 建造成功！"
@@ -388,13 +410,22 @@ class GameState:
         開啟 -> 關閉：純粹 `Building.toggle()`，不打斷正在跑的這一輪
         （tick() 只認 is_processing），也不退還已經投入的原料——這是
         使用者要求的「完成當前這輪再停工」優雅做法，不是「立刻中斷並
-        退還原料」那個選項。"""
+        退還原料」那個選項。
+
+        Phase 4：SPRINKLER/AUTO_HARVESTER 這類被動機台完全沒有 ON/OFF
+        這個概念——蓋下去就永久生效，玩家點擊它們不應該觸發任何開關
+        切換（is_active 對它們本來就沒有意義，_update_buildings() 也
+        不會去看這個欄位）。這裡直接擋在最前面，用一句清楚的提示回覆，
+        不會誤動到 is_active 或誤發 BUILDING_TOGGLED 事件。"""
         tile = self.get_tile(x, y)
         if not tile or tile.building is None:
             return False, "此處沒有加工機台！"
 
         building = tile.building
         config = building.config
+
+        if building.is_passive:
+            return False, f"{config['name']} 是被動永久生效的自動化科技，蓋下去就會持續運作，無需切換開關！"
 
         if not building.is_active:
             # 準備開啟：閒置中才需要預檢查原料（如果這一輪其實還在跑，
@@ -445,9 +476,51 @@ class GameState:
            這個「不用 elif」是刻意的：同一幀「跑完一輪」後緊接著判斷
            能不能開始下一輪，玩家觀感上就是完全連續自動運作，不會因為
            一幀的時間差而看起來卡了一下，也不會漏判。
+
+        Phase 4：SPRINKLER/AUTO_HARVESTER 這類被動科技機台（config 裡
+        有 "passive_effect"）完全不走上面這套開關-配方-倒數邏輯，一律
+        在迴圈最前面用 continue 跳過，避免它們去讀根本不存在的
+        config["recipe"]/config["output_key"] 而噴 KeyError。
+        - SPRINKLER 的加成邏輯不需要每幀在這裡做任何事：它的效果是
+          GameState._update_crops_growth() 每幀直接掃 self.buildings
+          現算「哪些作物格子在灑水器的 3x3 範圍內」，這裡只需要跳過、
+          不用重複實作一次。
+        - AUTO_HARVESTER 用 Building.scan_timer 累積 dt，每達到
+          config["scan_interval"] 秒（預設 1 秒）才真正掃描一次周圍
+          3x3 找成熟作物並呼叫 self.harvest_crop()——用「累積計時器」
+          而不是每幀掃，是使用者原始需求就明確要求的效能考量。夜晚
+          (GamePhase.NIGHT) 直接跳過整個掃描：harvest_crop() 在夜晚一
+          律回傳失敗，掃了也是白掃，不如直接不掃，省一點運算。
         """
         for building in self.buildings:
             config = building.config
+
+            passive_effect = config.get("passive_effect")
+            if passive_effect == "AUTO_HARVESTER":
+                if self.phase == GamePhase.NIGHT:
+                    continue
+                building.scan_timer += dt
+                interval = config.get("scan_interval", 1.0)
+                if building.scan_timer < interval:
+                    continue
+                building.scan_timer = 0.0
+                radius = config.get("effect_radius", 1)
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        nx, ny = building.x + dx, building.y + dy
+                        ntile = self.get_tile(nx, ny)
+                        if ntile and ntile.crop is not None and ntile.crop.is_mature:
+                            # harvest_crop() 已經會自動把金幣加進 self.gold、
+                            # 把作物記進 self.crop_inventory，並 emit
+                            # CROP_HARVESTED 事件——sound_manager 監聽的
+                            # 就是這個既有事件，所以這裡不用另外播音效，
+                            # 完全複用既有的「事件驅動」UI 回饋管線。
+                            self.harvest_crop(nx, ny)
+                continue
+            elif passive_effect == "SPRINKLER":
+                # 灑水器本身在這裡不用做任何事，加成邏輯在
+                # _update_crops_growth() 裡現算，見上方說明。
+                continue
 
             if building.is_processing:
                 if building.tick(dt):
@@ -786,19 +859,45 @@ class GameState:
         # 「拆除生產中的建築會損失在製品」是一樣的取捨，避免玩家用
         # 「蓋機台consume原料 -> 立刻拆除retrieve金幣」的套利路徑繞過
         # 訂單系統原本要建立的資源消耗。
+        #
+        # Phase 4：SPRINKLER/AUTO_HARVESTER 的建造成本是 build_cost_items
+        # (metal_ingot) 而不是金幣，如果這裡只退金幣、完全不退物品，會
+        # 變成「拆掉灑水器什麼都拿不回來」，跟烤箱/熔爐拆除退 80% 金幣
+        # 的手感不一致，玩家會覺得這兩種新機台特別不划算。這裡一併把
+        # build_cost_items 也照 80% 比例退回背包，維持所有機台「拆除都
+        # 退 80% 建造成本」這個一致的規則，不分成本的形式是金幣還是
+        # 物品。
         if tile.building is not None:
             name = tile.building.config["name"]
-            cost = tile.building.config["build_cost_gold"]
+            config = tile.building.config
+            cost = config["build_cost_gold"]
             refund = int(cost * 0.8)
             self.gold += refund
+
+            item_refund_parts = []
+            for item_key, paid_qty in config.get("build_cost_items", {}).items():
+                item_refund_qty = int(paid_qty * 0.8)
+                if item_refund_qty <= 0:
+                    continue
+                if item_key in self.crop_inventory:
+                    self.crop_inventory[item_key] = self.crop_inventory.get(item_key, 0) + item_refund_qty
+                else:
+                    self.inventory[item_key] = self.inventory.get(item_key, 0) + item_refund_qty
+                item_refund_parts.append(f"{item_refund_qty} 個{self._item_display_name(item_key)}")
+
             self.buildings = [b for b in self.buildings if b is not tile.building]
             tile.building = None
+
+            refund_desc = f"{refund} 金幣"
+            if item_refund_parts:
+                refund_desc += "、" + "、".join(item_refund_parts)
+
             self._emit_event(
                 EventType.TILE_CLEARED,
-                f"🔨 已拆除 ({x}, {y}) 的 {name}，退還 {refund} 金幣！",
+                f"🔨 已拆除 ({x}, {y}) 的 {name}，退還 {refund_desc}！",
                 {"x": x, "y": y, "refund": refund, "gold": self.gold}
             )
-            return True, f"已拆除 {name}，退還 {refund} 金幣！", refund
+            return True, f"已拆除 {name}，退還 {refund_desc}！", refund
 
         return False, "無法剷除此處物品！", 0
 
@@ -1018,11 +1117,43 @@ class GameState:
 
         self.check_game_over()
 
+    def _get_sprinkler_boosted_tiles(self) -> Set[Tuple[int, int]]:
+        """Phase 4：掃一遍 self.buildings 找出所有 SPRINKLER，把它們周圍
+        3x3（effect_radius=1）範圍內的座標全部收進一個 set 回傳，供
+        _update_crops_growth() 查詢「這一格是否在某個灑水器的加成範圍
+        內」。self.buildings 通常只有個位數到十幾個元素，每幀重新算一
+        次而不快取，效能上完全不是問題，也不用煩惱機台被拆除/新增時
+        快取要不要失效的問題。座標超出地圖邊界的部分用 get_tile 的隱含
+        邊界檢查（0 <= x < width）自然濾掉，不會 index error。"""
+        boosted: Set[Tuple[int, int]] = set()
+        for building in self.buildings:
+            if building.building_type != BuildingType.SPRINKLER:
+                continue
+            radius = building.config.get("effect_radius", 1)
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    nx, ny = building.x + dx, building.y + dy
+                    if 0 <= nx < self.width and 0 <= ny < self.height:
+                        boosted.add((nx, ny))
+        return boosted
+
     def _update_crops_growth(self, dt: float):
+        # Phase 4：灑水器加成——在 SPRINKLER 的 3x3 範圍內的作物格子，
+        # 除了原本的 dt，額外再疊加 dt * growth_bonus_dt_mult（目前設
+        # 1.0，等於雙倍生長速度）。用「額外疊加的 dt」而不是直接乘
+        # growth_timer，這樣完全不用改 Crop.update_growth() 的內部計算
+        # 邏輯，呼叫端多送一點 dt 進去就好，作物本身不需要知道自己是不
+        # 是被灑水器加成。
+        boosted_tiles = self._get_sprinkler_boosted_tiles()
+        sprinkler_bonus_mult = BUILDING_DATA[BuildingType.SPRINKLER].get("growth_bonus_dt_mult", 0.0)
+
         for row in self.grid:
             for tile in row:
                 if tile.crop is not None:
-                    new_stage = tile.crop.update_growth(dt)
+                    effective_dt = dt
+                    if (tile.x, tile.y) in boosted_tiles:
+                        effective_dt += dt * sprinkler_bonus_mult
+                    new_stage = tile.crop.update_growth(effective_dt)
                     if new_stage == CropStage.MATURE:
                         self._emit_event(
                             EventType.CROP_MATURED,

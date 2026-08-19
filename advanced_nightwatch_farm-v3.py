@@ -665,7 +665,7 @@ class NightwatchFarmApp:
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
             ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
-            ("DECO", "莊園景觀 (15)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (17)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
@@ -708,6 +708,14 @@ class NightwatchFarmApp:
                 # 上也說得通。
                 ("PLACE_OVEN", "烤箱", "$160+12科技 | 烤小麥→麵包", "oven"),
                 ("PLACE_FURNACE", "熔爐", "$200+18科技 | 煉礦石→鋼錠", "furnace"),
+                # Phase 4：自動化農業科技，一樣沿用同一個 DECO 分頁、同一
+                # 個「四周莊園景觀區」放置規則，理由跟 Phase 2 加烤箱/
+                # 熔爐時一樣——沒有另外開新分頁。花費是 metal_ingot（背包
+                # 物品）而不是金幣，卡片說明文字用「2錠」/「5錠+100科技」
+                # 表示，跟其餘卡片「$金額」的呈現風格有意識地做出區分，
+                # 讓玩家一眼看出這兩張卡「要花的不是錢」。
+                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 周圍3x3雙倍生長", "sprinkler"),
+                ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100科技 | 自動採收3x3", "auto_harvester"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1290,6 +1298,10 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.OVEN)
         elif act == "PLACE_FURNACE":
             success, msg = self.game.place_building(gx, gy, BuildingType.FURNACE)
+        elif act == "PLACE_SPRINKLER":
+            success, msg = self.game.place_building(gx, gy, BuildingType.SPRINKLER)
+        elif act == "PLACE_AUTO_HARVESTER":
+            success, msg = self.game.place_building(gx, gy, BuildingType.AUTO_HARVESTER)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1587,15 +1599,21 @@ class NightwatchFarmApp:
             elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
-            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE"):
-                # 烤箱/熔爐的 unlock_level 目前都是 3（跟 BUILDING_DATA
-                # 定義一致，這裡直接讀 self.game.farm_level 比對，不用
-                # 另外走 is_crop_unlocked 那套只吃 CropType 的介面）。
-                # 金幣/科技點數不足不會鎖卡——維持跟其餘商店卡片一致的
-                # 「可以點，點了會跳紅字說明缺什麼」既有手感，只有等級
-                # 這種「不管有沒有錢都做不到」的門檻才會直接鎖卡。
-                building_type = BuildingType.OVEN if card.action_id == "PLACE_OVEN" else BuildingType.FURNACE
-                req_lvl = BUILDING_DATA[building_type]["unlock_level"]
+            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER"):
+                # 烤箱/熔爐/灑水器/自動採收機的 unlock_level 都直接讀
+                # BUILDING_DATA 定義比對 self.game.farm_level，不用另外
+                # 走 is_crop_unlocked 那套只吃 CropType 的介面）。金幣/
+                # 科技點數/metal_ingot 材料不足都不會鎖卡——維持跟其餘
+                # 商店卡片一致的「可以點，點了會跳紅字說明缺什麼」既有
+                # 手感，只有等級這種「不管有沒有錢都做不到」的門檻才會
+                # 直接鎖卡。
+                _card_building_type = {
+                    "PLACE_OVEN": BuildingType.OVEN,
+                    "PLACE_FURNACE": BuildingType.FURNACE,
+                    "PLACE_SPRINKLER": BuildingType.SPRINKLER,
+                    "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
+                }[card.action_id]
+                req_lvl = BUILDING_DATA[_card_building_type]["unlock_level"]
                 card.is_locked = self.game.farm_level < req_lvl
                 card.lock_reason = f"需莊園等級 Lv.{req_lvl}"
             elif card.action_id == "PLANT_GRAPE":
@@ -2070,15 +2088,16 @@ class NightwatchFarmApp:
                         img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
                         self.screen.blit(img, img_rect)
 
-                # 加工機台 (Phase 2)：需求裡提到可以畫在 _render_defenses
-                # 或新建的 _render_buildings，但這個專案裡防禦設施/景觀/
-                # 作物其實都是同一個逐格迴圈裡畫的（沒有獨立的
-                # _render_defenses 方法），這裡沿用同一個既有寫法、加在
-                # 同一個迴圈裡，而不是另外拆一個獨立的渲染 pass，跟其餘
-                # 格子物件的繪製順序/風格保持一致。
-                if tile.building:
-                    self._render_building_tile(tile.building, px, py)
-
+                    # Phase 4 bug fix：這一整塊（月光加成光點/成熟金色高
+                    # 光/成長進度條）原本被誤縮排在下面 `if tile.building:`
+                    # 區塊裡面——但 tile.crop 跟 tile.building 是互斥的
+                    # (Tile.is_empty 的定義)，同一格不可能兩者同時存在，
+                    # 代表這整塊「只要格子上是作物就一定不是建築」的程式
+                    # 碼實質上永遠不會被執行到，這就是「成熟進度條消失」
+                    # 的真正原因。移到這裡、掛在 `if tile.crop:` 底下才是
+                    # 正確位置，且確保這是這個格子最後畫的東西（在作物
+                    # 圖片本體之後），Z 軸順序上一定畫在最上層，不會被
+                    # 土地或其他格子物件的判定框蓋掉。
                     if tile.crop.is_moonlight_boosted:
                         pygame.draw.circle(self.screen, (129, 212, 250), (px + 10, py + 10), 4)
 
@@ -2091,6 +2110,15 @@ class NightwatchFarmApp:
                         pb = pygame.Rect(px + 6, py + CELL_SIZE - 6, CELL_SIZE - 12, 3)
                         pygame.draw.rect(self.screen, (0, 0, 0, 80), pb)
                         pygame.draw.rect(self.screen, (76, 175, 80), (pb.x, pb.y, int(pb.width * ratio), 3))
+
+                # 加工機台 (Phase 2)：需求裡提到可以畫在 _render_defenses
+                # 或新建的 _render_buildings，但這個專案裡防禦設施/景觀/
+                # 作物其實都是同一個逐格迴圈裡畫的（沒有獨立的
+                # _render_defenses 方法），這裡沿用同一個既有寫法、加在
+                # 同一個迴圈裡，而不是另外拆一個獨立的渲染 pass，跟其餘
+                # 格子物件的繪製順序/風格保持一致。
+                if tile.building:
+                    self._render_building_tile(tile.building, px, py)
 
         # 第 1 天未播種時，農田外框呈現金色呼吸引導光效
         if self.game.day_count == 1 and sum(1 for row in self.game.grid for tile in row if tile.crop) == 0:
@@ -2197,17 +2225,28 @@ class NightwatchFarmApp:
 
         self.screen.blit(overlay, (GRID_X, GRID_Y))
 
+    # 機台圖示文字對照表：烤箱/熔爐是 Phase 2 就有的兩種，Phase 4 的
+    # 灑水器/自動採收機沒有對應貼圖 asset_key 素材，走跟其他機台一致的
+    # 退回色塊 + emoji 圖示。用字典而不是原本的 if/else 三元式，是因為
+    # 現在種類變成 4 種，寫成字典比疊 elif 好讀。
+    _BUILDING_ICONS = {
+        BuildingType.FURNACE: "🔥",
+        BuildingType.OVEN: "🍞",
+        BuildingType.SPRINKLER: "💧",
+        BuildingType.AUTO_HARVESTER: "🤖",
+    }
+
     def _render_building_tile(self, building, px: int, py: int):
-        """畫一座加工機台（烤箱/熔爐）。Phase 3 改成開關式自動化後，機台
-        不再有「完成待手動採收」這個中間狀態（ready_to_collect 已經從
-        Building 移除），所以這裡不再畫跳動的驚嘆號；取而代之的是一個
-        明確的 ON/OFF 小圓點指示燈（右上角，開=科技綠、關=暗紅），讓玩家
-        一眼看出這座機台目前是否處於自動運作中，運作中的倒數進度用既有
-        的小進度條表示（Phase 2 就有，這裡保留）。asset_loader 目前沒有
-        載入 "oven"/"furnace" 這兩個 asset_key（assets/ 底下還沒有對應
-        圖片），所以一律會走 else 分支的退回色塊 + 圖示文字，等以後真的
-        放圖片進去，loader.get() 就會自動抓到、不用改這裡的邏輯（跟專案
-        其他地方的貼圖後備模式一致）。
+        """畫一座機台。Phase 2/3 的烤箱/熔爐走「開關-配方-倒數」那套，
+        右上角有明確的 ON/OFF 指示燈跟運作進度條；Phase 4 新增的灑水器/
+        自動採收機是 building.is_passive 為 True 的「蓋下去就永久生效」
+        機台，完全沒有開關狀態，畫 ON/OFF 圓點反而會誤導玩家以為它們
+        也需要手動開啟，所以這裡改成一個穩定不閃爍的淡科技綠外框，代表
+        「持續生效中」，跟可切換機台的圓點指示燈明確做出視覺區分。
+        asset_loader 目前沒有載入這幾個 asset_key（assets/ 底下還沒有
+        對應圖片），所以一律會走 else 分支的退回色塊 + 圖示文字，等以後
+        真的放圖片進去，loader.get() 就會自動抓到、不用改這裡的邏輯
+        （跟專案其他地方的貼圖後備模式一致）。
         """
         config = building.config
         asset_key = config.get("asset_key")
@@ -2216,23 +2255,34 @@ class NightwatchFarmApp:
             img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
             self.screen.blit(img, img_rect)
         else:
-            # 貼圖缺失後備：木箱色塊 + 機台圖示文字。這裡的明暗改成看
-            # is_active 而不是 is_processing——一座「開啟中」的機台在
-            # 兩輪配方之間會有短暫一幀 is_processing=False（剛收完、還沒
-            # 開始下一輪），如果明暗跟著 is_processing 走，畫面會在這一幀
-            # 閃一下「變亮」再馬上變暗，看起來像故障；改用 is_active 判斷
-            # 就只有玩家真的關閉開關時才會變暗，運作循環中间的過渡幀
-            # 看起來完全連續，不會閃爍。
+            # 貼圖缺失後備：木箱色塊 + 機台圖示文字。開關式機台 (烤箱/
+            # 熔爐) 的明暗看 is_active——一座「開啟中」的機台在兩輪配方
+            # 之間會有短暫一幀 is_processing=False（剛收完、還沒開始下
+            # 一輪），如果明暗跟著 is_processing 走，畫面會在這一幀閃一
+            # 下「變亮」再馬上變暗，看起來像故障；改用 is_active 判斷就
+            # 只有玩家真的關閉開關時才會變暗。被動機台 (灑水器/自動採收
+            # 機) 沒有 is_active 這個概念，永遠用「開啟」的亮色調。
             body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
-            base_col = (94, 66, 50) if building.is_active else (55, 48, 44)
+            if building.is_passive:
+                base_col = (94, 66, 50)
+            else:
+                base_col = (94, 66, 50) if building.is_active else (55, 48, 44)
             draw_beveled_rect(self.screen, body_rect, base_col, border_radius=6, depth=2,
                                pressed=building.is_processing)
-            icon = "🔥" if building.building_type == BuildingType.FURNACE else "🍞"
+            icon = self._BUILDING_ICONS.get(building.building_type, "🏭")
             icon_surf = FONT_MD.render(icon, True, C_TEXT_ON_DARK)
             self.screen.blit(icon_surf, icon_surf.get_rect(center=body_rect.center))
 
-        # ON/OFF 指示燈：機台右上角一個小圓點，開=科技綠、關=暗紅，
-        # 開啟時再疊一圈淡淡的光暈表示「自動運作中」。
+        if building.is_passive:
+            # 被動永久生效：一圈穩定的淡科技綠外框，不閃爍、不需要玩家
+            # 操作，跟下面「開關式機台」的圓點指示燈明確區分開，避免
+            # 誤以為這種機台也有 ON/OFF 兩態。
+            body_rect = pygame.Rect(px + 6, py + 10, CELL_SIZE - 12, CELL_SIZE - 16)
+            pygame.draw.rect(self.screen, (90, 200, 150), body_rect, width=2, border_radius=6)
+            return
+
+        # ON/OFF 指示燈（只有開關式機台才有）：機台右上角一個小圓點，
+        # 開=科技綠、關=暗紅，開啟時再疊一圈淡淡的光暈表示「自動運作中」。
         dot_center = (px + CELL_SIZE - 12, py + 10)
         if building.is_active:
             pygame.draw.circle(self.screen, (30, 60, 40), dot_center, 7)

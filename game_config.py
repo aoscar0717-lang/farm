@@ -71,6 +71,10 @@ class BuildingType(Enum):
     FURNACE = "FURNACE"                  # 熔爐：金屬礦 -> 金屬錠（下一階段）
     OVEN = "OVEN"                        # 烤箱：小麥 -> 麵包（下一階段）
     HAMSTER_WHEEL = "HAMSTER_WHEEL"      # 倉鼠滾輪：消耗糧食產生電池/科技點數（下一階段）
+    # Phase 4 新增：被動永久生效的自動化農業科技，跟上面三種「開關-配方
+    # -倒數」機台是完全不同的互動模型（見 BUILDING_DATA 裡的說明）。
+    SPRINKLER = "SPRINKLER"              # 自動灑水器：加速周圍 3x3 作物生長
+    AUTO_HARVESTER = "AUTO_HARVESTER"    # 自動採收機：自動採收周圍 3x3 成熟作物
 
 
 class EnemyType(Enum):
@@ -520,6 +524,53 @@ BUILDING_DATA = {
         "walkable": False,
         "asset_key": "furnace",
     },
+    # Phase 4：自動化農業科技。跟烤箱/熔爐不同，這兩種機台「蓋下去就
+    # 永久被動生效」，完全不需要 is_active/is_processing 那套開關-配方-
+    # 倒數循環，所以 BUILDING_DATA 裡刻意不給它們 recipe/output_key/
+    # process_time 這幾個 Phase 2/3 專屬的欄位——GameState._update_buildings()
+    # 會先看 "passive_effect" 這個 key 決定要不要整個跳過開關式自動化
+    # 邏輯，兩者互不干擾。build_cost_items 是這裡新增的欄位：跟
+    # build_cost_gold/build_cost_tech 一樣是「建造時一次性扣除」，但
+    # 扣的是背包物品（這裡固定是 metal_ingot）而不是金幣/科技點數，
+    # place_building() 已經改成通用邏輯，任何建築只要在這裡填了
+    # build_cost_items 就會被檢查/扣除，不用另外為這兩種機台寫專用
+    # 分支。
+    #
+    # 【已知限制，如實揭露】metal_ingot 目前完全沒有取得管道：FURNACE
+    # 的配方需要 metal_ore + charcoal，這兩者本身也還沒有任何生產/採集
+    # 來源（Phase 2 的 BUILDING_DATA 註解就已經寫明這件事）。也就是說，
+    # 現階段就算把 SPRINKLER/AUTO_HARVESTER 的資料/邏輯都做好，玩家在
+    # 正常遊玩流程裡目前還是「摸不到」——這不是這次改動漏做，是延續
+    # Phase 1/2 就講清楚的分階段範圍：這幾種進階資源的採集來源留給未來
+    # 階段（例如新增「挖礦/砍樹」小遊戲或地圖資源點）再補上。
+    BuildingType.SPRINKLER: {
+        "name": "自動灑水器",
+        "unlock_level": 4,   # 比烤箱/熔爐(3)高一階，符合「高階科技」的定位
+        "build_cost_gold": 0,
+        "build_cost_tech": 0,
+        "build_cost_items": {"metal_ingot": 2},
+        "passive_effect": "SPRINKLER",
+        "effect_radius": 1,  # 以自身為中心的 3x3（radius=1 代表左右上下各 1 格）
+        # 生長加成用「額外疊加的 dt」表示，而不是直接乘 growth_timer，
+        # 這樣不管 update_growth() 內部怎麼算 ratio 都不用改——寫成
+        # 1.0 代表「額外再疊加一份 dt」，也就是雙倍生長速度；未來想調
+        # 強度只要改這個數字，不用碰 game_state.py 的邏輯。
+        "growth_bonus_dt_mult": 1.0,
+        "walkable": False,
+        "asset_key": "sprinkler",
+    },
+    BuildingType.AUTO_HARVESTER: {
+        "name": "自動採收機",
+        "unlock_level": 5,   # 比灑水器(4)更高階——「自動幫你賺錢」理應是最終期科技
+        "build_cost_gold": 0,
+        "build_cost_tech": 100,
+        "build_cost_items": {"metal_ingot": 5},
+        "passive_effect": "AUTO_HARVESTER",
+        "effect_radius": 1,  # 同樣是以自身為中心的 3x3
+        "scan_interval": 1.0,  # 每 1 秒掃描一次周圍成熟作物，不用每幀掃，省效能
+        "walkable": False,
+        "asset_key": "auto_harvester",
+    },
 }
 
 DOG_CONFIG = {
@@ -707,13 +758,28 @@ class Building:
     inventory 的參照——維持這個專案從 Phase 1 就一路遵守的分工：
     game_config.py 的資料結構只管自己的狀態機，不碰玩家背包）。
     已經移除舊版 Phase 2 的 ready_to_collect「等待手動採收」狀態卡點；
-    完成的當下由 GameState._update_buildings() 直接把產出加進背包。"""
+    完成的當下由 GameState._update_buildings() 直接把產出加進背包。
+
+    Phase 4 新增 SPRINKLER/AUTO_HARVESTER 這兩種「蓋下去就永久被動生
+    效」的機台，完全不用 is_active/is_processing 這套開關-配方-倒數
+    循環（玩家點擊它們也不會觸發 toggle_building 的開關切換——
+    GameState.toggle_building() 會先檢查 config 裡有沒有 passive_effect，
+    有的話直接拒絕切換並回覆提示，見該方法的說明）。scan_timer 是專門
+    給 AUTO_HARVESTER 用的內建冷卻計時器（每 scan_interval 秒才掃描一
+    次周圍成熟作物，不用每幀都掃，省效能——這是使用者原始需求就明確
+    要求的做法）；SPRINKLER 完全不需要任何額外狀態，它的加成邏輯是
+    GameState._update_crops_growth() 每幀直接讀 self.buildings 現算，
+    不需要在 Building 身上存任何東西。這個欄位對 OVEN/FURNACE 完全沒
+    有意義，預設 0.0、永遠不會被用到，維持這個資料結構是所有機台共用
+    的單一 dataclass 這個既有設計，不用為了兩種新機台另外拆一個
+    PassiveBuilding 子類別。"""
     building_type: BuildingType
     x: int
     y: int
-    is_active: bool = False        # 開關：True=自動運作中，False=關閉（預設關閉）
-    is_processing: bool = False    # 目前這一輪配方是否正在倒數
+    is_active: bool = False        # 開關：True=自動運作中，False=關閉（預設關閉）——只對 OVEN/FURNACE 有意義
+    is_processing: bool = False    # 目前這一輪配方是否正在倒數——只對 OVEN/FURNACE 有意義
     processing_time_left: float = 0.0
+    scan_timer: float = 0.0        # 只對 AUTO_HARVESTER 有意義：累積到 scan_interval 就掃描一次周圍作物
 
     @property
     def config(self) -> dict:
@@ -722,6 +788,13 @@ class Building:
     @property
     def is_walkable(self) -> bool:
         return self.config.get("walkable", False)
+
+    @property
+    def is_passive(self) -> bool:
+        """True 代表這是「蓋下去就永久生效、沒有開關」的自動化科技機台
+        (SPRINKLER/AUTO_HARVESTER)；False 代表這是走 Phase 3 開關式自動
+        化那套邏輯的機台 (OVEN/FURNACE)。"""
+        return bool(self.config.get("passive_effect"))
 
     def start_processing(self):
         self.is_processing = True
