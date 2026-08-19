@@ -1312,19 +1312,26 @@ class NightwatchFarmApp:
             px = int(GRID_X + enemy.x * CELL_SIZE)
             py = int(GRID_Y + enemy.y * CELL_SIZE)
 
-            if enemy.enemy_type == EnemyType.BOSS_BOAR_KING:
-                # 血月首領：優先用 pig_chroma.png 切好的移動動畫，
+            if enemy.enemy_type in (EnemyType.WILD_BOAR, EnemyType.BOSS_BOAR_KING):
+                # 野豬 (WILD_BOAR) 跟血月首領 (BOSS_BOAR_KING) 共用同一張
+                # pig_chroma.png 步行動畫，差別只有縮放後的大小：野豬王用
+                # self.loader.boss_frames (放大 1.4x)，野豬用
+                # self.loader.enemy_boar_frames (一般格子大小)。
                 # 每 200ms 換下一幀，依 enemy.facing_direction 選方向；
-                # 素材還沒放進 assets/characters/ 時 boss_frames 是空字典，
-                # 自動退回原本的靜態 boss_boar 圖，不會壞掉。
-                frames = self.loader.boss_frames.get(enemy.facing_direction, [])
+                # 素材還沒放進 assets/characters/ 時對應字典是空的，
+                # 自動退回原本的靜態圖，不會壞掉。
+                is_boss = enemy.enemy_type == EnemyType.BOSS_BOAR_KING
+                frame_dict = self.loader.boss_frames if is_boss else self.loader.enemy_boar_frames
+                fallback_key = "boss_boar" if is_boss else "enemy_boar"
+
+                frames = frame_dict.get(enemy.facing_direction, [])
                 if frames:
                     frame_index = (pygame.time.get_ticks() // 200) % len(frames)
                     img = frames[frame_index]
                 else:
-                    img = self.loader.get("boss_boar")
+                    img = self.loader.get(fallback_key)
                 if img:
-                    offset_y = -10
+                    offset_y = -10 if is_boss else 0
                     self.screen.blit(img, (px, py + offset_y))
             else:
                 k = ENEMY_DATA[enemy.enemy_type].get("asset_key", "enemy_thief")
