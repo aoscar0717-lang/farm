@@ -292,6 +292,7 @@ class NightwatchFarmApp:
                     self._handle_mouse_down(event)
                 elif event.type == pygame.MOUSEMOTION:
                     self._handle_mouse_move(event)
+                elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN and self.show_intro:
                         self.show_intro = False
                     elif event.key == pygame.K_r and self.game.game_over:
@@ -310,6 +311,7 @@ class NightwatchFarmApp:
                                 self.log_messages.append(f"🔦 {msg}")
                         else:
                             self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按空白鍵可發動手電筒強光擊暈！")
+
 
 
             if not self.show_intro:
