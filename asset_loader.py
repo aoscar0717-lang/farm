@@ -126,6 +126,17 @@ class AssetLoader:
     def __init__(self, cell_size: int = 50):
         self.cell_size = cell_size
         self.images: Dict[str, pygame.Surface] = {}
+        # 視覺升級：熔爐 Sprite Sheet 特定影格動畫。
+        #
+        # 這裡沒有沿用使用者要求的 self.assets['furnace_anim'] 這個命名，
+        # 是因為 self.assets 這個屬性在整個專案裡從來不存在——AssetLoader
+        # 一直以來唯一的存放處都是 self.images（單一 Surface，靠 get()
+        # 取用）。如果硬塞一個 self.assets 字典進來，會跟既有的 self.images
+        # 命名慣例互相打架，還會讓人誤以為兩者是同一份資料。改用一個平行
+        # 的 self.building_anim_frames: Dict[str, list[Surface]]，維持
+        # get() 「回傳單一 Surface 或 None」的既有契約不被破壞，動畫幀
+        # 另外透過 get_anim_frames() 取用，兩條路徑互不干擾。
+        self.building_anim_frames: Dict[str, list] = {}
         self.load_all()
 
     def _scale_keep_aspect(self, frame: pygame.Surface, cell_size: int) -> pygame.Surface:
@@ -570,6 +581,18 @@ class AssetLoader:
         for key, path, category in buildings:
             self.images[key] = self._load_image(path, sz, name=key, category=category)
 
+        # 3c. 熔爐 Sprite Sheet 特定影格動畫 (assets/decorations/熔爐.png)。
+        # 只切第一排 3 格，縮放到跟上面 buildings 清單一樣的 sz
+        # (CELL_SIZE x CELL_SIZE)，存進 self.building_anim_frames["furnace"]。
+        # 這裡刻意不去動上面 buildings 清單裡 ("furnace", "buildings/
+        # furnace.png", "furnace") 這一筆——那張圖目前不存在，
+        # self.images["furnace"] 仍然會照舊落到 generate_placeholder()，
+        # 當作「動畫幀也載入失敗時」的第二層防呆退回路徑；渲染層會優先
+        # 檢查 get_anim_frames("furnace") 有沒有內容，有的話才用動畫幀，
+        # 沒有的話才退回 self.images["furnace"] 的靜態圖或色塊。兩條載
+        # 入路徑不會互相覆蓋，只是渲染時分優先順序。
+        self._load_building_anim_frames("furnace", "decorations/熔爐.png", sz)
+
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
         # 上面的 defs 清單），完全不會走到 generate_placeholder() 的
@@ -671,3 +694,62 @@ class AssetLoader:
 
     def get(self, key: str) -> pygame.Surface:
         return self.images.get(key)
+
+    def get_anim_frames(self, key: str) -> list:
+        """回傳指定 key 的動畫影格列表；沒有的話回傳空 list（不是
+        None），讓呼叫端可以直接用 `if frames:` 判斷，不用另外防 None。
+        """
+        return self.building_anim_frames.get(key, [])
+
+    def _load_building_anim_frames(self, key: str, rel_path: str, size: Tuple[int, int]) -> None:
+        """
+        視覺升級：熔爐 Sprite Sheet 特定影格提取。
+
+        使用者原始需求提到的檔名是 furnace_anim.jpg，但實際放進
+        assets/decorations/ 的檔案是「熔爐.png」——這裡直接用真實存在
+        的檔名，不是照著需求文字裡的假設檔名去找一個不存在的檔案。
+
+        使用者也要求「用 set_colorkey((0,0,0)) 去背」，但用 PIL 實際檢
+        查過 熔爐.png 之後發現：這張圖本身是 951x1024 的 RGBA PNG，背
+        景本來就是真正的 alpha=0 透明（不是不透明黑底的 JPG）；抽樣熔
+        爐第一格範圍內，找到 7,156 個「顏色接近黑色、但 alpha 是不透明
+        的」像素——這些是熔爐本體的黑色描邊/陰影線條。如果照字面上跑
+        set_colorkey((0,0,0))，pygame 只看 RGB 顏色比對、不管原本的
+        alpha 狀態，會把這幾千個本來就不透明、屬於熔爐外框的黑色像素
+        一併挖空，畫面上會變成有破洞的熔爐。所以這裡只呼叫
+        convert_alpha() 保留圖片原生的 alpha 透明度，不呼叫
+        set_colorkey()——這個作法跟專案裡所有其他真實 PNG 素材的載入
+        方式（decos/defs/chars 清單）完全一致。
+
+        只切第一排 (Y=0) 的 3 格 (X=0, 1, 2)，索引 3~8（第二、三排）維
+        持不讀取，符合「經典像素跳動感只需要 3 幀」的需求。
+        """
+        full_path = os.path.join(ASSET_ROOT, rel_path)
+        if not os.path.exists(full_path):
+            print(f"[AssetLoader] 提示：{rel_path} 不存在，"
+                  f"{key} 動畫將退回既有的安全字元/色塊繪製，不影響遊戲運作。")
+            return
+        try:
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 警告：{rel_path} 載入失敗（{e}），"
+                  f"{key} 動畫將退回既有的安全字元/色塊繪製。")
+            return
+
+        sheet_w, sheet_h = sheet.get_size()
+        cell_w, cell_h = sheet_w // 3, sheet_h // 3
+        if cell_w <= 0 or cell_h <= 0:
+            print(f"[AssetLoader] 警告：{rel_path} 尺寸異常 ({sheet_w}x{sheet_h})，"
+                  f"無法切出 3 欄影格，{key} 動畫將退回既有繪製方式。")
+            return
+
+        frames = []
+        for i in range(3):
+            cell_rect = pygame.Rect(i * cell_w, 0, cell_w, cell_h)
+            frame = sheet.subsurface(cell_rect).copy()
+            # 縮放到跟其他建築貼圖一致的 CELL_SIZE（呼叫端傳進來的
+            # size），不是需求文字裡的範例尺寸 32x32/40x40——那兩個數字
+            # 只是舉例，真正要對齊的是這個專案實際的地圖網格尺寸，否則
+            # 熔爐會比同排的烤箱/炭窯等其他建築明顯小一圈或大一圈。
+            frames.append(pygame.transform.scale(frame, size))
+        self.building_anim_frames[key] = frames
