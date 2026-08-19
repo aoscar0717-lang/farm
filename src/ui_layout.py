@@ -236,7 +236,8 @@ SHOP_TAB_LABELS = {"seed": "種子", "def": "防禦", "pet": "景觀"}
 # actually represents.
 SHOP_ITEM_IDS = {
     "seed": ["radish", "carrot", "pumpkin"],
-    "def": ["fence", "trap", "dog"],
+    "def": ["fence", "trap", "dog", "cat", "goose", "sheep", "bull", "owl"],
+
     # Landscape expansion round 1: 4 original + 7 (scarecrow/crate/bush/
     # rock/sunflower/pine_tree/big_tree). shop_column_rects has no hard cap
     # on count, so growing this list lays out automatically -- no geometry
