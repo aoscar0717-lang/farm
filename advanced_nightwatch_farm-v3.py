@@ -844,7 +844,15 @@ class NightwatchFarmApp:
                 # 系統大重構 Phase 7：富鐵花，取代原本 DECO 分頁裡的
                 # PLACE_MINE（礦場）卡片——礦場整批移除，改成種在農田
                 # 核心區的作物，所以卡片自然歸在 CROPS 分頁而不是 DECO。
-                ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石", "iron_flower_mature"),
+                # 【系統修復】商店卡片圖示的 asset_key 從 "iron_flower_mature"
+                # 改成 "iron_flower"——這次改用 1x4 Sprite Sheet 之後，
+                # AssetLoader._load_1x4_spritesheet() 統一把切好的第一幀
+                # 寫回 self.images["iron_flower"]（不再有 "_mature" 這個
+                # key 了，成熟階段改由 get_anim_frames("iron_flower") 依
+                # 成長比例挑幀，見渲染層的說明），卡片圖示要跟著改，不然
+                # loader.get("iron_flower_mature") 會拿到 None，卡片會沒
+                # 有圖示。
+                ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石", "iron_flower"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -2528,9 +2536,47 @@ class NightwatchFarmApp:
 
                 if tile.crop:
                     ct = tile.crop.crop_type
-                    base_key = CROP_DATA[ct].get("asset_key", "radish")
-                    st_key = tile.crop.stage.name.lower()
-                    img = self.loader.get(f"{base_key}_{st_key}")
+
+                    if ct == CropType.IRON_FLOWER:
+                        # 【系統修復與視覺升級】富鐵花改用 1x4 Sprite
+                        # Sheet 切出來的 4 幀動畫（asset_loader.py 的
+                        # get_anim_frames("iron_flower")），不是其餘作物
+                        # 共用的「{asset_key}_{stage}」離散 per-stage
+                        # 查表。這裡用法跟需求裡寫的 `_render_crops` 不
+                        # 一樣——這個專案沒有獨立的 _render_crops() 方
+                        # 法，作物渲染本來就是這個逐格迴圈裡的
+                        # `if tile.crop:` 區塊，這裡直接在原地加特例分
+                        # 支，不新建一個方法。
+                        #
+                        # 挑幀依連續成長比例（不是離散 stage 列舉），跟
+                        # 下面成長進度條用的是同一個 ratio 算法
+                        # （growth_timer / grow_time），只是這裡額外拿來
+                        # 決定要畫哪一幀：
+                        #   ratio < 0.33        -> frame[0]（幼苗）
+                        #   0.33 <= ratio < 1.0 -> frame[1]（生長中）
+                        #   ratio >= 1.0（成熟）-> frame[2]（帶鐵礦）
+                        # frame[3]（需求裡標「可選」的「剛採收的枯枝」）
+                        # 這次刻意不用：harvest_crop() 採收成功後會立刻
+                        # 把 tile.crop 設回 None（demolish_tile()/敵人偷
+                        # 竊破壞作物也是同樣做法），資料模型裡沒有任何
+                        # 「已採收但還殘留在格子上」的過渡狀態可以掛
+                        # frame[3]，勉強生出一個假的殘留計時器已經超出
+                        # 這次請求的範圍，先如實留白，不假裝支援一個不
+                        # 存在的狀態。
+                        iron_frames = self.loader.get_anim_frames("iron_flower")
+                        ratio = 1.0 if tile.crop.is_mature else min(1.0, tile.crop.growth_timer / tile.crop.grow_time)
+                        if ratio >= 1.0:
+                            frame_idx = 2
+                        elif ratio >= 0.33:
+                            frame_idx = 1
+                        else:
+                            frame_idx = 0
+                        img = iron_frames[frame_idx] if iron_frames else None
+                    else:
+                        base_key = CROP_DATA[ct].get("asset_key", "radish")
+                        st_key = tile.crop.stage.name.lower()
+                        img = self.loader.get(f"{base_key}_{st_key}")
+
                     if img:
                         # 作物圖片現在是等比例縮放的（asset_loader.py 的
                         # _scale_keep_aspect），長條形作物（如胡蘿蔔）的
@@ -2801,18 +2847,22 @@ class NightwatchFarmApp:
                 # 規則不變。
                 frame_index = 0
             elif building.building_type == BuildingType.LUMBERYARD:
-                # 【視覺升級後續調整】伐木場改成「frame[0] ~ frame[-1]
-                # 整組循環播放」，不再像熔爐那樣特地跳過 frame[0]。鋸木頭
-                # 是一個連續往復的循環動作，frame[0] 本來就同時是「循環
-                # 起始格」也是最自然的「閒置姿勢」，不需要為了區分開關
-                # 兩態而犧牲掉一幀只給閒置狀態專用——用 len(anim_frames)
-                # （9）直接對 anim_time 取模，讓運作中的動畫完整跑過全部
-                # 9 個影格 (0~8) 再回頭，跟閒置時固定停在 frame[0] 明確
-                # 區分開，不會有一幀被永遠跳過不播的情況。熔爐維持原本
-                # 「frame[1]~frame[len-1] 循環、frame[0] 只給關閉態」的
-                # 規則不變（見下面 else 分支），兩種機台的動畫語意本來
-                # 就不一樣，不用統一成同一套公式。
-                frame_index = int(self.anim_time / ANIMATION_SPEED) % len(anim_frames)
+                # 【系統修復與視覺升級】伐木場換成 1x4 素材後，這次使用
+                # 者明確要求改成「0/2 幀跳動」——不是像上一版那樣跑滿
+                # frame[0]~frame[-1] 全部影格，也不是熔爐那種
+                # frame[1]~frame[-1] 循環，而是運作中只在 frame[0] 跟
+                # frame[2] 兩張之間切換，營造更猛烈的「機械打擊感」（兩張
+                # 差異較大的影格快速交替，比連續多幀漸變動畫更有「一拍一
+                # 下」的重擊視覺效果）。frame[1]/frame[3] 在運作中完全不
+                # 會被畫到；frame[1] 只是伐木場 1x4 素材裡的過渡幀，
+                # frame[3] 目前沒有對應用途（見下方富鐵花 frame[3] 的
+                # 說明——兩張素材雖然規格一致，但用途不需要對稱）。
+                # 使用者提供的參考公式寫的是 self.animation_timer，這個
+                # 屬性在專案裡不存在（沿用先前已經確認過的
+                # self.anim_time，run() 主迴圈每幀累加、不受暫停/日夜切
+                # 換影響），這裡照專案實際的計時器名稱寫。
+                step = int(self.anim_time / ANIMATION_SPEED) % 2
+                frame_index = 2 if step == 1 else 0
             else:
                 # frame[0] 保留給「關閉/閒置」狀態，運作中的時候在
                 # frame[1] ~ frame[len-1] 之間循環（熔爐只有 3 幀，等於

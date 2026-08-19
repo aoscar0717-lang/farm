@@ -269,45 +269,90 @@ class AssetLoader:
             placeholder_name = name or os.path.splitext(os.path.basename(rel_path))[0]
             return self.generate_placeholder(placeholder_name, size, category=category)
 
-    def _load_iron_flower_mature(self, size: Tuple[int, int]) -> None:
-        """視覺升級：32x32 富鐵花成熟階段素材 (crops/iron_flower.png)。
+    def _load_1x4_spritesheet(self, key: str, rel_path: str, target_size: Tuple[int, int],
+                               colorkey: Optional[Tuple[int, int, int]] = None,
+                               placeholder_category: Optional[str] = None) -> None:
+        """系統修復：通用的「單排 4 幀 (1x4) 水平 Sprite Sheet」切圖器。
 
-        使用者這次提供的規格明確要求「載入圖片時，將亮綠色 (0, 255, 0)
-        設為透明色 set_colorkey」——這跟這個專案裡其餘所有 PNG 素材
-        （crops/decorations/characters 全部）一律用 convert_alpha()
-        保留原生 alpha 透明度的載入方式不一樣，不能沿用 _load_image()：
-        那個函式只呼叫 convert_alpha()、完全不會呼叫 set_colorkey()，
-        如果直接拿它來讀這張圖，綠色背景會被當成不透明的實色一起畫
-        出來，變成一塊完整的綠色方塊蓋住整格。這裡改用 convert()（保留
-        色深、不建立 per-pixel alpha 通道）+ set_colorkey((0, 255, 0))，
-        才會照字面需求把綠色背景挖成透明。
+        取代前一階段兩個各自為政的舊寫法：熔爐/伐木場共用的 3x3 九宮格
+        切法 (_load_building_anim_frames())，以及富鐵花專用、只切一張
+        靜態圖的 _load_iron_flower_mature()（已整個刪除，不再保留）。
+        使用者這次明確說明新素材（伐木場_3.jpg / 富鐵花.png）是同一種
+        規格：單排橫向 4 格，不是 3x3，也不是單張圖，兩者共用這一份
+        邏輯。熔爐目前沒有換新素材，還是沿用舊的
+        _load_building_anim_frames()，這個函式不影響熔爐。
 
-        成功後直接寫進 self.images["iron_flower_mature"]，跟其餘作物
-        共用同一套 "{asset_key}_{stage}" 讀取慣例（asset_key="iron_flower"、
-        stage="mature"）——_render_flat_meadow_and_farm() 既有的通用作物
-        渲染邏輯（`img = self.loader.get(f"{base_key}_{st_key}")`）完全
-        不用改一行，會自動抓到這張圖；金色成熟浮動高光 (is_mature 那塊)
-        本來就畫在這張圖之後（Z 軸在上面），這裡不用另外處理疊放順序。
+        去背邏輯依 colorkey 參數決定：
+          colorkey 給實際顏色（例如伐木場的黑色 (0,0,0)）：一律用
+            convert() + set_colorkey(colorkey)。.jpg 格式本身不可能帶
+            alpha 通道，伐木場素材是 .jpg，不用另外判斷。
+          colorkey 是 None（富鐵花的情況）：自動偵測——用
+            pygame.image.load() 讀出來的原始 Surface 的 get_masks()[3]
+            （alpha 遮罩）是否非 0，判斷來源檔案是否原生就有 alpha
+            通道；有的話直接 convert_alpha()（沿用專案裡其餘 PNG 素材
+            的標準做法）；沒有的話退回 convert() +
+            set_colorkey((255, 255, 255))（視為白底去背），符合使用者
+            「若有 Alpha 通道則直接 convert_alpha()，否則視為白底
+            set_colorkey」的規格描述。
 
-        素材檔案 (crops/iron_flower.png) 目前還沒有實際放進 assets/，
-        找不到檔案或載入失敗時，改用 generate_placeholder() 生成一張
-        「iron_flower」分類的專屬佔位圖（草綠底 + 金屬礦石圓點，見該
-        方法說明），而不是讓 self.images 完全沒有這個 key——如果什麼都
-        不寫，_render_flat_meadow_and_farm() 裡 `if img:` 會直接跳過
-        繪製，富鐵花成熟後會整格「消失」變成看不到任何圖案，比起其他
-        作物都至少有個灰色方塊可看，體驗明顯更差，所以這裡刻意補上
-        跟其餘素材載入一致的「失敗必有佔位圖」保底。
+        找不到檔案、載入失敗、或切出來的單幀尺寸異常（寬或高 <= 0，
+        通常代表來源圖檔根本不是 1x4 格式）都會印出提示，並且改用
+        generate_placeholder() 生成 4 張佔位圖頂替，而不是讓
+        self.building_anim_frames 完全沒有這個 key。這裡刻意跟舊版
+        _load_building_anim_frames()（載入失敗就直接 return、完全不寫
+        任何佔位動畫幀）不一樣：熔爐/伐木場是「建築」，就算動畫幀載入
+        失敗，_render_building_tile() 還有 self.images[key] 這條「buildings
+        清單載入的靜態備援圖」可以退回；但富鐵花是「作物」，沒有這樣一
+        條備援路徑，如果這裡不自己補佔位幀，取用端
+        (`get_anim_frames("iron_flower")`) 拿到空 list 時，渲染邏輯完全
+        沒東西可畫，富鐵花會在成熟階段整格消失不見，比其他任何素材缺
+        失時的體驗都差，所以統一在這裡補齊，不管是哪個呼叫端都保證拿
+        到 4 張非 None 的 Surface。
+
+        成功時額外把 self.images[key] 覆寫成 frame[0]（跟舊版
+        _load_building_anim_frames() 同一個慣例），讓商店卡片
+        （ActionCard.draw() 只呼叫 loader.get(asset_key)，不知道動畫幀
+        這回事）也能顯示真的貼圖。
         """
-        full_path = os.path.join(ASSET_ROOT, "crops/iron_flower.png")
+        full_path = os.path.join(ASSET_ROOT, rel_path)
+
+        def _make_placeholder_frames() -> list:
+            return [self.generate_placeholder(f"{key}_{i}", target_size, category=placeholder_category)
+                    for i in range(4)]
+
+        if not os.path.exists(full_path):
+            print(f"[AssetLoader] 提示：{rel_path} 不存在，{key} 動畫將使用佔位圖，不影響遊戲運作。")
+            self.building_anim_frames[key] = _make_placeholder_frames()
+            return
+
         try:
-            img = pygame.image.load(full_path).convert()
-            img.set_colorkey((0, 255, 0))
-            self.images["iron_flower_mature"] = pygame.transform.scale(img, size)
+            raw = pygame.image.load(full_path)
+            has_alpha = colorkey is None and raw.get_masks()[3] != 0
+            if has_alpha:
+                sheet = raw.convert_alpha()
+            else:
+                sheet = raw.convert()
+                sheet.set_colorkey(colorkey if colorkey is not None else (255, 255, 255))
+
+            sheet_w, sheet_h = sheet.get_size()
+            frame_w, frame_h = sheet_w // 4, sheet_h
+            if frame_w <= 0 or frame_h <= 0:
+                print(f"[AssetLoader] 警告：{rel_path} 尺寸異常 ({sheet_w}x{sheet_h})，"
+                      f"無法切出 1x4 影格，{key} 動畫將使用佔位圖。")
+                self.building_anim_frames[key] = _make_placeholder_frames()
+                return
+
+            frames = []
+            for i in range(4):
+                rect = pygame.Rect(i * frame_w, 0, frame_w, frame_h)
+                frame = sheet.subsurface(rect).copy()
+                frames.append(pygame.transform.scale(frame, target_size))
+
+            self.building_anim_frames[key] = frames
+            self.images[key] = frames[0]
         except Exception as e:
-            if os.path.exists(full_path):
-                print(f"[AssetLoader] 載入 crops/iron_flower.png 失敗: {e}")
-            self.images["iron_flower_mature"] = self.generate_placeholder(
-                "iron_flower_mature", size, category="iron_flower")
+            print(f"[AssetLoader] 警告：{rel_path} 載入失敗（{e}），{key} 動畫將使用佔位圖。")
+            self.building_anim_frames[key] = _make_placeholder_frames()
 
     def _load_corn_spritesheet(self, size: Tuple[int, int]):
         """
@@ -565,31 +610,20 @@ class AssetLoader:
             ("sunflower", ["seed", "sprout", "growing", "mature"]),  # 小麥 (WHEAT) 目前還沿用這組舊圖
             ("grape", ["seed", "sprout", "growing", "mature"]),
             ("starlight", ["seed", "sprout", "growing", "mature"]),
-            # 系統大重構 Phase 7：富鐵花 (CropType.IRON_FLOWER)，取代原本
-            # MINE 建築的 metal_ore 產出來源。種子/幼苗/成長中這三個階段
-            # 目前還沒有真的美術，先照跟其餘作物完全一致的命名慣例
-            # （crops/iron_flower_{stage}.png）登記，檔案還沒放進 assets/
-            # 之前 _load_image() 既有的 generate_placeholder() 後備機制
-            # 會自動接手，不會讓遊戲壞掉。
-            # 【視覺升級：32x32 富鐵花成熟階段】"mature" 這個階段拿掉、
-            # 不放在這個清單裡——使用者這次提供的成熟階段美術
-            # (iron_flower.png) 檔名不是照 xxx_mature.png 這個慣例命名，
-            # 而且背景是純綠色 (0,255,0) 色鍵去背，不是其餘作物 PNG 那種
-            # 原生 alpha 透明度，不能沿用這個迴圈統一呼叫的 _load_image()
-            # （那個函式只會 convert_alpha()，不會呼叫 set_colorkey()，
-            # 綠色背景會被當成不透明色整塊畫出來）。改成下面
-            # _load_iron_flower_mature() 專門處理，最後一樣寫回
-            # self.images["iron_flower_mature"]，跟其餘作物共用同一套
-            # "{asset_key}_{stage}" 讀取慣例，渲染層完全不用改。
-            ("iron_flower", ["seed", "sprout", "growing"]),
+            # 富鐵花 (CropType.IRON_FLOWER) 刻意不放進這個清單——【系統
+            # 修復：1x4 精準切圖】階段改成整個作物（種子/幼苗/成長中/
+            # 成熟四個視覺狀態）統一從同一張 1x4 Sprite Sheet
+            # (crops/富鐵花.png) 切出來，用連續成長比例挑幀，不是像其餘
+            # 作物一樣靠 "{asset_key}_{stage}" 這套離散 per-stage 檔名去
+            # 查表。載入呼叫在下面 3e.（跟伐木場的 1x4 素材共用同一個
+            # _load_1x4_spritesheet() 輔助函式），渲染層的挑幀邏輯見
+            # advanced_nightwatch_farm-v3.py 的
+            # _render_flat_meadow_and_farm() 說明。
         ]
         for cname, stages in crops:
             for st in stages:
                 key = f"{cname}_{st}"
                 self.images[key] = self._load_image(f"crops/{cname}_{st}.png", sz)
-
-        # 富鐵花成熟階段用專門的色鍵去背載入，見該方法的完整說明。
-        self._load_iron_flower_mature(sz)
 
         # 1b. 新版整合精靈圖：玉米 (corn) + 胡蘿蔔/番茄/藍莓 (potato 素材
         # 目前遊戲沒有用到，切圖時略過)。切好的畫格直接塞進
@@ -707,21 +741,39 @@ class AssetLoader:
         furnace_sz = (self.cell_size * furnace_span_w, self.cell_size * furnace_span_h)
         self._load_building_anim_frames("furnace", "decorations/熔爐.png", furnace_sz)
 
-        # 3d. 伐木場 Sprite Sheet 特定影格動畫 (assets/decorations/伐木場.png)。
-        # 跟熔爐同一張 3x3 網格規格，但這裡傳 frame_count=9 切出全部
-        # 9 格——使用者這次明確要求「為了呈現鋸木頭的流暢動態，提取
-        # 所有的 9 個影格」，不是像熔爐那樣只取第一排 3 格。上面
-        # buildings 清單裡 ("lumberyard", "buildings/lumberyard.png",
-        # "lumberyard") 這一筆同樣保留當第二層防呆（那張圖不存在，會
-        # 落到 generate_placeholder() 的棕色木紋佔位圖）；
-        # _load_building_anim_frames() 切出動畫幀成功時一樣會把
-        # self.images["lumberyard"] 覆寫成 frame[0]，建造選單卡片跟地圖
-        # 建築本體都能吃到真圖，寫法完全比照熔爐那份。
-        # 同上，伐木場動畫幀也改傳 2x2 尺寸，跟 3b. 的靜態備援圖與
-        # FURNACE 的處理方式一致。
+        # 3d. 伐木場 Sprite Sheet 特定影格動畫。
+        # 【系統修復：1x4 精準切圖】使用者這次換了一張新素材
+        # (decorations/伐木場_3.jpg)，規格從先前的 3x3 九宮格改成單排橫
+        # 向 4 格 (1x4)，徹底取代舊的 _load_building_anim_frames()（那個
+        # 函式是照 3x3 網格寫的，拿 1x4 的圖去切會整個切錯位置，是使用者
+        # 這次要求「徹底修復之前的破圖問題」的原因）。改用下面新寫的
+        # _load_1x4_spritesheet()，去背色鍵指定黑色 (0,0,0)——.jpg 格式
+        # 本身不可能帶 alpha 通道，這裡不用像富鐵花那樣另外判斷。縮放尺
+        # 寸沿用跟 3b./3c. 同一份 BUILDING_SPRITE_GRID_SPAN 對照表算出來
+        # 的 2x2 大小，跟建築本體佔地格數、_render_building_tile() 的
+        # span_w/span_h 定位公式保持一致。
         lumberyard_span_w, lumberyard_span_h = BUILDING_SPRITE_GRID_SPAN.get("lumberyard", (1, 1))
         lumberyard_sz = (self.cell_size * lumberyard_span_w, self.cell_size * lumberyard_span_h)
-        self._load_building_anim_frames("lumberyard", "decorations/伐木場.png", lumberyard_sz, frame_count=9)
+        self._load_1x4_spritesheet("lumberyard", "decorations/伐木場_3.jpg", lumberyard_sz,
+                                    colorkey=(0, 0, 0), placeholder_category="lumberyard")
+
+        # 3e. 富鐵花 (CropType.IRON_FLOWER) 成熟視覺。
+        # 【系統修復：1x4 精準切圖】使用者這次提供的新素材
+        # (crops/富鐵花.png) 同樣是 1x4 規格，取代前一階段
+        # crops/iron_flower.png 那張單張 32x32、純綠色色鍵去背的舊版
+        # （那個做法連續能不能挖乾淨背景都要碰運氣，這次的 1x4 素材是
+        # 正式規格，直接取代，不保留舊版 _load_iron_flower_mature() 那條
+        # 路徑）。colorkey 傳 None，讓 _load_1x4_spritesheet() 自動判斷
+        # 「有 alpha 通道就 convert_alpha()、沒有就當白底 (255,255,255)
+        # 色鍵去背」，符合使用者這次的規格描述。縮放尺寸是 sz（單一格
+        # CELL_SIZE x CELL_SIZE，1x1，不是伐木場的 2x2）。這裡切出來的
+        # 4 幀不是「不同生長階段各自一張獨立圖」的舊架構，而是渲染層依
+        # 連續成長比例挑幀（見 advanced_nightwatch_farm-v3.py 的
+        # _render_flat_meadow_and_farm() 說明），所以刻意不再把
+        # "iron_flower_seed"/"_sprout"/"_growing"/"_mature" 這幾個
+        # per-stage key 塞進上面的 crops 清單。
+        self._load_1x4_spritesheet("iron_flower", "crops/富鐵花.png", sz,
+                                    colorkey=None, placeholder_category="iron_flower")
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
