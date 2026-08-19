@@ -742,37 +742,45 @@ class AssetLoader:
         self._load_building_anim_frames("furnace", "decorations/熔爐.png", furnace_sz)
 
         # 3d. 伐木場 Sprite Sheet 特定影格動畫。
-        # 【系統修復：1x4 精準切圖】使用者這次換了一張新素材
-        # (decorations/伐木場_3.jpg)，規格從先前的 3x3 九宮格改成單排橫
-        # 向 4 格 (1x4)，徹底取代舊的 _load_building_anim_frames()（那個
-        # 函式是照 3x3 網格寫的，拿 1x4 的圖去切會整個切錯位置，是使用者
-        # 這次要求「徹底修復之前的破圖問題」的原因）。改用下面新寫的
-        # _load_1x4_spritesheet()，去背色鍵指定黑色 (0,0,0)——.jpg 格式
-        # 本身不可能帶 alpha 通道，這裡不用像富鐵花那樣另外判斷。縮放尺
-        # 寸沿用跟 3b./3c. 同一份 BUILDING_SPRITE_GRID_SPAN 對照表算出來
-        # 的 2x2 大小，跟建築本體佔地格數、_render_building_tile() 的
+        # 【檔名修正】使用者一開始說的檔名是 decorations/伐木場_3.jpg，
+        # 但那個檔案從頭到尾都沒有真的放進 assets/（雲端環境跟裝置上都
+        # 用 device_list_dir/find 確認過），後來使用者改口直接指定用
+        # 既有的 decorations/伐木場.png（這個檔案先前已經被使用者換成
+        # 新內容，用 PIL 實際檢查過尺寸是 1024x254——寬度剛好整除 4，
+        # 是這次 1x4 規格，不是先前的 3x3 九宮格）。
+        # colorkey 這裡改傳 None（原本是寫死 (0,0,0)）：實際用 PIL 抽樣
+        # 檢查過這張 PNG 的像素，背景本來就是真正 alpha=0 透明，而且
+        # 抽樣範圍內找得到「顏色接近黑色、但 alpha 不透明」的像素（伐木
+        # 場本體的黑色描邊/陰影線條）——如果照舊寫死 set_colorkey
+        # ((0,0,0))，這些本來就不透明的黑色像素會被一併挖空，變成有破
+        # 洞的貼圖。這張圖其實不是 .jpg（不可能帶 alpha），是已經有原生
+        # alpha 透明度的 .png，改傳 colorkey=None 讓
+        # _load_1x4_spritesheet() 的自動偵測邏輯直接走 convert_alpha()
+        # 那條路徑，保留原生透明度，不會誤挖黑色描邊。縮放尺寸沿用跟
+        # 3b./3c. 同一份 BUILDING_SPRITE_GRID_SPAN 對照表算出來的 2x2
+        # 大小，跟建築本體佔地格數、_render_building_tile() 的
         # span_w/span_h 定位公式保持一致。
         lumberyard_span_w, lumberyard_span_h = BUILDING_SPRITE_GRID_SPAN.get("lumberyard", (1, 1))
         lumberyard_sz = (self.cell_size * lumberyard_span_w, self.cell_size * lumberyard_span_h)
-        self._load_1x4_spritesheet("lumberyard", "decorations/伐木場_3.jpg", lumberyard_sz,
-                                    colorkey=(0, 0, 0), placeholder_category="lumberyard")
+        self._load_1x4_spritesheet("lumberyard", "decorations/伐木場.png", lumberyard_sz,
+                                    colorkey=None, placeholder_category="lumberyard")
 
         # 3e. 富鐵花 (CropType.IRON_FLOWER) 成熟視覺。
-        # 【系統修復：1x4 精準切圖】使用者這次提供的新素材
-        # (crops/富鐵花.png) 同樣是 1x4 規格，取代前一階段
-        # crops/iron_flower.png 那張單張 32x32、純綠色色鍵去背的舊版
-        # （那個做法連續能不能挖乾淨背景都要碰運氣，這次的 1x4 素材是
-        # 正式規格，直接取代，不保留舊版 _load_iron_flower_mature() 那條
-        # 路徑）。colorkey 傳 None，讓 _load_1x4_spritesheet() 自動判斷
-        # 「有 alpha 通道就 convert_alpha()、沒有就當白底 (255,255,255)
-        # 色鍵去背」，符合使用者這次的規格描述。縮放尺寸是 sz（單一格
-        # CELL_SIZE x CELL_SIZE，1x1，不是伐木場的 2x2）。這裡切出來的
-        # 4 幀不是「不同生長階段各自一張獨立圖」的舊架構，而是渲染層依
-        # 連續成長比例挑幀（見 advanced_nightwatch_farm-v3.py 的
+        # 【檔名修正】使用者一開始說的檔名是 crops/富鐵花.png，同樣沒有
+        # 真的放進 assets/，後來改口指定用既有的 crops/iron_flower.png
+        # （這個檔案是更早一版單張 32x32 綠色色鍵素材的舊檔名，但使用者
+        # 已經把內容換成新的 1024x254、寬度整除 4 的 1x4 素材——用 PIL
+        # 實際檢查過，不是原本的 32x32）。colorkey 繼續傳 None，
+        # _load_1x4_spritesheet() 的自動偵測邏輯會檢查到這張圖也是原生
+        # alpha 透明（PIL 抽樣確認過），一樣直接走 convert_alpha()，不會
+        # 誤用白底色鍵去背。縮放尺寸是 sz（單一格 CELL_SIZE x
+        # CELL_SIZE，1x1，不是伐木場的 2x2）。這裡切出來的 4 幀不是
+        # 「不同生長階段各自一張獨立圖」的舊架構，而是渲染層依連續成長
+        # 比例挑幀（見 advanced_nightwatch_farm-v3.py 的
         # _render_flat_meadow_and_farm() 說明），所以刻意不再把
         # "iron_flower_seed"/"_sprout"/"_growing"/"_mature" 這幾個
         # per-stage key 塞進上面的 crops 清單。
-        self._load_1x4_spritesheet("iron_flower", "crops/富鐵花.png", sz,
+        self._load_1x4_spritesheet("iron_flower", "crops/iron_flower.png", sz,
                                     colorkey=None, placeholder_category="iron_flower")
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
