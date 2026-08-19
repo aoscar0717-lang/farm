@@ -60,53 +60,27 @@ class SoundManager:
         return pygame.mixer.Sound(buffer=bytes(buf))
 
 
-    def _generate_music_loop(self, is_day: bool) -> pygame.mixer.Sound:
-        sample_rate = 22050
-        duration = 3.0
-        n_samples = int(sample_rate * duration)
-        buf = bytearray()
-        
-        # Day: Happy C major arpeggio / Night: Spooky low drone
-        if is_day:
-            freqs = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63]
-            notes_len = duration / len(freqs)
-        else:
-            freqs = [130.81, 138.59, 130.81, 123.47]
-            notes_len = duration / len(freqs)
-
-        for i in range(n_samples):
-            t = i / sample_rate
-            note_idx = int((t % duration) / notes_len)
-            freq = freqs[note_idx]
-            
-            if is_day:
-                envelope = 1.0 - ((t % notes_len) / notes_len)
-                val = math.sin(2.0 * math.pi * freq * t)
-                volume = 0.15
-            else:
-                envelope = 1.0
-                vibrato = 1.0 + 0.05 * math.sin(2.0 * math.pi * 5 * t)
-                val = math.sin(2.0 * math.pi * (freq * vibrato) * t) + 0.3 * math.sin(2.0 * math.pi * (freq * 2) * t)
-                volume = 0.25
-
-            sample = int(val * envelope * volume * 32767)
-            sample = max(-32768, min(32767, sample))
-            data = struct.pack('<hh', sample, sample)
-            buf.extend(data)
-
-        return pygame.mixer.Sound(buffer=bytes(buf))
-
     def play_bgm(self, is_day: bool):
         if not self.sfx_enabled: return
+        import os
         
-        if self.bgm_channel is None:
-            self.bgm_channel = pygame.mixer.find_channel()
-            
-        if self.bgm_channel:
-            self.bgm_channel.stop()
-            snd = self.sounds.get("bgm_day" if is_day else "bgm_night")
-            if snd:
-                self.bgm_channel.play(snd, loops=-1)
+        bgm_file = "assets/bgm_day.mp3" if is_day else "assets/bgm_night.mp3"
+        fallback_file = "assets/bgm_day.ogg" if is_day else "assets/bgm_night.ogg"
+        
+        if os.path.exists(bgm_file):
+            try:
+                pygame.mixer.music.load(bgm_file)
+                pygame.mixer.music.play(loops=-1)
+            except Exception as e:
+                print(f"[SoundManager] BGM Error: {e}")
+        elif os.path.exists(fallback_file):
+            try:
+                pygame.mixer.music.load(fallback_file)
+                pygame.mixer.music.play(loops=-1)
+            except Exception as e:
+                print(f"[SoundManager] BGM Error: {e}")
+        else:
+            pass
 
     def _init_sounds(self):
         try:
@@ -124,8 +98,6 @@ class SoundManager:
             self.sounds["stolen"] = self._generate_tone(261.63, 0.2, volume=0.4, wave_type="saw")
             self.sounds["game_over"] = self._generate_tone(110.0, 0.8, volume=0.6, wave_type="square")
             self.sounds["night_alarm"] = self._generate_tone(493.88, 0.3, volume=0.4, wave_type="sine")
-            self.sounds["bgm_day"] = self._generate_music_loop(is_day=True)
-            self.sounds["bgm_night"] = self._generate_music_loop(is_day=False)
             self.bgm_channel = None
 
         except Exception as e:
@@ -181,7 +153,10 @@ class SoundManager:
             self.play("stolen")
         elif t == EventType.CROP_STOLEN:
             self.play("stolen")
+        elif t == EventType.DAY_STARTED:
+            self.play_bgm(is_day=True)
         elif t == EventType.NIGHT_STARTED:
+            self.play_bgm(is_day=False)
             self.play("night_alarm")
         elif t == EventType.GAME_OVER:
             self.play("game_over")
