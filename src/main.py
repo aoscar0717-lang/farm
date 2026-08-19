@@ -71,9 +71,19 @@ def play():
                 break
                 
             if event.type == TICK_EVENT:
-                # Holding F pauses the simulation -- see the f_held block below.
+                # Holding F pauses the simulation -- see the f_held block
+                # below. time_scale (0x/1x/2x/4x, via P/[/]) is the other
+                # pause/speed control: this engine has no continuous
+                # update(dt) -- "tick" is a discrete action fired once per
+                # fixed real-time interval -- so "run at Nx speed" means
+                # firing that same tick N times per interval instead of
+                # scaling a delta value. time_scale is always one of
+                # 0/1/2/4 (see capstone_contract.TIME_SCALE_STEPS), so
+                # int() here is always exact, never a truncated fraction.
+                ticks_this_interval = int(state.get("time_scale", 1.0))
                 if not is_terminal(state) and not f_held:
-                    state = apply_action(state, "tick")
+                    for _ in range(ticks_this_interval):
+                        state = apply_action(state, "tick")
 
             if event.type == pygame.MOUSEBUTTONDOWN and not f_held:
                 log_action(f"Click at {mouse_pos}, tool={current_tool}, zone={active_zone}, cam=({camera_x},{camera_y})")
@@ -185,27 +195,51 @@ def play():
         update_unlocks(state)
 
         # Holding F pauses enemy/night ticking too, same reasoning as the
-        # TICK_EVENT gate above.
-        if state["phase"] == "night" and not is_terminal(state) and not f_held:
+        # TICK_EVENT gate above. night_tick's cadence is throttled by real
+        # elapsed milliseconds (not a fixed-interval timer event like
+        # TICK_EVENT), so it's the one place in this codebase that actually
+        # has a dt-like continuous value -- time_scale is applied here by
+        # multiplying that elapsed-ms measurement, which is the literal
+        # "dt * time_scale" the feature asked for, just at the one spot
+        # where a real "dt" exists. time_scale == 0 (paused) skips this
+        # block entirely, same as f_held already does.
+        time_scale = state.get("time_scale", 1.0)
+        if state["phase"] == "night" and not is_terminal(state) and not f_held and time_scale > 0:
             current_time = pygame.time.get_ticks()
-            if current_time - last_night_tick > night_tick_delay:
+            if (current_time - last_night_tick) * time_scale > night_tick_delay:
                 state = apply_action(state, "night_tick")
                 last_night_tick = current_time
 
         screen.fill((0, 0, 0))
-        from src.renderer import draw_board
-        draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone)
-        
+
+        # Night fade-in bookkeeping stays here (frame-loop-local, real
+        # wall-clock timing -- not simulation truth, so it doesn't belong
+        # in capstone_contract.py's state). The actual mask drawing
+        # (including light-source holes) now happens inside
+        # renderer.draw_board via _draw_night_overlay, replacing the old
+        # flat night_filter blit that used to happen here -- a flat,
+        # non-per-pixel-alpha Surface can't punch light holes, so it
+        # couldn't support the new day/night light-overlay feature.
+        # night_filter itself is left in assets.py, just no longer used
+        # here.
         if state["phase"] == "night":
-            # Smooth fade-in for night filter
             if night_start_time is None:
                 night_start_time = time.time()
             elapsed = time.time() - night_start_time
-            fade_ratio = min(1.0, elapsed / NIGHT_FADE_DURATION)
-            night_filter.set_alpha(int(150 * fade_ratio))
-            screen.blit(night_filter, (0, 0))
+            night_fade_ratio = min(1.0, elapsed / NIGHT_FADE_DURATION)
         else:
             night_start_time = None  # Reset when day begins
+            night_fade_ratio = 0.0
+
+        from src.renderer import draw_board
+        draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone, night_fade_ratio)
+
+        # Floating-text events are one-shot: renderer.draw_board's call to
+        # particle.ingest_events(state) has already consumed everything
+        # currently queued this frame, so clear it now to keep the queue
+        # from growing unbounded and to avoid re-spawning the same
+        # particle next frame.
+        state["events"] = []
 
         # 思索模式：dim the (still-visible, just paused) world and show a
         # short, situational hint. F now also works while the shop is open

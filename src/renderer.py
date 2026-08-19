@@ -836,7 +836,50 @@ def _draw_minimap(screen, zstate, camera_x, camera_y):
     screen.blit(label, (mm_x + mm_w // 2 - label.get_width() // 2, mm_y - label.get_height() - 2))
 
 
-def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone):
+
+_LIGHT_GRADIENT_CACHE = {}
+
+def _get_light_gradient(radius):
+    if radius in _LIGHT_GRADIENT_CACHE:
+        return _LIGHT_GRADIENT_CACHE[radius]
+
+    size = radius * 2
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    for py in range(size):
+        for px in range(size):
+            dist = math.hypot(px - radius, py - radius)
+            if dist >= radius:
+                continue
+            a = int(255 * (1.0 - dist / radius))
+            surf.set_at((px, py), (255, 255, 255, a))
+    _LIGHT_GRADIENT_CACHE[radius] = surf
+    return surf
+
+def _draw_night_overlay(screen, state, zstate, camera_x, camera_y, mouse_pos, fade_ratio):
+    if fade_ratio <= 0:
+        return
+
+    max_alpha = int(150 * fade_ratio)
+    mask = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    mask.fill((10, 10, 40, max_alpha))
+
+    light_radius = 70
+    gradient = _get_light_gradient(light_radius)
+
+    light_positions = []
+    for dx, dy in zstate.get("dogs", []):
+        sx, sy = _screen_coords(dx, dy, camera_x, camera_y)
+        light_positions.append((sx, sy))
+    if mouse_pos:
+        light_positions.append(mouse_pos)
+
+    for lx, ly in light_positions:
+        mask.blit(gradient, (lx - light_radius, ly - light_radius), special_flags=pygame.BLEND_RGBA_SUB)
+
+    screen.blit(mask, (0, 0))
+
+def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_open, active_tab, active_zone, night_fade_ratio=0.0):
+
     # Farm and decor are independent maps now -- everything drawn below
     # (except HUD-level globals like money/phase/inventory) reads from the
     # currently active zone's own entity lists, never the other zone's.
@@ -861,6 +904,14 @@ def draw_board(screen, state, current_tool, camera_x, camera_y, mouse_pos, shop_
     _draw_harvestable_glow(screen, zstate, camera_x, camera_y)
     _draw_minimap(screen, zstate, camera_x, camera_y)
 
-    draw_hud(screen, state, current_tool, active_zone, mouse_pos)
+
+    particle.ingest_events(state)
+    particle.update_and_draw(screen, camera_x, camera_y)
+
+    if state.get("phase") == "night":
+        _draw_night_overlay(screen, state, zstate, camera_x, camera_y, mouse_pos, night_fade_ratio)
+
+    draw_hud
+(screen, state, current_tool, active_zone, mouse_pos)
     draw_shop(screen, state, shop_open, active_tab, mouse_pos)
     draw_game_over(screen, state)

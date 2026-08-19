@@ -295,6 +295,22 @@ def handle_keyboard_events(state, event, current_tool, shop_open, active_zone):
     elif event.key == pygame.K_2: current_tool = "scythe"
     elif event.key == pygame.K_3: current_tool = "shovel"
     elif event.key == pygame.K_4: current_tool = "fertilizer"
+    elif event.key == pygame.K_p:
+        if state.get("time_scale", 1.0) > 0:
+            state = apply_action(state, "set_time_scale_0")
+        else:
+            resume = state.get("time_scale_before_pause", 1.0)
+            state = apply_action(state, f"set_time_scale_{int(resume)}")
+    elif event.key == pygame.K_LEFTBRACKET:
+        import src.ui_layout as ui_layout
+        idx = ui_layout.time_scale_step_index(state.get("time_scale", 1.0))
+        idx = max(0, idx - 1)
+        state = apply_action(state, f"set_time_scale_{int(ui_layout.TIME_SCALE_STEPS[idx])}")
+    elif event.key == pygame.K_RIGHTBRACKET:
+        import src.ui_layout as ui_layout
+        idx = ui_layout.time_scale_step_index(state.get("time_scale", 1.0))
+        idx = min(len(ui_layout.TIME_SCALE_STEPS) - 1, idx + 1)
+        state = apply_action(state, f"set_time_scale_{int(ui_layout.TIME_SCALE_STEPS[idx])}")
 
     return state, current_tool, shop_open, active_zone
 

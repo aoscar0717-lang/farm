@@ -111,6 +111,18 @@ class TestDefenseAnimals(unittest.TestCase):
         # Sheep stays firmly at (30, 30)
         self.assertEqual(state["farm"]["sheeps"][0], (30, 30))
 
+
+    def test_shovel_reclaims_animals(self):
+        state = new_game()
+        state["farm"]["cats"].append((10, 10))
+        state["farm"]["bulls"].append((20, 20))
+
+        state = apply_action(state, "use_shovel_10_10")
+        self.assertNotIn((10, 10), state["farm"]["cats"])
+
+        state = apply_action(state, "use_shovel_20_20")
+        self.assertNotIn((20, 20), state["farm"]["bulls"])
+
 if __name__ == "__main__":
     unittest.main()
 
