@@ -190,7 +190,7 @@ class ActionCard:
 class NightwatchFarmApp:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 現代極簡塔防農場")
+        pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 經典精緻像素塔防農場")
         self.clock = pygame.time.Clock()
         
         self.game = GameState()
@@ -211,7 +211,6 @@ class NightwatchFarmApp:
         
         self._init_ui()
 
-
     def _init_ui(self):
         self.tab_buttons = [
             ("CROPS", "🌾 農田耕作 (10種)", pygame.Rect(24, 650, 175, 36)),
@@ -223,38 +222,38 @@ class NightwatchFarmApp:
         self.cards_by_tab = {
             "CROPS": [
                 ("PLANT_RADISH", "白蘿蔔", "$10 | 4s熟", "radish_mature"),
-                ("PLANT_TOMATO", "紅番茄", "$20 | 6s熟", "tomato_mature"),
-                ("PLANT_CORN", "甜玉米", "$40 | 10s熟", "corn_mature"),
+                ("PLANT_STRAWBERRY", "鮮甜草莓", "$20 | 6s熟", "strawberry_mature"),
+                ("PLANT_TOMATO", "紅番茄", "$35 | 8s熟", "tomato_mature"),
                 ("PLANT_EGGPLANT", "紫晶茄子", "$55 | 12s熟", "eggplant_mature"),
-                ("PLANT_STRAWBERRY", "鮮甜草莓", "$70 | 14s熟", "strawberry_mature"),
-                ("PLANT_PUMPKIN", "魔法南瓜", "$90 | 16s熟", "pumpkin_mature"),
-                ("PLANT_WATERMELON", "冰爽西瓜", "$110 | 18s熟", "watermelon_mature"),
-                ("PLANT_SUNFLOWER", "向日葵", "$130 | 20s熟", "sunflower_mature"),
-                ("PLANT_GRAPE", "皇家紫葡萄", "$160 | 22s熟", "grape_mature"),
-                ("PLANT_STARLIGHT", "永恆星光果", "$280 | 28s熟", "starlight_mature"),
+                ("PLANT_PUMPKIN", "巨型金南瓜", "$80 | 15s熟", "pumpkin_mature"),
+                ("PLANT_CORN", "香甜玉米", "$110 | 18s熟", "corn_mature"),
+                ("PLANT_SUNFLOWER", "金黃向日葵", "$140 | 20s熟", "sunflower_mature"),
+                ("PLANT_WATERMELON", "冰爽西瓜", "$180 | 24s熟", "watermelon_mature"),
+                ("PLANT_GRAPE", "皇家紫葡萄", "$220 | 26s熟", "grape_mature"),
+                ("PLANT_STARLIGHT", "永恆星光果", "$300 | 30s熟", "starlight_mature"),
             ],
             "DECO": [
-                ("PLACE_PATH", "石板花徑", "$20 | +10繁榮", "stone_path"),
-                ("PLACE_FLOWER", "鮮花花壇", "$35 | +20繁榮", "flower_bed"),
-                ("PLACE_BENCH", "休閒長椅", "$45 | +30繁榮", "garden_bench"),
-                ("PLACE_PINE", "莊園松樹", "$50 | +35繁榮", "pine_tree"),
-                ("PLACE_APPLE_TREE", "蘋果果樹", "$60 | +40繁榮", "apple_tree"),
-                ("PLACE_LANTERN", "守護路燈", "$75 | +50繁榮", "soul_lantern"),
-                ("PLACE_SAKURA_TREE", "櫻花樹", "$85 | +55繁榮", "sakura_tree"),
-                ("PLACE_BIRD_BATH", "鳥浴水盆", "$95 | +65繁榮", "bird_bath"),
-                ("PLACE_STATUE", "莊園雕像", "$110 | +75繁榮", "ancient_statue"),
-                ("PLACE_PET_HOUSE", "寵物小屋", "$130 | +90繁榮", "pet_house"),
-                ("PLACE_FOUNTAIN", "圓形噴泉", "$160 | +110", "fountain"),
-                ("PLACE_SUNDIAL", "日晷鐘塔", "$220 | +160", "sundial_tower"),
-                ("PLACE_WINDMILL", "風車磨坊", "$300 | +220", "windmill"),
+                ("PLACE_PATH", "石板小徑", "$20 | +10繁榮", "stone_path"),
+                ("PLACE_FLOWER", "鮮花盆栽", "$35 | +20繁榮", "flower_bed"),
+                ("PLACE_BENCH", "休閒木椅", "$45 | +30繁榮", "garden_bench"),
+                ("PLACE_PINE", "針葉松樹", "$50 | +35繁榮", "pine_tree"),
+                ("PLACE_APPLE_TREE", "紅葉楓樹", "$60 | +40繁榮", "apple_tree"),
+                ("PLACE_LANTERN", "夜巡路燈", "$75 | +50繁榮", "soul_lantern"),
+                ("PLACE_SAKURA_TREE", "莊園大樹", "$85 | +55繁榮", "sakura_tree"),
+                ("PLACE_BIRD_BATH", "森林野菇", "$95 | +65繁榮", "bird_bath"),
+                ("PLACE_STATUE", "神秘寶箱", "$110 | +75繁榮", "ancient_statue"),
+                ("PLACE_PET_HOUSE", "木材柴堆", "$130 | +90繁榮", "pet_house"),
+                ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110", "fountain"),
+                ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160", "sundial_tower"),
+                ("PLACE_WINDMILL", "莊園木屋", "$300 | +220", "windmill"),
             ],
             "DEFENSE": [
-                ("PLACE_FENCE", "刺藤木柵", "$15 | 阻擋+反傷", "wooden_fence"),
-                ("PLACE_TRAP", "鋼鐵捕獸夾", "$20 | 120傷害", "bear_trap"),
+                ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
+                ("PLACE_TRAP", "地刺陷阱", "$20 | 120傷害", "bear_trap"),
                 ("PLACE_SCARECROW", "農田稻草人", "$35 | 驚嚇小偷", "scarecrow"),
                 ("PLACE_BEEHIVE", "蜜蜂守衛巢", "$85 | 自動射擊", "beehive"),
                 ("BUY_DOG", "看門柴犬", "$100 | 夜間撲咬", "guard_dog"),
-                ("BUY_CAT", "招財小貓", "$80 | 白天贈金", "farm_cat"),
+                ("BUY_CAT", "招財小雞", "$80 | 白天贈金", "farm_cat"),
             ],
             "TOOLS": [
                 ("SHOVEL", "鐵鏟 / 拆除", "免費 | 挖除退80%", "shovel"),
@@ -262,11 +261,11 @@ class NightwatchFarmApp:
                 ("FLASHLIGHT", "強光手電筒", "就緒 | 3s充能", "soul_lantern"),
                 ("WHISTLE", "守衛指揮哨", "免費 | 指揮狗狗衝刺", "guard_dog"),
             ]
-
         }
 
         self.action_cards = []
         start_x = 24
+
 
         for tab_id, items in self.cards_by_tab.items():
             count = len(items)
@@ -1200,15 +1199,16 @@ class NightwatchFarmApp:
                 ]
             ),
             (
-                "🔦 步驟 3：夜晚夜巡與空白鍵強光擊暈",
+                "🔦 步驟 3：夜晚夜巡與強光擊暈（滑鼠點擊 或 空白鍵）",
                 (33, 150, 243),
                 (240, 246, 255),
                 [
-                    "1. 夜晚怪物突襲時，將滑鼠游標瞄準敵人，按下【空白鍵 Space】強光擊暈！",
-                    "2. 阻止小偷與野豬掠奪作物與金庫（若農田無作物，敵人將洗劫中央金庫）。",
-                    "3. 黎明破曉後扣除每日領地維護費，記得到【景觀】佈置果樹升級莊園！"
+                    "1. 【方法 A（滑鼠點擊）】：點選「強光手電筒」後，滑鼠點擊敵人發射強光！",
+                    "2. 【方法 B（空白鍵快捷）】：不用換工具，游標移到敵人旁按【空白鍵 Space】瞬間照暈！",
+                    "3. 阻止小偷與野豬掠奪作物與金庫，破曉後至【景觀】佈置松樹、楓樹提升莊園等級！"
                 ]
             ),
+
         ]
 
         card_y = my + 88
