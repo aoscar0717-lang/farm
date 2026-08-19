@@ -190,9 +190,17 @@ class TestUIChromeCoverage(unittest.TestCase):
         state = new_game()
         _skip_beginner_intros(state)
         state["money"] = 0
-        rect = ui_layout.tutorial_sidebar_rect()
+        # 用實際的任務列座標，不用側欄中心點：中心點落在哪一列取決於
+        # 字型度量，而不同狀態的任務文案不一樣（詳見 test_hover_regressions
+        # 的 test_14）。
+        rows = ui_layout.tutorial_sidebar_task_rects(state)
+        self.assertTrue(rows, "側欄應該至少有一列任務")
+        task, rect = rows[0]
         lines = get_contemplation_lines(state, "farm", None, False, mouse_pos=rect.center)
-        self.assertTrue(any("任務" in line for line in lines))
+        self.assertTrue(
+            any(task.title in line for line in lines),
+            f"hover 任務列「{task.title}」應給出對應的 Thought，實際得到：{lines}",
+        )
 
     def test_ui_hover_entries_require_mouse_pos_and_dont_leak_without_it(self):
         """Callers (like most of test_thought.py) that don't pass mouse_pos
