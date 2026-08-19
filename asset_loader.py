@@ -25,6 +25,20 @@ BOSS_DIRECTION_ROWS = {"down": 0, "right": 1, "up": 2}
 # 背景是純黑色去背 (Chroma Key)，不是 alpha 透明。
 BOSS_CHROMA_KEY = (0, 0, 0)
 
+# ---- 小偷 (assets/characters/theif.png) 精靈圖設定 -------------------------
+# 實測 1024x568，是 8 欄 x 4 列的網格，每格 128x142，四個方向各自獨立畫好、
+# 每個方向 8 幀（超流暢動作），不用像 pig.png 那樣靠翻轉湊出 left。
+THIEF_COLS = 8
+THIEF_ROWS = 4
+# 每個方向對應第幾「列」(row)。
+THIEF_DIRECTION_ROWS = {"down": 0, "right": 1, "left": 2, "up": 3}
+# 注意：實測背景本來就是「真透明」(alpha=0)，不是純黑不透明去背——四個角落
+# 與畫格空白處都是 (0,0,0,0)。而且畫面上小偷的頭髮/衣服本身就有大量「不透明
+# 的黑色」像素（RGB 全 0 但 alpha=255），如果再對整張圖套用
+# set_colorkey((0,0,0)) 去背，會把這些真正的黑色畫面內容一起挖空。
+# 所以這裡直接用 convert_alpha() 吃原本就有的 per-pixel alpha，不套用
+# chroma key，避免誤傷素材本身的黑色部分。
+
 # ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
 # 實測 128x32，原本以為是 4 格橫向排列、每格 32x32，但其實每組是 2 個 16x32 並排
 # (左邊健康，右邊枯萎)。將寬度減半為 16 以排除連在一起的枯萎版本。
@@ -173,6 +187,45 @@ class AssetLoader:
 
         return frames
 
+    def _load_thief_frames(self):
+        """
+        切出 theif.png 的 4 方向 x 8 幀動畫，回傳 Dict[str, List[Surface]]
+        (key 是 'down'/'right'/'left'/'up')，畫格維持精靈圖原始尺寸
+        (128x142)，縮放留給呼叫端依格子大小處理。
+
+        找不到檔案 / 切不出畫格時回傳 {}，呼叫端要自己 fallback 回
+        原本的靜態 enemy_thief.png，不要讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "characters/theif.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 characters/theif.png，小偷動畫將退回靜態圖片。")
+            return {}
+
+        try:
+            # 背景本身就是真透明 (alpha=0)，不是純黑去背，直接用
+            # convert_alpha() 讀取即可，不套用 colorkey（見上方常數註解）。
+            sheet = pygame.image.load(full_path).convert_alpha()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 theif.png 失敗: {e}")
+            return {}
+
+        sheet_w, sheet_h = sheet.get_size()
+        frame_width = sheet_w // THIEF_COLS
+        frame_height = sheet_h // THIEF_ROWS
+        if frame_width <= 0 or frame_height <= 0:
+            print(f"[AssetLoader] theif.png 尺寸 {sheet.get_size()} 切不出 {THIEF_COLS}x{THIEF_ROWS} 的畫格。")
+            return {}
+
+        def _cut(row: int, col: int) -> pygame.Surface:
+            rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+            return sheet.subsurface(rect).copy()
+
+        frames = {}
+        for direction, row in THIEF_DIRECTION_ROWS.items():
+            frames[direction] = [_cut(row, col) for col in range(THIEF_COLS)]
+
+        return frames
+
     def load_all(self):
         sz = (self.cell_size, self.cell_size)
 
@@ -270,6 +323,18 @@ class AssetLoader:
             # 靜態圖，不會讓遊戲壞掉。
             self.boss_frames: Dict[str, list] = {}
             self.enemy_boar_frames: Dict[str, list] = {}
+
+        # 6. 小偷 (theif.png) 的 4 方向 x 8 幀移動動畫，縮放成一般格子大小。
+        thief_frames_native = self._load_thief_frames()
+        if thief_frames_native:
+            self.thief_frames: Dict[str, list] = {
+                d: [pygame.transform.scale(f, sz) for f in frames]
+                for d, frames in thief_frames_native.items()
+            }
+        else:
+            # theif.png 還沒放進 assets/characters/，或切圖失敗時，
+            # 空字典——渲染層要檢查並退回 enemy_thief 靜態圖，不會讓遊戲壞掉。
+            self.thief_frames: Dict[str, list] = {}
 
     def get(self, key: str) -> pygame.Surface:
         return self.images.get(key)

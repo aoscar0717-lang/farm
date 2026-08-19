@@ -1490,6 +1490,21 @@ class NightwatchFarmApp:
                 if img:
                     offset_y = -10 if is_boss else 0
                     self.screen.blit(img, (px, py + offset_y))
+            elif enemy.enemy_type == EnemyType.THIEF:
+                # 小偷 (THIEF) 用 theif.png 8 欄 x 4 列的超流暢動畫，方向
+                # 沿用跟野豬/血月首領同一套 enemy.facing_direction（在
+                # game_state.py 移動時依 dx/dy 更新），每 100ms 換下一幀
+                # (8 幀，比野豬的 200ms 更快，符合「超流暢」的素材節奏)。
+                # 素材還沒放進 assets/characters/ 時字典是空的，自動退回
+                # 原本的靜態 enemy_thief 圖，不會讓遊戲壞掉。
+                frames = self.loader.thief_frames.get(enemy.facing_direction, [])
+                if frames:
+                    frame_index = (pygame.time.get_ticks() // 100) % len(frames)
+                    img = frames[frame_index]
+                else:
+                    img = self.loader.get("enemy_thief")
+                if img:
+                    self.screen.blit(img, (px, py))
             else:
                 k = ENEMY_DATA[enemy.enemy_type].get("asset_key", "enemy_thief")
                 img = self.loader.get(k)
