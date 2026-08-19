@@ -67,6 +67,20 @@ class AssetLoader:
         self.images: Dict[str, pygame.Surface] = {}
         self.load_all()
 
+    def _scale_keep_aspect(self, frame: pygame.Surface, cell_size: int) -> pygame.Surface:
+        """
+        等比例縮放：寬度固定等於 cell_size，高度依原始長寬比自動算出，
+        不會強制拉伸/壓扁成正方形。長條形的作物畫格（例如胡蘿蔔的
+        16x32）縮放後仍會維持瘦高的比例，不會變成矮胖的正方形。
+        呼叫端 blit 時要記得改用 midbottom 對齊格子底部，而不是
+        topleft，這樣比較高的圖才會自然往上延伸、不會超出格子下緣。
+        """
+        fw, fh = frame.get_size()
+        if fw <= 0 or fh <= 0:
+            return frame
+        target_h = max(1, round(fh * (cell_size / fw)))
+        return pygame.transform.scale(frame, (cell_size, target_h))
+
     def _load_image(self, rel_path: str, size: Tuple[int, int]) -> pygame.Surface:
         full_path = os.path.join(ASSET_ROOT, rel_path)
         if os.path.exists(full_path):
@@ -103,10 +117,12 @@ class AssetLoader:
                 self.images[f"corn_{stage}"] = self._load_image("crops/__missing__.png", size)
             return
 
+        cell_size = size[0]
         for stage, col in CORN_STAGE_COLUMNS.items():
             rect = pygame.Rect(col * CORN_FRAME_WIDTH, 0, CORN_FRAME_WIDTH, CORN_FRAME_HEIGHT)
             frame = sheet.subsurface(rect).copy()
-            self.images[f"corn_{stage}"] = pygame.transform.scale(frame, size)
+            # 等比例縮放，不強制壓成正方形 (見 _scale_keep_aspect 註解)。
+            self.images[f"corn_{stage}"] = self._scale_keep_aspect(frame, cell_size)
 
     def _load_carrot_tomato_blueberry_spritesheet(self, size: Tuple[int, int]):
         """
@@ -133,11 +149,16 @@ class AssetLoader:
                     self.images[f"{crop_name}_{stage}"] = self._load_image("crops/__missing__.png", size)
             return
 
+        cell_size = size[0]
         for crop_name, row in MIX_ROW_CROPS.items():
             for stage, col in MIX_STAGE_COLUMNS.items():
                 rect = pygame.Rect(col * MIX_FRAME_WIDTH, row * MIX_FRAME_HEIGHT, MIX_FRAME_WIDTH, MIX_FRAME_HEIGHT)
                 frame = sheet.subsurface(rect).copy()
-                self.images[f"{crop_name}_{stage}"] = pygame.transform.scale(frame, size)
+                # 等比例縮放，不強制壓成正方形 (見 _scale_keep_aspect 註解)。
+                # 這張圖的原始畫格是 16x32 (1:2 長寬比)，若強制縮放成
+                # cell_size x cell_size 的正方形，會讓胡蘿蔔/藍莓等偏瘦高
+                # 的作物看起來被橫向壓扁、變形。
+                self.images[f"{crop_name}_{stage}"] = self._scale_keep_aspect(frame, cell_size)
 
     def _load_pig_frames(self):
         """

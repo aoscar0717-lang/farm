@@ -787,16 +787,24 @@ class NightwatchFarmApp:
         # 3. 第三優先權：地圖建築、播種、澆水操作
         if self.hovered_grid:
             gx, gy = self.hovered_grid
-            self._apply_grid_action(gx, gy)
+            self._apply_grid_action(gx, gy, mx, my)
 
-    def _apply_grid_action(self, gx: int, gy: int):
+    def _apply_grid_action(self, gx: int, gy: int, mx: int = None, my: int = None):
         tile = self.game.get_tile(gx, gy)
-        
+
+        # 失敗時要在滑鼠點擊的位置跳浮動文字，沒有傳入 mx/my（例如舊的呼叫
+        # 端）時退回格子中心，確保這個 helper 不管誰呼叫都能給出合理位置。
+        if mx is None or my is None:
+            mx = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
+            my = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
+
         # 【一鍵直接採收】：若點擊成熟作物，一律直接採收獲取金幣，無須切換任何工具！
         if tile and tile.crop and tile.crop.is_mature:
             success, reward, msg = self.game.harvest_crop(gx, gy)
             if not success:
                 self.log_messages.append(f"❌ {msg}")
+                self.floating_texts.append(FloatingText(f"❌ {msg}", mx - 45, my - 12, C_RED))
+                self.sound.play("error")
             return
 
         act = self.selected_action
@@ -878,6 +886,13 @@ class NightwatchFarmApp:
 
         if not success:
             self.log_messages.append(f"❌ {msg}")
+            # 側邊日誌面板在改版後已經拿掉，玩家點擊失敗（金幣不足/該格
+            # 已被佔用/不是農田範圍...等）如果沒有畫面回饋會誤以為是
+            # Bug。這裡直接沿用 game_state.py 各個 action 函式已經算好的
+            # 詳細失敗原因字串 (msg)，在滑鼠點擊位置跳出紅色浮動文字，
+            # 不额外重複判斷一次條件（避免跟遊戲邏輯的判斷條件兩邊不同步）。
+            self.floating_texts.append(FloatingText(f"❌ {msg}", mx - 45, my - 12, C_RED))
+            self.sound.play("error")
 
     def _spawn_particles(self, px: float, py: float, color: tuple, count: int = 8):
         for _ in range(count):
@@ -1345,7 +1360,13 @@ class NightwatchFarmApp:
                     st_key = tile.crop.stage.name.lower()
                     img = self.loader.get(f"{base_key}_{st_key}")
                     if img:
-                        self.screen.blit(img, (px, py))
+                        # 作物圖片現在是等比例縮放的（asset_loader.py 的
+                        # _scale_keep_aspect），長條形作物（如胡蘿蔔）的
+                        # Surface 寬度等於 CELL_SIZE，但高度可能比格子高。
+                        # 用「底部中心 (midbottom)」對齊格子底部，讓比較
+                        # 高的作物自然往上延伸，不會歪一邊或超出格子下方。
+                        img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
+                        self.screen.blit(img, img_rect)
 
                     if tile.crop.is_moonlight_boosted:
                         pygame.draw.circle(self.screen, (129, 212, 250), (px + 10, py + 10), 4)
