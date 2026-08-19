@@ -2387,10 +2387,19 @@ class NightwatchFarmApp:
         機台，完全沒有開關狀態，畫 ON/OFF 圓點反而會誤導玩家以為它們
         也需要手動開啟，所以這裡改成一個穩定不閃爍的淡科技綠外框，代表
         「持續生效中」，跟可切換機台的圓點指示燈明確做出視覺區分。
-        asset_loader 目前沒有載入這幾個 asset_key（assets/ 底下還沒有
-        對應圖片），所以一律會走 else 分支的退回色塊 + 圖示文字，等以後
-        真的放圖片進去，loader.get() 就會自動抓到、不用改這裡的邏輯
-        （跟專案其他地方的貼圖後備模式一致）。
+        視覺升級（動態佔位圖系統）之後，asset_loader 已經會為這幾個
+        asset_key 呼叫 _load_image()，就算 assets/buildings/ 底下還沒
+        有真的放對應 PNG（目前確實還沒有），也會經由
+        AssetLoader.generate_placeholder() 產生一張有底色/特徵區分的
+        動態佔位 Surface（機台類深灰底+橘紅火焰、伐木場棕色底+木紋），
+        而不是回傳 None——所以這裡的 `if img:` 分支現在一定會成立，
+        下面 else 分支手畫的木箱色塊 + 圖示文字目前實質上變成不會被走
+        到的防禦性後備（保留著是因為萬一未來 asset_key 命名調整、或
+        AssetLoader 那邊的載入呼叫被移除，這裡還是能安全地退回一個能
+        看的樣子，不會直接壞掉）。等以後真的放上手繪 PNG 貼圖，
+        loader.get() 一樣會自動抓到真圖，不用改這裡的任何邏輯（跟專案
+        其他地方的貼圖後備模式一致）。ON/OFF 指示燈、運作進度條、被動
+        機台的淡綠外框都畫在圖片之上，不受這次改動影響。
         """
         config = building.config
         asset_key = config.get("asset_key")

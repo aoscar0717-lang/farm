@@ -5,7 +5,7 @@
 
 import os
 import pygame
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 ASSET_ROOT = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -142,18 +142,102 @@ class AssetLoader:
         target_h = max(1, round(fh * (cell_size / fw)))
         return pygame.transform.scale(frame, (cell_size, target_h))
 
-    def _load_image(self, rel_path: str, size: Tuple[int, int]) -> pygame.Surface:
-        full_path = os.path.join(ASSET_ROOT, rel_path)
-        if os.path.exists(full_path):
-            try:
-                img = pygame.image.load(full_path).convert_alpha()
-                return pygame.transform.scale(img, size)
-            except Exception as e:
-                print(f"[AssetLoader] 載入 {rel_path} 失敗: {e}")
-        
+    # 視覺升級：動態生成佔位圖 (Procedural Placeholder) 系統。
+    #
+    # name -> 底色/特徵分類的對照表。用「category」這個明確參數而不是
+    # 完全靠字串猜測，是為了避開一個真實存在的地雷：這個專案既有的
+    # 資產鍵名裡，"sundial_tower"（向日葵叢景觀）這個 key 本身就含有
+    # "tower" 這個字，如果 generate_placeholder() 純粹用「name 裡有沒
+    # 有出現 tower 關鍵字」來判斷要不要畫成防禦塔樣式，會把向日葵叢的
+    # 佔位圖誤判成金屬防禦塔，畫出完全不搭的視覺。所以這裡採用「呼叫端
+    # 明確指定 category 優先；沒指定才退回關鍵字猜測」的兩層設計——
+    # load_all() 裡新增的 7 種機台資產一律明確傳入 category，不會誤
+    # 判；generate_placeholder() 本身仍然保留關鍵字猜測邏輯，滿足「根據
+    # name 給予不同底色」的原始需求，只是這條路徑目前只有在呼叫端沒有
+    # 明確指定 category 時才會生效。
+    _PLACEHOLDER_KEYWORDS = {
+        "furnace": ("furnace", "oven", "kiln", "熔", "爐", "窯", "烤", "焦"),
+        "lumberyard": ("lumberyard", "伐木"),
+        "tower": ("tesla", "turret", "防禦塔"),
+    }
+
+    def _infer_placeholder_category(self, name: str) -> Optional[str]:
+        key = (name or "").lower()
+        for category, keywords in self._PLACEHOLDER_KEYWORDS.items():
+            for kw in keywords:
+                if kw in key:
+                    return category
+        return None
+
+    def generate_placeholder(self, name: str, size: Tuple[int, int],
+                              category: Optional[str] = None) -> pygame.Surface:
+        """在沒有外部 PNG 圖檔時，依照 name/category 生成一張有基本辨識
+        度的佔位圖，取代原本「隨便畫一個半透明灰色方塊」的做法。三種
+        目前有實作特徵的分類：
+          furnace     機台/熔爐/烤箱/炭窯類：深灰底 + 下方橘紅色矩形
+                      （代表爐火/加熱）。
+          lumberyard  伐木場：棕色底 + 幾條深色橫線（代表木紋/原木堆疊）。
+          tower       防禦塔（目前這個專案還沒有實際的防禦塔建築類型，
+                      這個分類先實作起來，供未來新增防禦塔類建築時直接
+                      使用，不用等到那時候才回頭補這個函式）：金屬銀色
+                      底 + 頂部一個亮藍色小圓形（代表塔頂的感應器/砲台）。
+          其他/無法辨識 沿用專案原本的半透明灰色方塊風格，不強加不合適
+                      的視覺，維持向下相容——原本能正常顯示（不管是真的
+                      有 PNG，還是走這個 fallback）的東西，行為不變。
+        不論哪一種分類，最後都會在 Surface 邊緣描一圈深色框線，讓格子
+        在地圖上多一點立體感，這是所有分類共用的收尾動作。"""
+        w, h = size
         surf = pygame.Surface(size, pygame.SRCALPHA)
-        pygame.draw.rect(surf, (200, 200, 200, 150), (4, 4, size[0] - 8, size[1] - 8), border_radius=4)
+        cat = category or self._infer_placeholder_category(name)
+
+        if cat == "furnace":
+            pygame.draw.rect(surf, (58, 58, 64), (0, 0, w, h))
+            flame_w = max(4, int(w * 0.5))
+            flame_h = max(4, int(h * 0.35))
+            flame_rect = pygame.Rect((w - flame_w) // 2, h - flame_h - max(2, h // 12), flame_w, flame_h)
+            pygame.draw.rect(surf, (224, 92, 38), flame_rect, border_radius=3)
+        elif cat == "lumberyard":
+            pygame.draw.rect(surf, (122, 86, 53), (0, 0, w, h))
+            grain_color = (84, 57, 33)
+            grain_lines = 3
+            for i in range(grain_lines):
+                gy = int(h * (i + 1) / (grain_lines + 1))
+                pygame.draw.line(surf, grain_color, (max(2, w // 12), gy), (w - max(2, w // 12), gy),
+                                  max(1, h // 20))
+        elif cat == "tower":
+            pygame.draw.rect(surf, (168, 172, 180), (0, 0, w, h))
+            radius = max(3, w // 6)
+            pygame.draw.circle(surf, (58, 150, 255), (w // 2, max(radius + 2, int(h * 0.28))), radius)
+        else:
+            pygame.draw.rect(surf, (200, 200, 200, 150), (4, 4, w - 8, h - 8), border_radius=4)
+
+        # 統一收尾：邊緣描一圈深色框線做出立體感。格子太小 (< 24px) 時
+        # 用 1px 框，避免細框線把整個小圖塊吃掉大半面積；正常尺寸用 2px。
+        border_width = 1 if min(w, h) < 24 else 2
+        pygame.draw.rect(surf, (28, 28, 32), surf.get_rect(), width=border_width)
         return surf
+
+    def _load_image(self, rel_path: str, size: Tuple[int, int],
+                     name: Optional[str] = None, category: Optional[str] = None) -> pygame.Surface:
+        """載入一張圖片；找不到檔案或載入失敗（格式錯誤/毀損等）都會被
+        這裡的 except 攔下來，統一改呼叫 generate_placeholder() 生成佔
+        位圖，不會讓遊戲直接壞掉。這裡刻意不再像舊版那樣先用
+        os.path.exists() 判斷檔案存不存在、只在「檔案存在但載入失敗」
+        時才印警告——現在不管是「檔案根本不存在」還是「檔案存在但讀取
+        失敗」，都會走同一條 pygame.image.load() 呼叫，由 except 統一
+        攔截處理，行為更單純、也更貼近使用者這次要求的「攔截例外錯
+        誤」寫法。只有在檔案確實存在、卻還是載入失敗時才印出警告訊息
+        （檔案單純不存在是這個專案目前的常態——很多素材本來就還沒畫，
+        不需要每次啟動都印一堆「找不到檔案」的雜訊）。"""
+        full_path = os.path.join(ASSET_ROOT, rel_path)
+        try:
+            img = pygame.image.load(full_path).convert_alpha()
+            return pygame.transform.scale(img, size)
+        except Exception as e:
+            if os.path.exists(full_path):
+                print(f"[AssetLoader] 載入 {rel_path} 失敗: {e}")
+            placeholder_name = name or os.path.splitext(os.path.basename(rel_path))[0]
+            return self.generate_placeholder(placeholder_name, size, category=category)
 
     def _load_corn_spritesheet(self, size: Tuple[int, int]):
         """
@@ -456,6 +540,45 @@ class AssetLoader:
         for key, path in defs:
             self.images[key] = self._load_image(path, sz)
 
+        # 3b. 加工機台/生產設施（烤箱/熔爐/炭窯/伐木場/礦場/灑水器/自動
+        # 採收機）。這 7 個 asset_key 從 Phase 2 起就一直存在於
+        # BUILDING_DATA 裡（_render_building_tile() 會呼叫
+        # self.loader.get(asset_key)），但 AssetLoader 之前從來沒有真的
+        # 幫這些 key 呼叫過 _load_image()——self.images 字典裡根本沒有
+        # 這幾個 key，get() 永遠回傳 None，所以畫面上一直是
+        # _render_building_tile() 自己手畫的色塊 + 文字圖示這條退回路
+        # 徑，從來沒有機會走到「有貼圖就用貼圖」那個分支。這次視覺升級
+        # 補上這幾個 key 的載入呼叫，assets/buildings/ 底下目前還沒有
+        # 對應的 PNG（本來就還沒畫），所以一定會透過 _load_image() 的
+        # except 分支落到 generate_placeholder()，改用有底色/特徵區分
+        # 的動態佔位圖取代原本 _render_building_tile() 手畫的純色塊。
+        # category 這裡明確指定，不靠 asset_key 字串去猜——避免日後這幾
+        # 個 key 命名調整時，猜測邏輯悄悄失準也不會發現。
+        buildings = [
+            ("oven", "buildings/oven.png", "furnace"),
+            ("furnace", "buildings/furnace.png", "furnace"),
+            ("kiln", "buildings/kiln.png", "furnace"),
+            ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
+            # 礦場沒有對應到使用者這次給的三種分類（機台/伐木場/防禦
+            # 塔），generate_placeholder() 目前也還沒有「礦場」專屬的
+            # 底色/特徵設計——不勉強套用一個不合適的分類（例如硬套用
+            # furnace 分類會讓礦場看起來像在燒火，語意不對），先讓它落
+            # 到 category=None、退回原本半透明灰色方塊的通用樣式，等
+            # 之後有明確的礦場視覺需求時再回來替它加一個專屬分類。
+            ("mine", "buildings/mine.png", None),
+        ]
+        for key, path, category in buildings:
+            self.images[key] = self._load_image(path, sz, name=key, category=category)
+
+        # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
+        # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
+        # 上面的 defs 清單），完全不會走到 generate_placeholder() 的
+        # fallback，所以這裡沒有東西需要為「防禦塔 (tower)」這個分類
+        # 補上載入呼叫——tower 這個分類是主動預留給未來如果新增電磁塔/
+        # 砲塔類防禦建築時直接使用，屆時只要在這裡（或 game_config.py
+        # 新增 DefenseType 之後對應的位置）用跟上面 buildings 一樣的寫
+        # 法、指定 category="tower" 呼叫 _load_image() 即可，不用再回頭
+        # 修改 generate_placeholder() 本身。
 
         # 4. 生物角色
         chars = [
