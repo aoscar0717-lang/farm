@@ -706,7 +706,29 @@ class NightwatchFarmApp:
         self.screen = self._create_display(fullscreen=False)
         pygame.display.set_caption("夜巡農場 (Nightwatch Farm) - 經典精緻像素塔防農場")
         self.clock = pygame.time.Clock()
-        
+
+        # 【Phase 6：外層遊戲狀態】主選單/遊玩狀態切換。'MENU' = 開始
+        # 畫面（開機預設狀態，玩家會先看到這個畫面才能進農場）、
+        # 'PLAYING' = 原本整套農場遊戲。run() 主迴圈依這個狀態決定要
+        # 攔截事件走選單分支、還是照舊跑遊戲的 update/render。
+        self.app_state = 'MENU'
+        self.title_bg = self._load_title_bg()
+        # 選單三顆按鈕的點擊判定 Rect，每幀由 _render_main_menu() 算好
+        # 存起來，跟既有 self.btn_speed_down_rect 這種「渲染時順便算好
+        # 點擊判定矩形」的既有模式一致，不是新發明的寫法。開機第一幀
+        # 還沒畫過選單時是 None，點擊判斷要先檢查非 None 再
+        # collidepoint，避免第一幀點擊噴例外。
+        self.btn_new_game_rect = None
+        self.btn_continue_rect = None
+        self.btn_exit_rect = None
+        # run() 原本用區域變數 running 控制主迴圈是否繼續，但「離開」
+        # 按鈕的點擊處理是在 _handle_menu_mouse_down() 這個獨立方法裡，
+        # 摸不到 run() 內部的區域變數，所以這裡改成 self.running 這個
+        # 實例屬性，讓任何方法都能直接設 self.running = False 來要求
+        # 結束主迴圈，run() 的 while 迴圈條件也改讀這個屬性。
+
+        self.running = True
+
         self.game = GameState()
         self.sound = SoundManager(sfx_enabled=True)
         self.loader = AssetLoader(cell_size=CELL_SIZE)
@@ -855,6 +877,37 @@ class NightwatchFarmApp:
                 r = pygame.Rect(0, 0, 0, 0)
                 self.action_cards.append(ActionCard(act_id, lbl, cost, tab_id, asset_key, r))
 
+    def _load_title_bg(self):
+        """載入主選單背景圖，縮放填滿整個螢幕。找不到檔案/載入失敗時
+        回傳 None，_render_main_menu() 會退回畫深藍色純色背景，不會讓
+        遊戲壞掉。
+
+        需求文字裡寫的檔名是 assets/title_bg.jpg，但實際放進
+        assets/ 目錄的真實檔案是 assets/title_bg.png（用
+        device_list_dir 實際列出目錄內容確認過，273KB 的 PNG，不是
+        JPG）——這裡直接用真實存在的檔名載入，不是照著需求文字裡的
+        假設檔名去找一個不存在的檔案。這張圖是全螢幕背景，不是套用在
+        地圖格子上的建築/裝飾貼圖，所以不透過 AssetLoader（那邊所有
+        _load_image() 呼叫都是把圖縮放成 CELL_SIZE x CELL_SIZE 的正方
+        形格子貼圖，套用在這裡尺寸會整個跑掉），改在這裡直接用
+        pygame.image.load() 讀取、縮放成 (SCREEN_WIDTH, SCREEN_HEIGHT)
+        兩個獨立步驟處理。用 convert()（不用 convert_alpha()）是因為
+        這是滿版背景，不需要保留透明度、直接吃底層 pixel format 效能
+        更好，跟遊戲內其他「需要疊在別的東西上面」的透明貼圖用途不同。
+        """
+        full_path = os.path.join(os.path.dirname(__file__), "assets", "title_bg.png")
+        if not os.path.exists(full_path):
+            print("[NightwatchFarmApp] 提示：assets/title_bg.png 不存在，"
+                  "主選單將退回深藍色純色背景，不影響遊戲運作。")
+            return None
+        try:
+            img = pygame.image.load(full_path).convert()
+            return pygame.transform.scale(img, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except Exception as e:
+            print(f"[NightwatchFarmApp] 警告：assets/title_bg.png 載入失敗（{e}），"
+                  f"主選單將退回深藍色純色背景。")
+            return None
+
     def _create_display(self, fullscreen: bool):
         flags = (pygame.FULLSCREEN | pygame.SCALED) if fullscreen else (pygame.RESIZABLE | pygame.SCALED)
         return pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
@@ -864,16 +917,30 @@ class NightwatchFarmApp:
         self.screen = self._create_display(self.is_fullscreen)
 
     def run(self):
-        running = True
-        while running:
+        while self.running:
             dt = self.clock.tick(FPS) / 1000.0
             dt = min(dt, 0.05)
             self.anim_time += dt
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    self.running = False
+                    continue
+
+                # 【Phase 6：外層遊戲狀態】主選單狀態下，把事件處理整個
+                # 攔截到獨立的分支——只認滑鼠左鍵點擊（判斷點在哪顆按鈕）
+                # 跟 F11 全螢幕切換，其餘原本 PLAYING 狀態才有意義的滑鼠
+                # 移動/放開/滾輪、鍵盤快捷鍵（P 暫停、O 訂單板、R 重開…）
+                # 全部不處理，避免選單畫面被還沒開始的那一局遊戲的殘留
+                # 狀態（例如 self.game.game_over）誤觸發。
+                if self.app_state == 'MENU':
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        self._handle_menu_mouse_down(event)
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                        self._toggle_fullscreen()
+                    continue
+
+                if event.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_mouse_down(event)
                 elif event.type == pygame.MOUSEBUTTONUP:
                     self._handle_mouse_up(event)
@@ -925,24 +992,33 @@ class NightwatchFarmApp:
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
 
+            # 【Phase 6：外層遊戲狀態】只有進入 PLAYING 狀態之後，才跑
+            # 原本整套農場遊戲的 update（時間流逝、作物生長、敵人 AI、
+            # 建築生產…）。MENU 狀態下這些都不執行，玩家還沒開始玩，
+            # 農場世界應該完全靜止，不會有任何背景模擬在跑。
+            if self.app_state == 'PLAYING':
+                if not self.show_intro and not self.show_pause_menu:
+                    self.game.update(dt * self.time_scale)
 
-            if not self.show_intro and not self.show_pause_menu:
-                self.game.update(dt * self.time_scale)
+                if self.flash_vfx_timer > 0 and not self.show_pause_menu:
+                    self.flash_vfx_timer = max(0.0, self.flash_vfx_timer - dt)
 
-            if self.flash_vfx_timer > 0 and not self.show_pause_menu:
-                self.flash_vfx_timer = max(0.0, self.flash_vfx_timer - dt)
+                self._process_events()
+                self._update_card_states()
 
-            self._process_events()
-            self._update_card_states()
+                if not self.show_pause_menu:
+                    self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
+                    self.particles = [p for p in self.particles if p.update(dt)]
 
-            if not self.show_pause_menu:
-                self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
-                self.particles = [p for p in self.particles if p.update(dt)]
-
-            self._render()
+            # 渲染同樣依 app_state 分流：MENU 只畫選單畫面，PLAYING 才
+            # 畫原本整套農場畫面（_render() 內部，含 HUD/地圖/商店/各種
+            # 彈窗，完全不動，只是現在只有 PLAYING 狀態才會被呼叫到）。
+            if self.app_state == 'MENU':
+                self._render_main_menu()
+            else:
+                self._render()
 
             pygame.display.flip()
-
 
         pygame.quit()
 
@@ -1033,6 +1109,39 @@ class NightwatchFarmApp:
         # 而不是每次只移動 1px。
         new_scroll = current - event.y * 40
         self.shop_scroll[self.active_tab] = max(0, min(max_scroll, new_scroll))
+
+    def _handle_menu_mouse_down(self, event):
+        """【Phase 6：外層遊戲狀態】主選單三顆按鈕的點擊判定。三個 Rect
+        由 _render_main_menu() 每幀算好存起來，這裡只負責讀取判斷，跟
+        _handle_mouse_down() 裡其餘按鈕的既有寫法一致。第一幀選單還沒
+        畫過時三個 Rect 都是 None，先檢查非 None 再 collidepoint，避免
+        開機瞬間點擊噴例外。"""
+        mx, my = event.pos
+
+        if self.btn_new_game_rect and self.btn_new_game_rect.collidepoint(mx, my):
+            # 新遊戲：明確重置 GameState，清空原本進度（就算玩家先前已經
+            # 玩過一局又回到選單，這裡也會拿到全新的一局，不會延續舊
+            # 進度），一併清掉浮動文字/特效/訊息記錄，避免上一局的殘留
+            # 畫面元素飄進新的一局。show_intro 重設回 True，讓新手教學
+            # 彈窗在每次「新遊戲」都會重新出現一次。
+            self.game = GameState()
+            self.floating_texts.clear()
+            self.particles.clear()
+            self.log_messages = ["🌾 歡迎來到夜巡農場！精緻像素莊園，中央為農田與防線，四周為景觀與寵物！"]
+            self.show_intro = True
+            self.show_pause_menu = False
+            self.show_order_board = False
+            self.app_state = 'PLAYING'
+            self.sound.play("build")
+        elif self.btn_continue_rect and self.btn_continue_rect.collidepoint(mx, my):
+            # 繼續遊戲：需求文字明確說「目前先直接切換狀態，不動
+            # GameState，未來再接存檔系統」——這裡忠實照做，不額外做
+            # 存檔/讀檔（那是還沒開始的下一階段工作），單純把畫面切回
+            # 玩家離開前（或開機時 __init__ 建立的那個）self.game 狀態。
+            self.app_state = 'PLAYING'
+            self.sound.play("build")
+        elif self.btn_exit_rect and self.btn_exit_rect.collidepoint(mx, my):
+            self.running = False
 
     def _handle_mouse_down(self, event):
         mx, my = event.pos
@@ -1751,6 +1860,55 @@ class NightwatchFarmApp:
                     card.cost_text = f"CD: {self.game.flashlight_cooldown:.1f}s"
                 else:
                     card.cost_text = "就緒 | 暈眩2.5s"
+
+    # ==========================================
+    # 【Phase 6】外層遊戲狀態：主選單畫面
+    # ==========================================
+    def _render_main_menu(self):
+        """開始畫面。self.title_bg 是 __init__ 時就載入好、縮放到跟螢幕
+        一樣大的背景圖（載入失敗則是 None），這裡只負責畫，不重複載入
+        邏輯。標題文字畫在正中央偏上，三顆按鈕直向排列在畫面下半部，
+        跟既有 _render_pause_menu() 一樣，用 draw_wood_panel（木紋面板，
+        沒有真的貼圖時自動退回立體木頭色塊）+ blit_text_with_shadow
+        （帶陰影文字，深色背景圖上也看得清楚）畫按鈕，維持跟遊戲其餘
+        彈窗一致的視覺語言，不是另外設計一套風格。"""
+        if self.title_bg:
+            self.screen.blit(self.title_bg, (0, 0))
+        else:
+            # 找不到 title_bg.png 時的後備：深藍色純色背景，比純黑柔和，
+            # 也呼應「像素太空船」這個主題色調的暗示（深空藍），不會讓
+            # 畫面看起來像壞掉、缺圖的空白畫面。
+            self.screen.fill((12, 16, 38))
+
+        # 半透明深色遮罩疊在背景圖上，讓標題文字跟按鈕不管背景圖本身
+        # 亮不亮都維持足夠對比度，不會被背景圖的亮色區塊蓋過去看不清楚。
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 12, 20, 90))
+        self.screen.blit(overlay, (0, 0))
+
+        blit_text_with_shadow(self.screen, FONT_TITLE, "🌾 夜巡農場 Nightwatch Farm", C_GOLD,
+                               center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 180))
+        blit_text_with_shadow(self.screen, FONT_SM, "經典精緻像素塔防農場", C_TEXT_ON_DARK,
+                               center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140))
+
+        def _draw_menu_button(rect, label, base_color):
+            hovered = rect.collidepoint(self.mouse_pos)
+            draw_wood_panel(self.screen, rect, self.loader, "ui_wood_button",
+                             base_color, border_radius=10, depth=3, pressed=hovered)
+            blit_text_with_shadow(self.screen, FONT_MD, label, C_TEXT_ON_DARK, center=rect.center)
+
+        btn_w, btn_h, gap = 260, 58, 20
+        btn_x = SCREEN_WIDTH // 2 - btn_w // 2
+        start_y = SCREEN_HEIGHT // 2 - 40
+
+        self.btn_new_game_rect = pygame.Rect(btn_x, start_y, btn_w, btn_h)
+        _draw_menu_button(self.btn_new_game_rect, "🌱 新遊戲", (90, 122, 74))
+
+        self.btn_continue_rect = pygame.Rect(btn_x, start_y + (btn_h + gap), btn_w, btn_h)
+        _draw_menu_button(self.btn_continue_rect, "▶ 繼續遊戲", (86, 108, 140))
+
+        self.btn_exit_rect = pygame.Rect(btn_x, start_y + (btn_h + gap) * 2, btn_w, btn_h)
+        _draw_menu_button(self.btn_exit_rect, "✖ 離開", (150, 70, 60))
 
     # ==========================================
     # 純色扁平無網格渲染管道 (Flat Pipeline)
