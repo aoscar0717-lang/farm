@@ -146,15 +146,71 @@ if _RESOLVED_FONT_PATH is None:
     )
 
 
+# ------------------------------------------------------------------
+# 缺字符 "☒" 方塊修復
+#
+# 中文字型已經正常顯示了，但字串裡摻的 Emoji/特殊符號（🌾🔦💰⚔️ 等）不在
+# assets/fonts/NotoSansTC-GameSubset.otf 的字集裡（那個字型本身就沒有
+# emoji 字形，不是子集裁切掉的），font.render 遇到字型裡真的沒有的字形，
+# SDL_ttf 就會畫出一個「缺字符方塊」(☒)。
+#
+# 採用最穩定的做法：不逐一去改 42 處 .render() 呼叫、也不去改
+# game_config.py 或這個檔案裡每一條字串常數（emoji 到處都是，改字串很
+# 容易漏），而是在唯一的共同關卡上做一次過濾——用 _SafeFont 包住
+# pygame.font.Font，攔截每一次 .render() 呼叫，渲染前先用 safe_text()
+# 把字型不支援的字元濾掉。因為所有畫面文字都是透過 FONT_XS/FONT_SM/
+# FONT_MD/FONT_LG/FONT_TITLE 這幾個物件呼叫 .render()，只要在這裡包一層，
+# 不管是寫死的字串常數還是動態組出來的日誌訊息，全部自動套用，不會漏掉。
+# ------------------------------------------------------------------
+_SAFE_TEXT_ALLOWED_RANGES = (
+    (0x0020, 0x007E),   # ASCII 可印字元（含基本英數字與標點）
+    (0x00A0, 0x00FF),   # Latin-1 補充（少數帶重音的字母，安全字元）
+    (0x2010, 0x2027),   # 一般標點（連接號、引號、刪節號等）
+    (0x3000, 0x303F),   # CJK 標點符號（、。「」【】等）
+    (0x3400, 0x4DBF),   # CJK 擴充 A
+    (0x4E00, 0x9FFF),   # CJK 統一表意文字（絕大多數中文字都在這個區段）
+    (0xF900, 0xFAFF),   # CJK 相容表意文字
+    (0xFF00, 0xFFEF),   # 全形符號（全形括號、標點等）
+)
+
+
+def safe_text(text) -> str:
+    """把字串裡任何落在允許範圍外的字元濾掉（主要是 Emoji、Dingbats、
+    Misc Symbols 這些目前綁定字型沒有字形的字元），確保丟進 font.render
+    的字串一定乾淨，不會跑出缺字符方塊「☒」。"""
+    if not text:
+        return text
+    text = str(text)
+    return "".join(
+        ch for ch in text
+        if any(lo <= ord(ch) <= hi for lo, hi in _SAFE_TEXT_ALLOWED_RANGES)
+    )
+
+
+class _SafeFont:
+    """包住 pygame.font.Font 的輕量代理：.render() 前自動呼叫 safe_text()
+    過濾，其他方法（.size()、.get_height() 等）原封不動轉發給底層字型，
+    行為跟直接用 pygame.font.Font 完全一樣，呼叫端不需要知道有這層包裝。"""
+
+    def __init__(self, font: pygame.font.Font):
+        self._font = font
+
+    def render(self, text, antialias, color, *args, **kwargs):
+        return self._font.render(safe_text(text), antialias, color, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._font, name)
+
+
 def get_font(size: int, bold: bool = False):
     if _RESOLVED_FONT_PATH:
         try:
             f = pygame.font.Font(_RESOLVED_FONT_PATH, size)
             f.set_bold(bold)
-            return f
+            return _SafeFont(f)
         except Exception:
             pass
-    return pygame.font.SysFont('arial', size, bold=bold)
+    return _SafeFont(pygame.font.SysFont('arial', size, bold=bold))
 
 FONT_XS = get_font(12)
 FONT_SM = get_font(14)
