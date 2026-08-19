@@ -112,13 +112,14 @@ def test_starting_gold_and_fence_durability():
     game = GameState()
     assert game.gold == 300, "初始金錢應為 300 G！"
     
-    # 在 (6, 4) 種植蘿蔔，在 (5, y) 全列建造木柵阻擋路徑
+    # 在 (6, 4) 種植蘿蔔，並在四周建造木柵阻隔
     game.plant_crop(6, 4, CropType.WHITE_RADISH)
-    for y in range(game.height):
-        game.place_defense(5, y, DefenseType.WOODEN_FENCE)
+    for fx, fy in [(5, 4), (7, 4), (6, 3), (6, 5)]:
+        game.place_defense(fx, fy, DefenseType.WOODEN_FENCE)
     fence_tile = game.get_tile(5, 4)
     assert fence_tile.defense is not None
     assert fence_tile.defense.hp == 80.0
+
     
     # 進入夜晚測試破壞
     game._start_night()

@@ -203,12 +203,14 @@ class NightwatchFarmApp:
         
         self.floating_texts = []
         self.particles = []
-        self.log_messages = ["🌾 歡迎來到夜巡農場！純色極簡莊園，中央為農田與金庫，四周為景觀與防禦！"]
+        self.log_messages = ["🌾 歡迎來到夜巡農場！精緻像素莊園，中央為農田與防線，四周為景觀與寵物！"]
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
+        self.flash_vfx_timer = 0.0
         
         self._init_ui()
+
 
     def _init_ui(self):
         self.tab_buttons = [
@@ -307,17 +309,22 @@ class NightwatchFarmApp:
                             world_gx = (mx - GRID_X) / CELL_SIZE
                             world_gy = (my - GRID_Y) / CELL_SIZE
                             success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
+                            self.flash_vfx_timer = 0.28
+                            self.sound.play("harvest")
                             if success:
-                                self._spawn_particles(mx, my, (255, 255, 200), count=15)
+                                self._spawn_particles(mx, my, (255, 255, 200), count=25)
+                                self.floating_texts.append(FloatingText("🔦 強光擊暈！", mx - 30, my - 20, (255, 255, 120)))
+                                self.log_messages.append(f"🔦 {msg}")
                             else:
                                 self.log_messages.append(f"🔦 {msg}")
                         else:
-                            self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按空白鍵可發動手電筒強光擊暈！")
-
-
+                            self.log_messages.append("☀️ 白天請專心耕作，夜晚來臨時按【空白鍵 Space】可發動手電筒強光擊暈！")
 
             if not self.show_intro:
                 self.game.update(dt)
+
+            if self.flash_vfx_timer > 0:
+                self.flash_vfx_timer = max(0.0, self.flash_vfx_timer - dt)
 
             self._process_events()
             self._update_card_states()
@@ -328,6 +335,7 @@ class NightwatchFarmApp:
             self._render()
 
             pygame.display.flip()
+
 
         pygame.quit()
 
@@ -776,6 +784,13 @@ class NightwatchFarmApp:
         for ft in self.floating_texts:
             ft.draw(self.screen)
 
+        # 全螢幕強光閃爍特效 (Flashlight Stun VFX)
+        if self.flash_vfx_timer > 0:
+            flash_alpha = int((self.flash_vfx_timer / 0.28) * 160)
+            flash_s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            flash_s.fill((255, 255, 220, flash_alpha))
+            self.screen.blit(flash_s, (0, 0))
+
         self._render_sidebar()
         self._render_tabbed_toolbar()
 
@@ -992,7 +1007,18 @@ class NightwatchFarmApp:
         if self.game.is_blood_moon:
             overlay.fill((80, 15, 25, 185))
         else:
-            overlay.fill((15, 23, 42, 175))
+            overlay.fill((12, 18, 35, 180))
+
+        # 手電筒聚光燈視野（隨滑鼠游標即時照明）
+        mx, my = self.mouse_pos
+        local_mx = mx - GRID_X
+        local_my = my - GRID_Y
+        if 0 <= local_mx <= self.game.width * CELL_SIZE and 0 <= local_my <= self.game.height * CELL_SIZE:
+            # 挖空主視野圈
+            pygame.draw.circle(overlay, (0, 0, 0, 0), (local_mx, local_my), 115)
+            # 金黃柔光光暈
+            pygame.draw.circle(overlay, (255, 235, 150, 45), (local_mx, local_my), 125, 10)
+            pygame.draw.circle(overlay, (255, 235, 150, 20), (local_mx, local_my), 140, 12)
 
         if self.game.guard_dog:
             dx = int(self.game.guard_dog.x * CELL_SIZE + CELL_SIZE // 2)
@@ -1010,6 +1036,7 @@ class NightwatchFarmApp:
                         pygame.draw.circle(overlay, (0, 0, 0, 0), (fx, fy), 60)
 
         self.screen.blit(overlay, (GRID_X, GRID_Y))
+
 
     def _render_entities(self):
         if self.game.guard_dog:
