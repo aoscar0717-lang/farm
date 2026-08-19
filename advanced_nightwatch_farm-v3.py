@@ -24,6 +24,20 @@ os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "0")
 
 import pygame
 
+# 告訴 Windows 系統這個程式支援高 DPI，不要強制進行模糊縮放。沒有這行時，
+# Windows 會把整個視窗當成一般「不支援 DPI」的舊程式，用作業系統層級的點陣
+# 縮放把畫面拉伸到符合系統顯示設定的縮放比例（通常是 125%/150%），這層
+# 拉伸跟上面 SDL_RENDER_SCALE_QUALITY 是兩回事、Pygame 完全不知情也管不到，
+# 疊加在一起就是「明明已經設定 nearest-neighbor 了，畫面卻還是糊」的原因。
+# 必須在 pygame.init() 之前呼叫（更精確地說是在第一次建立視窗之前），才能
+# 阻止 Windows 對這個程式套用相容性縮放。
+if os.name == 'nt':
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 
 if sys.platform == "win32":
     try:
