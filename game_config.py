@@ -168,7 +168,7 @@ CROP_DATA = {
         "asset_key": "radish",
     },
     CropType.RED_TOMATO: {
-        "name": "紅番茄",
+        "name": "金黃小麥",
         "unlock_level": 1,
         "seed_cost": 20,
         "grow_time": 6.0,
@@ -186,7 +186,7 @@ CROP_DATA = {
         "asset_key": "corn",
     },
     CropType.CRYSTAL_EGGPLANT: {
-        "name": "紫晶茄子",
+        "name": "紫心蘿蔔",
         "unlock_level": 2,
         "seed_cost": 55,
         "grow_time": 12.0,
@@ -195,7 +195,7 @@ CROP_DATA = {
         "asset_key": "eggplant",
     },
     CropType.SWEET_STRAWBERRY: {
-        "name": "鮮甜草莓",
+        "name": "漿果灌木",
         "unlock_level": 2,
         "seed_cost": 70,
         "grow_time": 14.0,
@@ -213,7 +213,7 @@ CROP_DATA = {
         "asset_key": "pumpkin",
     },
     CropType.CRISP_WATERMELON: {
-        "name": "冰爽西瓜",
+        "name": "秋收金南瓜",
         "unlock_level": 3,
         "seed_cost": 110,
         "grow_time": 18.0,
@@ -231,7 +231,7 @@ CROP_DATA = {
         "asset_key": "sunflower",
     },
     CropType.ROYAL_GRAPE: {
-        "name": "皇家紫葡萄",
+        "name": "櫻桃小蘿蔔",
         "unlock_level": 4,
         "seed_cost": 160,
         "grow_time": 22.0,
@@ -240,7 +240,7 @@ CROP_DATA = {
         "asset_key": "grape",
     },
     CropType.STARLIGHT_FRUIT: {
-        "name": "永恆星光果",
+        "name": "星光大南瓜",
         "unlock_level": 5,
         "seed_cost": 280,
         "grow_time": 28.0,
