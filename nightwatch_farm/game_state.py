@@ -35,8 +35,9 @@ class GameState:
         self.phase: GamePhase = GamePhase.DAY
         self.time_in_phase: float = 0.0
         self.total_game_time: float = 0.0
-        self.day_duration: float = self.config["DAY_DURATION"]
+        self.day_duration: float = self.config.get("DAY_1_DURATION", 30.0) if self.day_count == 1 else self.config["DAY_DURATION"]
         self.night_duration: float = self.config["NIGHT_DURATION"]
+
         
         # 網格初始化 (中央農田，四周佈置)
         self.grid: List[List[Tile]] = []
@@ -373,10 +374,13 @@ class GameState:
         
         self.is_blood_moon = (self.day_count % 3 == 0)
         
-        base_enemies = 3 + (self.day_count * 2)
-        prosperity_bonus = self.prosperity_score // 25
-        self.enemies_to_spawn = base_enemies + prosperity_bonus
-        self.spawn_timer = 0.8
+        if self.day_count == 1:
+            self.enemies_to_spawn = 2   # 第 1 天夜晚僅出 2 隻小偷，友善新手教學
+        else:
+            base_enemies = 2 + (self.day_count * 2)
+            prosperity_bonus = self.prosperity_score // 25
+            self.enemies_to_spawn = base_enemies + prosperity_bonus
+        self.spawn_timer = 1.2
         self.enemies.clear()
 
         # 夜間作物月光滋養標記
@@ -415,6 +419,7 @@ class GameState:
         self.phase = GamePhase.DAY
         self.time_in_phase = 0.0
         self.day_count += 1
+        self.day_duration = self.config.get("DAY_1_DURATION", 30.0) if self.day_count == 1 else self.config["DAY_DURATION"]
         self.is_blood_moon = False
         self.enemies.clear()
 
@@ -447,11 +452,15 @@ class GameState:
     # =========================================================================
 
     def _spawn_enemy(self):
-        weights = [45, 40, 15 if self.day_count >= 2 else 0]
-        enemy_type = random.choices(
-            [EnemyType.THIEF, EnemyType.WILD_BOAR, EnemyType.SHADOW_BAT],
-            weights=weights
-        )[0]
+        if self.day_count == 1:
+            enemy_type = EnemyType.THIEF
+        else:
+            weights = [45, 40 if self.day_count >= 2 else 0, 15 if self.day_count >= 3 else 0]
+            enemy_type = random.choices(
+                [EnemyType.THIEF, EnemyType.WILD_BOAR, EnemyType.SHADOW_BAT],
+                weights=weights
+            )[0]
+
         
         border = random.choice(["TOP", "BOTTOM", "LEFT", "RIGHT"])
         if border == "TOP":

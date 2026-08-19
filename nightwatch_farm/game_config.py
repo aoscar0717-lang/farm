@@ -137,12 +137,14 @@ MAP_CONFIG = {
     "FARM_Y_RANGE": (2, 8),
     "VAULT_POS": (8, 5),
     "DAY_DURATION": 20.0,
+    "DAY_1_DURATION": 30.0,     # 第 1 天給予 30 秒充裕時間供新手閱讀引導與播種
     "NIGHT_DURATION": 18.0,
     "INITIAL_GOLD": 300,
     "DAILY_TAX_BASE": 15,
     "DAILY_TAX_PER_DAY": 5,
     "FLASHLIGHT_COOLDOWN": 3.0,  # 3 秒強光手電筒冷卻時間
 }
+
 
 
 FARM_LEVELS = {

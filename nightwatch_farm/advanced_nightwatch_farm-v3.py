@@ -349,13 +349,17 @@ class NightwatchFarmApp:
             return
         mx, my = event.pos
 
-        # 開場故事彈窗
+        # 開場新手速成圖卡彈窗
         if self.show_intro:
-            btn_start = pygame.Rect(SCREEN_WIDTH // 2 - 120, SCREEN_HEIGHT // 2 + 200, 240, 50)
-            if btn_start.collidepoint(mx, my):
+            modal_w, modal_h = 840, 580
+            mod_x = (SCREEN_WIDTH - modal_w) // 2
+            mod_y = (SCREEN_HEIGHT - modal_h) // 2
+            btn_start = pygame.Rect(mod_x + (modal_w - 280) // 2, mod_y + 500, 280, 54)
+            if btn_start.collidepoint(mx, my) or not pygame.Rect(mod_x, mod_y, modal_w, modal_h).collidepoint(mx, my):
                 self.show_intro = False
                 self.sound.play("build")
             return
+
 
         # 遊戲結束
         if self.game.game_over:
@@ -592,31 +596,106 @@ class NightwatchFarmApp:
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
 
-    def _get_contextual_guide_text(self) -> Tuple[str, tuple]:
+    def _get_mascot_guide_data(self) -> Tuple[str, tuple, str, tuple, str]:
+        """Returns (badge_text, badge_bg_color, main_dialogue, text_color, step_tag)"""
         if self.game.phase == GamePhase.NIGHT:
             if self.game.is_blood_moon:
-                return "🩸 【血月警報】：巨型野豬首領即將破壞木柵防線！按空白鍵使用手電筒擊暈，全力集火！", (255, 128, 128)
+                return (
+                    "🩸 血月首領",
+                    (211, 47, 47),
+                    "【血月警報】巨型野豬巨獸即將破壞防線！請用手電筒強光擊暈，柴犬與蜜蜂塔全力集火！",
+                    (255, 180, 180),
+                    "[集火 Boss]"
+                )
             else:
-                return "🔦 【夜巡防守】：按空白鍵（或工具列手電筒）強光擊暈入侵者！小偷與野豬會啃咬木柵，請保護農田！", (179, 229, 252)
+                return (
+                    "🔦 夜巡夜戰",
+                    (33, 150, 243),
+                    "【夜間防守】入侵者來襲！游標瞄準敵人，按【空白鍵 Space】發動強光手電筒擊暈他！",
+                    (179, 229, 252),
+                    "[空白鍵擊暈]"
+                )
         else:
             # Daytime
             crops_count = sum(1 for row in self.game.grid for tile in row if tile.crop)
             mature_count = sum(1 for row in self.game.grid for tile in row if tile.crop and tile.crop.is_mature)
-            
-            if self.game.day_count <= 2:
+
+            if self.game.day_count == 1:
                 if crops_count == 0:
-                    return "🌱 【新手提示】：點擊下方「白蘿蔔」或「紅番茄」種子，在中央深色農田點擊播種！", (255, 245, 157)
+                    return (
+                        "🐶 柴犬管家",
+                        (255, 152, 0),
+                        "領主你好！快點選下方【白蘿蔔種子】，在中央金色農田點擊 3~5 格播種賺錢！",
+                        (255, 245, 157),
+                        "[步驟 1/3：播種]"
+                    )
                 elif mature_count > 0:
-                    return "🌾 【新手提示】：作物已成熟！直接點擊成熟作物採收賺取金幣，準備迎接夜晚！", (200, 230, 201)
-                elif self.game.time_in_phase > 12.0:
-                    return "🛡️ 【天黑預警】：夜晚即將來臨！可至「防禦」分頁設置捕獸夾、木柵或領養看門柴犬！", (255, 204, 128)
+                    return (
+                        "🌾 採收豐收",
+                        (76, 175, 80),
+                        "作物成熟泛出金黃光芒了！請【直接滑鼠點擊作物】採收，換取第一桶金！",
+                        (200, 230, 201),
+                        "[步驟 2/3：採收]"
+                    )
+                elif self.game.time_in_phase > 15.0:
+                    return (
+                        "🛡️ 防守備戰",
+                        (239, 83, 80),
+                        "天色即將變暗！請點擊【防禦】分頁，購買【看門柴犬 ($100)】或【刺藤木柵】保護農田！",
+                        (255, 204, 128),
+                        "[步驟 3/3：防禦]"
+                    )
                 else:
-                    return "⏳ 【生長中】：作物正在生長！可使用澆水壺加速，或在四周佈置莊園景觀提高繁榮度！", (220, 237, 200)
+                    return (
+                        "⏳ 生長觀察",
+                        (0, 188, 212),
+                        "作物正在快速生長中！可點擊【黃金澆水壺】加速進度，靜候成熟採收！",
+                        (220, 237, 200),
+                        "[生長觀察]"
+                    )
+            elif self.game.day_count == 2:
+                if mature_count > 0:
+                    return (
+                        "🌾 採收提醒",
+                        (76, 175, 80),
+                        "有成熟作物等待採收！天黑前記得收成，存活過夜作物更享有月光加成 +50%！",
+                        (200, 230, 201),
+                        "[點擊採收]"
+                    )
+                elif self.game.time_in_phase > 12.0:
+                    return (
+                        "🛡️ 防線加固",
+                        (239, 83, 80),
+                        "野豬即將加入夜襲！多配置幾條刺藤圍籬與捕獸夾，防止防線被衝破！",
+                        (255, 204, 128),
+                        "[佈置防禦]"
+                    )
+                else:
+                    return (
+                        "🌸 景觀擴建",
+                        (156, 39, 176),
+                        "第 2 天開始！到【景觀】分頁佈置果樹、噴泉提升繁榮度，解鎖甜玉米與草莓！",
+                        (245, 245, 245),
+                        "[莊園升級]"
+                    )
             else:
                 if mature_count > 0:
-                    return "🌾 【採收提醒】：有成熟作物等待採收！天黑前未採收若被小偷洗劫將損失慘重！", (200, 230, 201)
+                    return (
+                        "🌾 豐收時刻",
+                        (76, 175, 80),
+                        "請及時採收成熟作物，為莊園籌措升級資金與繳納每日領地地租！",
+                        (200, 230, 201),
+                        "[點擊採收]"
+                    )
                 else:
-                    return f"🏛️ 【第 {self.game.day_count} 天】：清晨將扣繳領地地租。持續升級種植高階作物、佈置防禦設施！", (245, 245, 245)
+                    return (
+                        "🏛️ 領地經營",
+                        (156, 39, 176),
+                        f"第 {self.game.day_count} 天莊園繁榮度: {self.game.prosperity_score}！持續佈置景觀解鎖高級魔法南瓜！",
+                        (245, 245, 245),
+                        f"[Lv.{self.game.farm_level}]"
+                    )
+
 
 
     def _update_card_states(self):
@@ -809,6 +888,22 @@ class NightwatchFarmApp:
                         pygame.draw.rect(self.screen, (0, 0, 0, 80), pb)
                         pygame.draw.rect(self.screen, (76, 175, 80), (pb.x, pb.y, int(pb.width * ratio), 3))
 
+        # 第 1 天未播種時，農田外框呈現金色呼吸引導光效
+        if self.game.day_count == 1 and sum(1 for row in self.game.grid for tile in row if tile.crop) == 0:
+            pulse = (math.sin(self.anim_time * 5.0) + 1.0) * 0.5
+            glow_alpha = int(120 + pulse * 135)
+            guide_s = pygame.Surface((farm_rw + 8, farm_rh + 8), pygame.SRCALPHA)
+            pygame.draw.rect(guide_s, (255, 215, 0, glow_alpha), (0, 0, farm_rw + 8, farm_rh + 8), width=3, border_radius=18)
+            self.screen.blit(guide_s, (farm_rx - 4, farm_ry - 4))
+            
+            # 中央飄浮新手引導標籤
+            tip_w, tip_h = 210, 26
+            tip_x = farm_rx + (farm_rw - tip_w) // 2
+            tip_y = farm_ry + 20
+            pygame.draw.rect(self.screen, (38, 50, 56, 230), (tip_x, tip_y, tip_w, tip_h), border_radius=6)
+            pygame.draw.rect(self.screen, C_GOLD, (tip_x, tip_y, tip_w, tip_h), width=1, border_radius=6)
+            self.screen.blit(FONT_SM.render("👇 請在此處點擊播種白蘿蔔", True, C_GOLD), (tip_x + 14, tip_y + 4))
+
         if self.hovered_grid:
             gx, gy = self.hovered_grid
             cx = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
@@ -817,11 +912,27 @@ class NightwatchFarmApp:
             pygame.draw.circle(glow_s, (255, 255, 255, 110), (CELL_SIZE, CELL_SIZE), 24, 3)
             self.screen.blit(glow_s, (cx - CELL_SIZE, cy - CELL_SIZE))
 
-        # 即時情境新手引導橫幅
-        guide_txt, guide_col = self._get_contextual_guide_text()
-        banner_rect = pygame.Rect(GRID_X, GRID_Y - 22, map_w, 20)
-        pygame.draw.rect(self.screen, (33, 43, 54, 220), banner_rect, border_radius=6)
-        self.screen.blit(FONT_SM.render(guide_txt, True, guide_col), (banner_rect.x + 10, banner_rect.y + 2))
+        # 即時情境【柴犬教官】動態新手對話框
+        badge_txt, badge_bg, main_txt, txt_col, step_tag = self._get_mascot_guide_data()
+        banner_h = 26
+        banner_rect = pygame.Rect(GRID_X, GRID_Y - 28, map_w, banner_h)
+        pygame.draw.rect(self.screen, (28, 37, 46, 235), banner_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (70, 85, 100), banner_rect, width=1, border_radius=8)
+
+        # 左側膠囊徽章 (Badge)
+        badge_w = 95
+        badge_r = pygame.Rect(banner_rect.x + 4, banner_rect.y + 3, badge_w, banner_h - 6)
+        pygame.draw.rect(self.screen, badge_bg, badge_r, border_radius=6)
+        b_surf = FONT_XS.render(badge_txt, True, C_WHITE)
+        self.screen.blit(b_surf, (badge_r.centerx - b_surf.get_width() // 2, badge_r.centery - b_surf.get_height() // 2))
+
+        # 中間主引導對話
+        self.screen.blit(FONT_SM.render(main_txt, True, txt_col), (badge_r.right + 12, banner_rect.y + 4))
+
+        # 右側步驟進度標籤
+        tag_surf = FONT_XS.render(step_tag, True, (176, 190, 197))
+        self.screen.blit(tag_surf, (banner_rect.right - tag_surf.get_width() - 10, banner_rect.y + 5))
+
 
 
     def _render_night_overlay(self):
@@ -967,60 +1078,87 @@ class NightwatchFarmApp:
                 card.draw(self.screen, is_selected=(self.selected_action == card.action_id), loader=self.loader)
 
     # ==========================================
-    # 開場故事彈窗
+    # 開場新手速成圖卡彈窗
     # ==========================================
     def _render_story_modal(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((15, 23, 42, 235))
         self.screen.blit(overlay, (0, 0))
 
-        modal_w, modal_h = 800, 560
+        modal_w, modal_h = 840, 580
         mx = (SCREEN_WIDTH - modal_w) // 2
         my = (SCREEN_HEIGHT - modal_h) // 2
         modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
 
-        pygame.draw.rect(self.screen, (255, 255, 255), modal_rect, border_radius=16)
-        pygame.draw.rect(self.screen, C_ORANGE, modal_rect, width=3, border_radius=16)
+        pygame.draw.rect(self.screen, (255, 255, 255), modal_rect, border_radius=18)
+        pygame.draw.rect(self.screen, C_ORANGE, modal_rect, width=3, border_radius=18)
 
-        t = FONT_TITLE.render("🌾《夜巡農場》純色極簡塔防守護傳奇", True, C_TEXT_MAIN)
-        self.screen.blit(t, (mx + (modal_w - t.get_width()) // 2, my + 24))
+        t = FONT_TITLE.render("🌾《夜巡農場》新手速成指南 (Quickstart Guide)", True, (38, 50, 56))
+        self.screen.blit(t, (mx + (modal_w - t.get_width()) // 2, my + 20))
+        sub_t = FONT_SM.render("掌握 3 大核心步驟，由「柴犬管家」手把手帶您守護農莊！", True, C_TEXT_MUTED)
+        self.screen.blit(sub_t, (mx + (modal_w - sub_t.get_width()) // 2, my + 56))
 
-        story_box = pygame.Rect(mx + 36, my + 68, modal_w - 72, 126)
-        pygame.draw.rect(self.screen, (250, 245, 235), story_box, border_radius=8)
-        pygame.draw.rect(self.screen, (230, 215, 195), story_box, width=1, border_radius=8)
-
-        story_lines = [
-            "【背景故事】你接手了一座純淨美麗的邊境莊園。",
-            "中央是「高架農田與金庫」，耕種 10 種作物換取金幣；四周可自由建造 13 種景觀與蜜蜂塔！",
-            "【防偷懶機制】若夜晚田裡空無一物，敵人將直接襲擊中央金庫洗劫 35% 金幣！",
-            "保護作物安全度過黑夜，隔日採收將獲得「月光滋養 +50% 巨額金幣」回報！"
+        # 3 個直覺新手步驟卡片
+        steps = [
+            (
+                "🌱 步驟 1：日間耕種與採收變現",
+                (76, 175, 80),
+                (240, 248, 240),
+                [
+                    "1. 點擊下方工具列【白蘿蔔種子 ($10)】，在中央深色農田點擊播種。",
+                    "2. 作物成熟長大後（泛出金黃光芒），【直接點擊作物】即可採收賺取金幣！",
+                    "3. 點選【黃金澆水壺 ($5)】可為作物加速生長 50%。"
+                ]
+            ),
+            (
+                "🛡️ 步驟 2：天黑前佈置防禦防線",
+                (255, 152, 0),
+                (255, 248, 238),
+                [
+                    "1. 天黑前切換至【防禦】分頁，購買【看門柴犬 ($100)】自動撲咬敵人！",
+                    "2. 在農田四周建造【刺藤木柵 ($15)】阻擋怪物，或設置【鋼鐵捕獸夾 ($20)】。",
+                    "3. 存活過夜的作物隔日採收享有【月光滋養 +50% 巨額金幣】回報！"
+                ]
+            ),
+            (
+                "🔦 步驟 3：夜晚夜巡與空白鍵強光擊暈",
+                (33, 150, 243),
+                (240, 246, 255),
+                [
+                    "1. 夜晚怪物突襲時，將滑鼠游標瞄準敵人，按下【空白鍵 Space】強光擊暈！",
+                    "2. 阻止小偷與野豬掠奪作物與金庫（若農田無作物，敵人將洗劫中央金庫）。",
+                    "3. 黎明破曉後扣除每日領地維護費，記得到【景觀】佈置果樹升級莊園！"
+                ]
+            ),
         ]
-        for idx, line in enumerate(story_lines):
-            self.screen.blit(FONT_SM.render(line, True, (93, 64, 55)), (story_box.x + 14, story_box.y + 12 + idx * 26))
 
-        guide_y = my + 215
-        self.screen.blit(FONT_MD.render("🎮 核心挑戰與戰術機制：", True, C_TEXT_MAIN), (mx + 36, guide_y))
-        guide_y += 28
+        card_y = my + 88
+        for title, b_col, bg_col, lines in steps:
+            card_r = pygame.Rect(mx + 30, card_y, modal_w - 60, 110)
+            pygame.draw.rect(self.screen, bg_col, card_r, border_radius=10)
+            pygame.draw.rect(self.screen, b_col, card_r, width=2, border_radius=10)
 
-        guides = [
-            ("🌾 直接點擊採收", "成熟作物只要【滑鼠直接點擊】即可瞬間採收獲取金幣，無須切換任何工具！"),
-            ("☀️ 白天 (20s)", "種植作物、用水壺澆水加速，建造景觀累積繁榮度升級莊園（最高 Lv.5 仙境）。"),
-            ("🌙 夜晚 (18s)", "保護作物與金庫！存活過夜作物享【月光加成+50%】；時間結束自動破曉！"),
-            ("🩸 血月 Boss", "每 3 天降臨超高血量「野豬暴君 Boss」，考驗您的防禦深度！"),
-            ("🔦 3s 強光手電", "夜晚點擊【強光手電筒】可照暈敵人 2.5 秒（每 3 秒快速充能一次）！"),
-            ("🐝 蜜蜂防禦塔", "蜜蜂守衛巢夜晚自動發射蜂針遠程射擊入侵敵人！"),
-            ("💀 破產淘汰", "若持金 < 10 G 且農田無作物，或遭洗劫破產，將立即判定破產淘汰！")
-        ]
-        for g_title, g_desc in guides:
-            t_col = C_ORANGE if "☀️" in g_title else (C_BLOOD_RED if "🩸" in g_title else (C_CYAN if "🌙" in g_title else C_GREEN))
-            self.screen.blit(FONT_MD.render(g_title, True, t_col), (mx + 36, guide_y))
-            self.screen.blit(FONT_SM.render(g_desc, True, C_TEXT_MAIN), (mx + 175, guide_y + 1))
-            guide_y += 25
+            # 標題欄
+            pygame.draw.rect(self.screen, b_col, (card_r.x, card_r.y, card_r.w, 28), border_top_left_radius=8, border_top_right_radius=8)
+            self.screen.blit(FONT_MD.render(title, True, C_WHITE), (card_r.x + 12, card_r.y + 4))
 
-        btn_start = pygame.Rect(mx + (modal_w - 240) // 2, my + 485, 240, 50)
-        pygame.draw.rect(self.screen, C_GREEN, btn_start, border_radius=10)
-        btn_txt = FONT_LG.render("🚀 開始守護農場", True, C_WHITE)
+            line_y = card_r.y + 34
+            for l in lines:
+                self.screen.blit(FONT_SM.render(l, True, (45, 55, 65)), (card_r.x + 14, line_y))
+                line_y += 24
+
+            card_y += 122
+
+        # 底部提示文字
+        bot_tip = FONT_XS.render("💡 提示：初始資金已充能為 $300 G，第 1 天提供 30 秒充裕時間，請跟隨畫面上方【柴犬管家】輕鬆遊玩！", True, (100, 115, 130))
+        self.screen.blit(bot_tip, (mx + (modal_w - bot_tip.get_width()) // 2, my + 468))
+
+        btn_start = pygame.Rect(mx + (modal_w - 280) // 2, my + 500, 280, 54)
+        pygame.draw.rect(self.screen, C_GREEN, btn_start, border_radius=12)
+        pygame.draw.rect(self.screen, (56, 142, 60), btn_start, width=2, border_radius=12)
+        btn_txt = FONT_LG.render("🚀 我瞭解了，開始農莊冒險！", True, C_WHITE)
         self.screen.blit(btn_txt, (btn_start.centerx - btn_txt.get_width() // 2, btn_start.centery - btn_txt.get_height() // 2))
+
 
     # ==========================================
     # 遊戲結束彈窗
