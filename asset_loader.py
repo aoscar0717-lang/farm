@@ -123,8 +123,18 @@ DOG_DAY_SIT_ROW = 2
 
 
 class AssetLoader:
-    def __init__(self, cell_size: int = 50):
+    def __init__(self, cell_size: int = 50, screen_size: Tuple[int, int] = (1260, 800)):
         self.cell_size = cell_size
+        # 【系統更新：主選單背景圖】主選單背景 (main_menu_bg) 要縮放成
+        # 「整個遊戲視窗大小」，但 SCREEN_WIDTH/SCREEN_HEIGHT 這兩個常數
+        # 定義在 advanced_nightwatch_farm-v3.py（呼叫端），asset_loader.py
+        # 不能反過來 import 那個檔案（那會是循環 import：主程式本來就要
+        # import 這個檔案裡的 AssetLoader）。改成呼叫端在建立 AssetLoader
+        # 時把 (SCREEN_WIDTH, SCREEN_HEIGHT) 當參數傳進來，這裡存成
+        # self.screen_size 給 load_all() 用；預設值 (1260, 800) 只是防呆
+        # （例如其他測試腳本直接 AssetLoader() 不傳這個參數時仍能正常
+        # 運作），實際遊戲執行時一律由主程式傳入當下真正的螢幕尺寸。
+        self.screen_size = screen_size
         self.images: Dict[str, pygame.Surface] = {}
         # 視覺升級：熔爐 Sprite Sheet 特定影格動畫。
         #
@@ -780,8 +790,35 @@ class AssetLoader:
         # _render_flat_meadow_and_farm() 說明），所以刻意不再把
         # "iron_flower_seed"/"_sprout"/"_growing"/"_mature" 這幾個
         # per-stage key 塞進上面的 crops 清單。
-        self._load_1x4_spritesheet("iron_flower", "crops/iron_flower.png", sz,
+        # 【系統更新：資產路徑更新】使用者這次把富鐵花素材換成新檔案，
+        # 路徑也跟著改成 crops/bg_iron_flower.png（取代上一版的
+        # crops/iron_flower.png）。切圖邏輯本身完全不用改——
+        # _load_1x4_spritesheet() 一樣會把它切成 4 幀、縮放成 sz（單一
+        # 格 CELL_SIZE x CELL_SIZE，1x1），colorkey 繼續傳 None 讓自動
+        # 偵測邏輯依這張圖實際的 alpha 通道決定要不要去背，去背設定跟
+        # 上一版行為一致，不用另外處理。
+        self._load_1x4_spritesheet("iron_flower", "crops/bg_iron_flower.png", sz,
                                     colorkey=None, placeholder_category="iron_flower")
+
+        # 【系統更新：主選單背景圖】main_menu_bg：墜毀太空船場景圖，
+        # 縮放至 self.screen_size（呼叫端傳入的 (SCREEN_WIDTH,
+        # SCREEN_HEIGHT)），讓它剛好貼滿整個遊戲視窗。
+        #
+        # 這裡刻意存進既有的 self.images（用 get("main_menu_bg") 取用），
+        # 不是使用者需求文字裡寫的 self.assets['main_menu_bg']——
+        # AssetLoader 這個類別從頭到尾都只有 self.images 這一個「單一
+        # Surface、靠 get() 取用」的字典（見 __init__ 裡
+        # self.building_anim_frames 那段既有註解，之前就因為同樣理由
+        # 特地不引入 self.assets 這個新字典，避免兩套命名並存互相打
+        # 架），這次沿用同一個既有慣例，不新增第二套存放機制。
+        #
+        # 用既有的 _load_image() 而不是 _load_1x4_spritesheet()：這張圖
+        # 是單張完整的背景場景圖，不是 4 幀 Sprite Sheet，_load_image()
+        # 本來就是給「單張圖片、縮放到指定尺寸、找不到就退回佔位圖」這
+        # 種需求用的既有共用函式，不用另外寫新邏輯。
+        self.images["main_menu_bg"] = self._load_image(
+            "crops/bg_crash.png", self.screen_size, name="main_menu_bg"
+        )
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見

@@ -766,7 +766,12 @@ class NightwatchFarmApp:
 
         self.game = GameState()
         self.sound = SoundManager(sfx_enabled=True)
-        self.loader = AssetLoader(cell_size=CELL_SIZE)
+        # 【系統更新：主選單背景圖】AssetLoader 這次多了一個
+        # screen_size 參數，用來把 main_menu_bg（crops/bg_crash.png）
+        # 縮放到剛好貼滿整個視窗——這裡把 (SCREEN_WIDTH, SCREEN_HEIGHT)
+        # 傳進去，AssetLoader 本身不 import 這兩個常數（避免跟這個檔案
+        # 循環 import），單純把呼叫端已經算好的螢幕尺寸原樣轉交進去。
+        self.loader = AssetLoader(cell_size=CELL_SIZE, screen_size=(SCREEN_WIDTH, SCREEN_HEIGHT))
 
         # 【系統升級：打字機開場劇情 + 無縫 AI 任務引導】app_state 沿用
         # 既有的字串狀態機（'MENU'/'PLAYING'，見上面的說明），這次新增
@@ -2228,19 +2233,38 @@ class NightwatchFarmApp:
     # 【Phase 6】外層遊戲狀態：主選單畫面
     # ==========================================
     def _render_main_menu(self):
-        """開始畫面。self.title_bg 是 __init__ 時就載入好、縮放到跟螢幕
-        一樣大的背景圖（載入失敗則是 None），這裡只負責畫，不重複載入
-        邏輯。標題文字畫在正中央偏上，三顆按鈕直向排列在畫面下半部，
-        跟既有 _render_pause_menu() 一樣，用 draw_wood_panel（木紋面板，
-        沒有真的貼圖時自動退回立體木頭色塊）+ blit_text_with_shadow
-        （帶陰影文字，深色背景圖上也看得清楚）畫按鈕，維持跟遊戲其餘
-        彈窗一致的視覺語言，不是另外設計一套風格。"""
-        if self.title_bg:
-            self.screen.blit(self.title_bg, (0, 0))
+        """開始畫面。
+
+        【系統更新：實裝主選單背景圖】背景圖來源這次從 self.title_bg
+        （__init__ 時用 os.path 直接讀 assets/title_bg.png 的獨立小
+        路徑，跟 AssetLoader 完全無關）改成 self.loader.get(
+        "main_menu_bg")（AssetLoader 統一管理、讀 assets/crops/
+        bg_crash.png、縮放到整個視窗大小）。self.title_bg 本身沒有被
+        刪除——_render_story() 開場劇情畫面仍然沿用它當背景，這裡只是
+        换了主選單專用的圖源，兩個畫面改成各自使用不同的背景圖，不是
+        誤刪或誤共用。
+
+        loader.get("main_menu_bg") 理論上不會是 None：AssetLoader.
+        load_all() 一律會呼叫 self._load_image("crops/bg_crash.png",
+        ...) 幫這個 key 賦值，就算檔案還沒放進 assets/crops/ 目錄，
+        _load_image() 內部的 except 也會自動退回
+        generate_placeholder() 生成一張佔位圖，而不是回傳 None。這裡
+        仍然保留 if/else 防呆判斷，跟這個檔案其餘 loader.get(...) 呼叫
+        點的既有寫法一致，避免之後如果 AssetLoader 的實作細節改變、
+        真的回傳 None 時整個畫面直接壞掉。
+
+        標題文字畫在正中央偏上，三顆按鈕直向排列在畫面下半部，跟既有
+        _render_pause_menu() 一樣，用 draw_wood_panel（木紋面板，沒有
+        真的貼圖時自動退回立體木頭色塊）+ blit_text_with_shadow（帶
+        陰影文字，深色背景圖上也看得清楚）畫按鈕，維持跟遊戲其餘彈窗
+        一致的視覺語言，不是另外設計一套風格。"""
+        main_menu_bg = self.loader.get("main_menu_bg")
+        if main_menu_bg:
+            self.screen.blit(main_menu_bg, (0, 0))
         else:
-            # 找不到 title_bg.png 時的後備：深藍色純色背景，比純黑柔和，
-            # 也呼應「像素太空船」這個主題色調的暗示（深空藍），不會讓
-            # 畫面看起來像壞掉、缺圖的空白畫面。
+            # 找不到圖時的後備：深藍色純色背景，比純黑柔和，也呼應
+            # 「墜毀太空船」這個主題色調的暗示（深空藍），不會讓畫面
+            # 看起來像壞掉、缺圖的空白畫面。
             self.screen.fill((12, 16, 38))
 
         # 半透明深色遮罩疊在背景圖上，讓標題文字跟按鈕不管背景圖本身
