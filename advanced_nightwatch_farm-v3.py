@@ -66,6 +66,7 @@ SCREEN_HEIGHT = 800
 FPS = 60
 
 CELL_SIZE = 60  # 原本 50，配合網格從 18x13 裁到 16x11 換來 +20% 放大
+ANIMATION_SPEED = 0.2  # 熔爐 Sprite Sheet 動畫每幀停留秒數（frame[1]/frame[2] 來回切換的節奏）
 GRID_X = 24
 GRID_Y = 86
 
@@ -2404,7 +2405,29 @@ class NightwatchFarmApp:
         config = building.config
         asset_key = config.get("asset_key")
         img = self.loader.get(asset_key) if asset_key else None
-        if img:
+
+        # 視覺升級：熔爐 Sprite Sheet 特定影格動畫。asset_key 對應到有
+        # 提取好動畫幀的機台（目前只有 "furnace"）時，優先用 3 幀動畫
+        # 取代單張靜態貼圖；沒有動畫幀（get_anim_frames 回傳空 list，
+        # 例如熔爐.png 缺檔或載入失敗）時，anim_frames 是 falsy，直接
+        # 落到下面既有的 img/色塊防呆邏輯，不受影響。
+        anim_frames = self.loader.get_anim_frames(asset_key) if asset_key else []
+        if anim_frames:
+            if not building.is_processing:
+                frame_index = 0
+            else:
+                # 只在 frame[1]、frame[2] 之間來回切換，frame[0] 保留給
+                # 「關閉/閒置」狀態，符合經典像素跳動感的需求。這裡沿用
+                # 專案裡已經存在、每一幀都會無條件累加的 self.anim_time
+                # （run() 主迴圈裡 `self.anim_time += dt`，不受暫停/日夜
+                # 切換影響），而不是另外新增一個 self.animation_timer——
+                # 兩者效果完全一樣，但重用既有計時器可以避免專案裡多出
+                # 一個語意重複的計時器變數。
+                frame_index = 1 + int(self.anim_time / ANIMATION_SPEED) % 2
+            frame_img = anim_frames[frame_index]
+            img_rect = frame_img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
+            self.screen.blit(frame_img, img_rect)
+        elif img:
             img_rect = img.get_rect(midbottom=(px + CELL_SIZE // 2, py + CELL_SIZE))
             self.screen.blit(img, img_rect)
         else:
