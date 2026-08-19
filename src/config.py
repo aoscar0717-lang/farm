@@ -87,14 +87,109 @@ WORLD_H = GRID_H * CELL_SIZE
 MARGIN_TOP = 0
 MARGIN_BOTTOM = 0
 
-try:
-    font_large = pygame.font.SysFont("microsoftjhenghei", 36)
-    font_small = pygame.font.SysFont("microsoftjhenghei", 24)
-    font_tiny = pygame.font.SysFont("microsoftjhenghei", 18)
-except:
-    font_large = pygame.font.Font(None, 48)
-    font_small = pygame.font.Font(None, 32)
-    font_tiny = pygame.font.Font(None, 24)
+# --- 繁體中文字型載入 -------------------------------------------------
+# SysFont / match_font 找不到指定字型時「不會」拋例外，而是印一行警告後
+# 靜默退回不含中文字符的預設字型 —— 所以舊的 try/except 永遠不會觸發，
+# 在沒有「微軟正黑體」的機器（例如 macOS）上，畫面每一個中文都會變成
+# 空白方框。這裡改成逐一嘗試候選字型，並實際渲染中文確認畫得出來。
+
+_CJK_FONT_FILES = (
+    # macOS
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+    # Windows
+    "C:/Windows/Fonts/msjh.ttc",       # 微軟正黑體
+    "C:/Windows/Fonts/msjhl.ttc",      # 微軟正黑體 Light
+    "C:/Windows/Fonts/mingliu.ttc",    # 細明體
+    "C:/Windows/Fonts/msyh.ttc",       # 微軟雅黑
+    "C:/Windows/Fonts/simhei.ttf",     # 黑體
+    # Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+)
+
+# 注意：這些是 pygame 正規化過的名稱（全小寫、去空白），
+# 跟字型的顯示名稱不一樣。macOS 上是 "pingfang" 而不是 "pingfangtc"，
+# 是 "arialunicode" 而不是 "arialunicodems" —— 寫錯不會報錯，只會靜默失效。
+_CJK_FONT_NAMES = (
+    "microsoftjhenghei", "mingliu", "microsoftyahei", "simhei",   # Windows
+    "pingfang", "stheitimedium", "stheitilight", "arialunicode",  # macOS
+    "hiraginosansgb", "notosanscjktc", "notosanscjk", "wqyzenhei",
+)
+
+_surface_to_bytes = getattr(pygame.image, "tobytes", None) or pygame.image.tostring
+
+
+def _renders_cjk(font):
+    """檢查字型是否真的含有中文字符。
+
+    缺字時 pygame 會把每一個中文都畫成同一個「空白方框」佔位符，
+    所以單純檢查有沒有畫出東西是不夠的。這裡渲染兩個不同的中文字，
+    如果結果一模一樣，就代表兩個都是同一個佔位方框、字型並不支援中文。
+
+    必須指定背景色：不給背景時 render 會把字形放進 alpha 通道，
+    RGB 通道整片都是文字顏色，兩張圖會永遠比對成相等。
+    """
+    try:
+        a = font.render("農", True, (0, 0, 0), (255, 255, 255))
+        b = font.render("場", True, (0, 0, 0), (255, 255, 255))
+    except pygame.error:
+        return False
+    if a.get_size() != b.get_size():
+        return True
+    return _surface_to_bytes(a, "RGB") != _surface_to_bytes(b, "RGB")
+
+
+def _path_renders_cjk(path):
+    try:
+        return _renders_cjk(pygame.font.Font(path, 20))
+    except (OSError, pygame.error):
+        return False
+
+
+def _find_cjk_font_path():
+    """找出一個確定畫得出繁體中文的字型檔。找不到則回傳 None。
+
+    只在載入時執行一次，三種字級共用同一個結果。
+    """
+    for path in _CJK_FONT_FILES:
+        if os.path.exists(path) and _path_renders_cjk(path):
+            return path
+
+    for name in _CJK_FONT_NAMES:
+        found = pygame.font.match_font(name)
+        if found and _path_renders_cjk(found):
+            return found
+
+    # 最終備援：掃描系統上所有已安裝字型，挑第一個真的畫得出中文的。
+    # 字型的路徑與名稱在不同作業系統、不同語系版本上差異很大，與其再
+    # 多列幾個猜測的名字，不如直接驗證。只有前兩段全數落空才會走到這裡。
+    for name in pygame.font.get_fonts():
+        found = pygame.font.match_font(name)
+        if found and _path_renders_cjk(found):
+            return found
+
+    return None
+
+
+_CJK_FONT_PATH = _find_cjk_font_path()
+
+if _CJK_FONT_PATH is None:
+    print("[warning] 找不到任何中文字型，畫面上的中文將顯示為空白方框。")
+
+
+def load_cjk_font(size):
+    """回傳指定大小、確定畫得出繁體中文的字型。"""
+    if _CJK_FONT_PATH is not None:
+        return pygame.font.Font(_CJK_FONT_PATH, size)
+    return pygame.font.Font(None, size)
+
+
+font_large = load_cjk_font(36)
+font_small = load_cjk_font(24)
+font_tiny = load_cjk_font(18)
 
 TOOL_NAMES = {
     "radish": "白蘿蔔種子", "carrot": "胡蘿蔔種子", "pumpkin": "魔法南瓜種子",

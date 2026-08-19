@@ -183,10 +183,20 @@ class TestHoverThoughtRegressions19Scenarios(unittest.TestCase):
         state = new_game()
         _skip_beginner_intros(state)
         state["money"] = 0
-        lines = get_contemplation_lines(
-            state, "farm", None, False, mouse_pos=ui_layout.tutorial_sidebar_rect().center
-        )
-        self.assertTrue(any("任務" in l for l in lines))
+        # 逐一 hover 實際的任務列，而不是側欄的幾何中心點。列高是由
+        # font_small / font_tiny 的度量算出來的，中心點會隨字型不同落在
+        # 不同任務上，而「已完成／進行中／未解鎖」三種文案並不相同 ——
+        # 押其中一種的關鍵字會讓這個測試綁死在特定字型的度量上。
+        rows = ui_layout.tutorial_sidebar_task_rects(state)
+        self.assertTrue(rows, "側欄應該至少有一列任務")
+        for task, rect in rows:
+            lines = get_contemplation_lines(
+                state, "farm", None, False, mouse_pos=rect.center
+            )
+            self.assertTrue(
+                any(task.title in l for l in lines),
+                f"hover 任務列「{task.title}」應給出對應的 Thought，實際得到：{lines}",
+            )
 
     # 15. 世界物件 (圍欄) hover 有 Thought
     def test_15_world_object_hover_produces_a_thought(self):
