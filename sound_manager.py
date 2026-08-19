@@ -98,6 +98,7 @@ class SoundManager:
             self.sounds["stolen"] = self._generate_tone(261.63, 0.2, volume=0.4, wave_type="saw")
             self.sounds["game_over"] = self._generate_tone(110.0, 0.8, volume=0.6, wave_type="square")
             self.sounds["night_alarm"] = self._generate_tone(493.88, 0.3, volume=0.4, wave_type="sine")
+            self.sounds["error"] = self._generate_tone(160.0, 0.14, volume=0.35, wave_type="square")
             self.bgm_channel = None
 
         except Exception as e:

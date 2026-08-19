@@ -362,9 +362,23 @@ class ActionCard:
             surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
 
         if self.is_locked:
-            lock_surf = FONT_XS.render("🔒", True, C_RED)
-            if lock_surf.get_width() > 0:
-                surface.blit(lock_surf, (self.rect.right - 22, self.rect.y + 8))
+            # 半透明深色遮罩蓋住整張卡片（圖示/文字都被壓暗），讓玩家一眼
+            # 就能看出這張卡片「目前點不了」，而不用等點下去才有反應。
+            # (Note: we use border_radius=10 to match our new aesthetics)
+            overlay = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+            pygame.draw.rect(overlay, (20, 20, 20, 128), overlay.get_rect(), border_radius=10)
+            surface.blit(overlay, self.rect.topleft)
+
+            # 遮罩之上疊印紅色解鎖條件文字（蓋掉原本售價那一行），
+            # 例如「🔒 需繁榮度 50」或「🔒 需 Lv.2」，說明「為什麼」點不了。
+            if self.lock_reason:
+                lock_surf = FONT_SM.render(f"🔒 {self.lock_reason}", True, (255, 130, 130))
+                # Using text_x and lbl_y+22 so it aligns with the new layout
+                surface.blit(lock_surf, (text_x, lbl_y + 22))
+            else:
+                lock_surf = FONT_XS.render("🔒", True, (255, 130, 130))
+                if lock_surf.get_width() > 0:
+                    surface.blit(lock_surf, (self.rect.right - 22, self.rect.y + 8))
 
 
 # ==========================================
@@ -713,12 +727,36 @@ class NightwatchFarmApp:
                         self.selected_action = card.action_id
                         self.sound.play("plant")
                     else:
-                        self.log_messages.append(f"🔒 {card.lock_reason}")
+                        # 點到尚未解鎖的商品：不執行任何購買/選取邏輯，
+                        # 在滑鼠位置跳出紅色浮動文字＋錯誤音效，讓玩家
+                        # 立刻知道「為什麼點了沒反應」，而不是只寫進日誌。
+                        reason_txt = card.lock_reason if card.lock_reason else "尚未解鎖"
+                        self.floating_texts.append(
+                            FloatingText(f"🔒 {reason_txt}", mx - 30, my - 12, C_RED)
+                        )
+                        self.log_messages.append(f"🔒 {reason_txt}")
+                        self.sound.play("error")
                 return
 
         # 地圖座標換算
         world_gx = (mx - GRID_X) / CELL_SIZE
         world_gy = (my - GRID_Y) / CELL_SIZE
+
+        # 0. 最優先權（僅限夜晚 + 已裝備手電筒）：優先判定敵人。
+        # 夜晚會自動裝備手電筒，這裡要排在「格子上有成熟作物就先採收」
+        # 判定的前面——否則敵人剛好站在成熟作物格子上時，玩家點擊想照暈
+        # 敵人，會被下面第 1 優先權攔截去跑採收邏輯（雖然夜晚採收一定會
+        # 失敗，但點擊已經被消耗掉、直接 return，手電筒永遠沒機會判定）。
+        # use_flashlight_stun() 內部本來就會依游標位置比對 self.game.enemies
+        # 的距離（含未命中時的最近敵人輔助瞄準），等同於「碰撞判定」，
+        # 沿用它可以維持跟原本一致的冷卻/瞄準輔助手感，不用另外重寫一份。
+        if self.game.phase == GamePhase.NIGHT and self.selected_action == "FLASHLIGHT":
+            success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
+            if success:
+                self._spawn_particles(mx, my, (255, 255, 200), count=15)
+            else:
+                self.log_messages.append(f"🔦 {msg}")
+            return
 
         # 1. 第一優先權：若點擊格子上有「成熟作物」，無論當前選中何種工具，一律直接採收！
         if self.hovered_grid:
@@ -730,18 +768,12 @@ class NightwatchFarmApp:
                     self.log_messages.append(f"❌ {msg}")
                 return
 
-        # 2. 第二優先權：主動戰術工具 (手電筒、指揮哨)
+        # 2. 第二優先權：主動戰術工具 (指揮哨；手電筒的夜晚情境已在最上面
+        # 處理掉了，走到這裡代表選了手電筒但現在是白天)
         if self.selected_action == "FLASHLIGHT":
-            if self.game.phase == GamePhase.DAY:
-                self.log_messages.append("☀️ 白天無入侵敵人！已為您自動切換至農耕播種模式。")
-                self.active_tab = "CROPS"
-                self.selected_action = "PLANT_RADISH"
-            else:
-                success, msg = self.game.use_flashlight_stun(world_gx, world_gy)
-                if not success:
-                    self.log_messages.append(f"🔦 {msg}")
-                else:
-                    self._spawn_particles(mx, my, (255, 255, 200), count=15)
+            self.log_messages.append("☀️ 白天無入侵敵人！已為您自動切換至農耕播種模式。")
+            self.active_tab = "CROPS"
+            self.selected_action = "PLANT_RADISH"
             return
 
         if self.selected_action == "WHISTLE":
