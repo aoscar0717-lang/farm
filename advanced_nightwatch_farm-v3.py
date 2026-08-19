@@ -361,6 +361,7 @@ class NightwatchFarmApp:
         self.hovered_grid = None
         self.mouse_pos = (0, 0)
         self.anim_time = 0.0
+        self.sound.play_bgm(is_day=True)
         # Time-scale control -- 0.1 級距微調 (0.0 暫停 ~ 2.0 二倍速)。
         # 用 +/-0.1 直接運算取代查表，TIME_SCALE_MIN/MAX/STEP 只是夾值用的
         # 邊界常數，不再是一份固定速度清單。
