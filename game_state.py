@@ -743,22 +743,36 @@ class GameState:
                         self._set_enemy_flee_path(enemy)
                         break
 
-            # 捕獸夾
-            if tile and tile.defense and tile.defense.defense_type == DefenseType.BEAR_TRAP and tile.defense.is_armed:
-                damage = tile.defense.trigger_trap()
-                self._emit_event(
-                    EventType.TRAP_TRIGGERED,
-                    f"💥 捕獸夾在 ({grid_x}, {grid_y}) 觸發！造成 {damage} 傷害！",
-                    {"x": grid_x, "y": grid_y, "enemy_id": enemy.id, "damage": damage}
-                )
-                if enemy.take_damage(damage):
-                    self._emit_event(
-                        EventType.ENEMY_DEFEATED,
-                        f"💀 {enemy.config['name']} 被捕獸夾消滅！",
-                        {"enemy_id": enemy.id}
-                    )
-                    dead_or_escaped.append(enemy)
-                    continue
+            # 地刺陷阱 (BEAR_TRAP)：永久性設施，敵人只要站在陷阱格上，
+            # 每一幀都會持續受到 DoT 傷害（乘上 dt，不受 FPS 影響），
+            # 不會像舊版一樣觸發一次就失效／消失——這裡刻意不寫
+            # `tile.defense = None`，陷阱會永久留在場上，直到玩家自己
+            # 用鏟子拆除。視覺/音效脈動節流成每 dot_tick_interval 秒一次
+            # （由 tile.defense.dot_tick_timer 倒數），避免 60 FPS 下
+            # 每一幀都噴粒子跟浮動文字。
+            if tile and tile.defense and tile.defense.defense_type == DefenseType.BEAR_TRAP:
+                trap = tile.defense
+                dot_damage = trap.tick_trap_damage(dt)
+                if dot_damage > 0:
+                    trap.dot_tick_timer -= dt
+                    should_pulse = trap.dot_tick_timer <= 0
+                    if should_pulse:
+                        trap.dot_tick_timer = trap.config.get("dot_tick_interval", 0.4)
+
+                    if enemy.take_damage(dot_damage):
+                        self._emit_event(
+                            EventType.ENEMY_DEFEATED,
+                            f"💀 {enemy.config['name']} 被地刺陷阱的持續傷害消滅！",
+                            {"enemy_id": enemy.id}
+                        )
+                        dead_or_escaped.append(enemy)
+                        continue
+                    elif should_pulse:
+                        self._emit_event(
+                            EventType.TRAP_TRIGGERED,
+                            f"💥 地刺陷阱在 ({grid_x}, {grid_y}) 持續刺傷 {enemy.config['name']}！",
+                            {"x": grid_x, "y": grid_y, "enemy_id": enemy.id, "damage": dot_damage}
+                        )
 
             # 刺藤木柵尖刺反傷 (Thorn Damage to nearby enemies)
             has_thorn_nearby = False

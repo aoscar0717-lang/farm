@@ -367,7 +367,18 @@ DEFENSE_DATA = {
     DefenseType.BEAR_TRAP: {
         "name": "鋼鐵捕獸夾",
         "cost": 20,
-        "damage": 120,
+        # 從「一次性大傷害後失效」改成永久性的持續傷害 (DoT) 陷阱：
+        # damage 現在的單位是「每秒傷害 (DPS)」，不是一次性爆發傷害，
+        # 敵人只要站在陷阱格上就會每幀持續受傷 (見 DefenseStructure.
+        # tick_trap_damage())。原本一次性 120 傷害調降成 15 DPS，站
+        # 滿 1 秒的總傷害量大約是原本的 1/8，但陷阱永久有效，敵人如果
+        # 停留在原地（例如被其他敵人卡住路徑）會持續流血，長期蹲一個
+        # 陷阱格反而更痛。
+        "damage": 15,
+        # 持續傷害的視覺/音效脈動間隔（秒）：實際扣血還是每幀照 dt
+        # 精確計算、不受這個值影響，這個只是節流「觸發特效」的頻率，
+        # 避免 60 FPS 下每一幀都噴粒子跟浮動文字，畫面會爆炸。
+        "dot_tick_interval": 0.4,
         "walkable": True,
         "asset_key": "bear_trap",
     },
@@ -509,11 +520,18 @@ class Decoration:
 @dataclass
 class DefenseStructure:
     defense_type: DefenseType
+    # 舊版一次性捕獸夾用來記錄「已經觸發過、彈簧鬆了」的欄位。地刺陷阱
+    # 改成永久性 DoT 之後不會再讀寫這個欄位，繼續保留是為了不動到既有
+    # 存檔/資料結構（如果之後有存檔機制的話），沒有其他用途。
     is_armed: bool = True
     cooldown_timer: float = 0.0
     hp: float = 80.0
     max_hp: float = 80.0
-    
+    # 地刺陷阱 DoT 特效節流計時器：只用來控制「多久觸發一次視覺/音效
+    # 脈動」，跟實際扣血量無關（扣血每幀都精確按 dt 計算）。預設 0，
+    # 讓敵人一站上陷阱就立刻有第一次脈動回饋。
+    dot_tick_timer: float = 0.0
+
     def __post_init__(self):
         self.max_hp = float(self.config.get("max_hp", 80.0))
         self.hp = self.max_hp
@@ -521,15 +539,19 @@ class DefenseStructure:
     @property
     def config(self) -> dict:
         return DEFENSE_DATA[self.defense_type]
-    
+
     @property
     def is_walkable(self) -> bool:
         return self.config["walkable"]
-    
-    def trigger_trap(self) -> float:
-        if self.defense_type == DefenseType.BEAR_TRAP and self.is_armed:
-            self.is_armed = False
-            return self.config["damage"]
+
+    def tick_trap_damage(self, dt: float) -> float:
+        """地刺陷阱是永久性設施，敵人每一幀站在陷阱格上就會受到持續
+        傷害 (Damage over Time)。回傳這一幀應該造成的傷害量
+        (每秒傷害 damage * dt)，乘上 dt 確保總傷害量不會因為 FPS
+        高低而不穩定。跟舊版 trigger_trap() 不同，這裡不會把陷阱設成
+        失效，陷阱會永久留在場上，直到玩家自己用鏟子拆除。"""
+        if self.defense_type == DefenseType.BEAR_TRAP:
+            return self.config["damage"] * dt
         return 0.0
 
     def take_damage(self, amount: float) -> bool:
