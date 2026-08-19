@@ -96,6 +96,14 @@ C_CARD_BORDER = C_WOOD_BEVEL_DARK    # 卡片邊框（原本是淺灰 1px，現�
 C_TEXT_MAIN = C_TEXT_ON_LIGHT         # 淺色底（羊皮紙/木板）上的主要文字，原本是接近黑色
 C_TEXT_MUTED = (140, 112, 100)        # 次要/停用文字，原本是純灰，現在偏木質的淡褐灰
 C_GOLD = (255, 193, 7)                # 焦點/選取色，沿用不變——金色本來就很搭木頭
+# 浮動文字專用的亮黃色：C_GOLD 是偏琥珀色的「金色」，拿來當 UI 焦點色很
+# 好看，但直接拿來畫在草地/夜晚場景上的浮動文字時，彩度不夠、容易讀起來
+# 是「暗黃色」。這個顏色只給浮動文字用，跟 C_GOLD 的 UI 焦點色用途分開，
+# 不會互相影響。
+C_FLOATTEXT_GOLD = (255, 241, 118)
+# 未解鎖商品鎖定原因文字的紅色：原本 (255,130,130) 疊在半透明深色遮罩上
+# 對比度不夠，改用更亮的紅（跟浮動文字錯誤提示的 C_RED 系列同一個色階）。
+C_LOCK_TEXT_RED = (255, 85, 85)
 C_GREEN = (76, 175, 80)
 C_RED = (239, 83, 80)
 C_BLUE = (33, 150, 243)
@@ -475,14 +483,27 @@ class ActionCard:
 
             # 遮罩之上疊印紅色解鎖條件文字（蓋掉原本售價那一行），
             # 例如「🔒 需繁榮度 50」或「🔒 需 Lv.2」，說明「為什麼」點不了。
+            # 原本的紅字 (255,130,130) 疊在半透明深色遮罩上對比度不夠，
+            # 改用更亮的紅 C_LOCK_TEXT_RED，並且比照 FloatingText 的做法
+            # 先往四個方向畫一層黑色描邊/陰影再畫主色文字，在木紋卡片跟
+            # 深色遮罩的混色背景上都能維持清楚的可讀性。
             if self.lock_reason:
-                lock_surf = FONT_SM.render(f"🔒 {self.lock_reason}", True, (255, 130, 130))
+                lock_text = f"🔒 {self.lock_reason}"
+                lock_pos = (text_x, lbl_y + 22)
+                shadow_surf = FONT_SM.render(lock_text, True, (20, 20, 20))
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    surface.blit(shadow_surf, (lock_pos[0] + dx, lock_pos[1] + dy))
+                lock_surf = FONT_SM.render(lock_text, True, C_LOCK_TEXT_RED)
                 # Using text_x and lbl_y+22 so it aligns with the new layout
-                surface.blit(lock_surf, (text_x, lbl_y + 22))
+                surface.blit(lock_surf, lock_pos)
             else:
-                lock_surf = FONT_XS.render("🔒", True, (255, 130, 130))
+                lock_pos = (self.rect.right - 22, self.rect.y + 8)
+                shadow_surf = FONT_XS.render("🔒", True, (20, 20, 20))
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    surface.blit(shadow_surf, (lock_pos[0] + dx, lock_pos[1] + dy))
+                lock_surf = FONT_XS.render("🔒", True, C_LOCK_TEXT_RED)
                 if lock_surf.get_width() > 0:
-                    surface.blit(lock_surf, (self.rect.right - 22, self.rect.y + 8))
+                    surface.blit(lock_surf, lock_pos)
 
 
 # ==========================================
@@ -1128,7 +1149,7 @@ class NightwatchFarmApp:
             if ev.event_type == EventType.CROP_HARVESTED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE + CELL_SIZE // 2
-                self.floating_texts.append(FloatingText(f"+{ev.data['reward']} G", px - 15, py - 10, C_GOLD))
+                self.floating_texts.append(FloatingText(f"+{ev.data['reward']} G", px - 15, py - 10, C_FLOATTEXT_GOLD))
                 self._spawn_particles(px, py, C_GOLD, count=12)
             elif ev.event_type == EventType.CROP_WATERED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
@@ -1147,18 +1168,18 @@ class NightwatchFarmApp:
                 # 不會疊在一起看不清楚。
                 self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, 95, (239, 83, 80)))
             elif ev.event_type == EventType.PROSPERITY_DIVIDEND:
-                self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, 119, C_GOLD))
+                self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, 119, C_FLOATTEXT_GOLD))
             elif ev.event_type == EventType.ENEMY_STUNNED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
-                self.floating_texts.append(FloatingText("⚡ 暈眩 2.5s", px - 20, py - 15, (255, 235, 59)))
+                self.floating_texts.append(FloatingText("⚡ 暈眩 2.5s", px - 20, py - 15, C_FLOATTEXT_GOLD))
                 self._spawn_particles(px, py, (255, 235, 59), count=14)
             elif ev.event_type == EventType.BEE_ATTACK:
                 fx = GRID_X + ev.data["from_x"] * CELL_SIZE + CELL_SIZE // 2
                 fy = GRID_Y + ev.data["from_y"] * CELL_SIZE + CELL_SIZE // 2
                 tx = GRID_X + ev.data["to_x"] * CELL_SIZE + CELL_SIZE // 2
                 ty = GRID_Y + ev.data["to_y"] * CELL_SIZE + CELL_SIZE // 2
-                self.floating_texts.append(FloatingText(f"🐝 -{int(ev.data['damage'])}", tx - 15, ty - 12, C_GOLD))
+                self.floating_texts.append(FloatingText(f"🐝 -{int(ev.data['damage'])}", tx - 15, ty - 12, C_FLOATTEXT_GOLD))
                 self._spawn_particles(tx, ty, C_GOLD, count=8)
             elif ev.event_type == EventType.BLOOD_MOON_WARNING:
                 self.floating_texts.append(FloatingText("🩸 血月降臨！巨型野豬首領來襲！", SCREEN_WIDTH // 2 - 120, 220, C_BLOOD_RED, duration=3.0))
@@ -1178,10 +1199,10 @@ class NightwatchFarmApp:
                 if self.game.farm_cat:
                     px = GRID_X + self.game.farm_cat.x * CELL_SIZE
                     py = GRID_Y + self.game.farm_cat.y * CELL_SIZE - 10
-                    self.floating_texts.append(FloatingText(f"🐱 +{ev.data['bonus']} G (招財)", px - 15, py, C_GOLD))
+                    self.floating_texts.append(FloatingText(f"🐱 +{ev.data['bonus']} G (招財)", px - 15, py, C_FLOATTEXT_GOLD))
                     self._spawn_particles(px, py, C_GOLD, count=6)
             elif ev.event_type == EventType.FARM_LEVEL_UP:
-                self.floating_texts.append(FloatingText(f"⭐ 莊園繁榮升級 Lv.{ev.data['new_level']}！", SCREEN_WIDTH // 2 - 90, 220, C_GOLD, duration=2.5))
+                self.floating_texts.append(FloatingText(f"⭐ 莊園繁榮升級 Lv.{ev.data['new_level']}！", SCREEN_WIDTH // 2 - 90, 220, C_FLOATTEXT_GOLD, duration=2.5))
                 self._spawn_particles(SCREEN_WIDTH // 2, 240, C_GOLD, count=30)
             elif ev.event_type == EventType.FENCE_DESTROYED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
@@ -1202,7 +1223,7 @@ class NightwatchFarmApp:
             if ev.event_type in (EventType.NIGHT_STARTED, EventType.BLOOD_MOON_WARNING):
                 self.active_tab = "TOOLS"
                 self.selected_action = "FLASHLIGHT"
-                self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, (255, 235, 59), duration=2.5))
+                self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, C_FLOATTEXT_GOLD, duration=2.5))
 
     def _get_mascot_guide_data(self) -> Tuple[str, tuple, str, tuple, str]:
         """Returns (badge_text, badge_bg_color, main_dialogue, text_color, step_tag)"""
@@ -1338,7 +1359,12 @@ class NightwatchFarmApp:
     # 純色扁平無網格渲染管道 (Flat Pipeline)
     # ==========================================
     def _render(self):
-        self.screen.fill((240, 244, 248))
+        # 畫面最底層的背景色：地圖跟商店面板不一定剛好貼齊填滿整個視窗
+        # 邊緣（例如視窗被拉寬、或地圖區塊本身有圓角），縫隙會露出這個
+        # 底色。原本是很亮的淺灰藍色，在夜晚模式下顯得刺眼、也跟木質
+        # 風格的 UI 不搭；改成深邃的泥土色，跟 C_WOOD_DARK 呼應，露出來
+        # 的縫隙看起來像木頭底下的陰影，而不是穿幫的畫布白邊。
+        self.screen.fill((46, 34, 24))
 
         self._render_header_banner()
         self._render_flat_meadow_and_farm()
@@ -1506,7 +1532,9 @@ class NightwatchFarmApp:
         p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 270, 12)
         draw_beveled_rect(self.screen, p_bar, C_WOOD_BEVEL_DARK, border_radius=6, depth=1, pressed=True)
         if p_ratio > 0:
-            pygame.draw.rect(self.screen, C_PURPLE, (p_bar.x, p_bar.y, int(p_bar.width * p_ratio), p_bar.height), border_radius=6)
+            # 原本是鮮豔的紫色，跟木質風格不搭；改用翠綠色，呼應「繁榮/
+            # 生長」的意象，背景凹槽 (C_WOOD_BEVEL_DARK) 維持深色不變。
+            pygame.draw.rect(self.screen, C_GREEN, (p_bar.x, p_bar.y, int(p_bar.width * p_ratio), p_bar.height), border_radius=6)
         self.screen.blit(FONT_SM.render(f"繁榮度: {curr_p} / {next_goal}", True, C_CYAN), (p_bar.right + 12, p_bar.y - 3))
 
         # 右上角選單按鈕（☰）：特意畫在 header 方法的最後面，確保一定疊在
