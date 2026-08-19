@@ -67,6 +67,7 @@ FPS = 60
 
 CELL_SIZE = 60  # 原本 50，配合網格從 18x13 裁到 16x11 換來 +20% 放大
 ANIMATION_SPEED = 0.2  # 熔爐 Sprite Sheet 動畫每幀停留秒數（frame[1]/frame[2] 來回切換的節奏）
+STORY_CHARS_PER_SEC = 32.0  # 打字機開場劇情：每秒顯示幾個字元，數值愈大打字愈快
 GRID_X = 24
 GRID_Y = 86
 
@@ -723,6 +724,57 @@ class ActionCard:
 # 主遊戲視窗 (NightwatchFarmApp)
 # ==========================================
 class NightwatchFarmApp:
+    # 【系統升級 Phase 8】開場打字機劇情台詞，'STORY' 狀態依序逐句播放。
+    # 用柴犬管家（既有 _get_mascot_guide_data() 裡貫穿全遊戲的嚮導角色，
+    # 不是另外發明一個新角色）的口吻自我介紹、交代玩家的身份與目標，
+    # 銜接到後面的互動教學（種田/建造/整地）跟遊戲本身的日夜循環玩法。
+    STORY_LINES = [
+        "夜幕降臨，星辰之間漂來一艘鏽跡斑斑的拓荒船……",
+        "「唔……終於有人來了！」一隻柴犬從控制艙裡探出頭來，尾巴搖個不停。",
+        "「我是柴犬管家，這座『夜巡農場』的看守者——不過現在，它是您的了。」",
+        "「白天，農田會沉睡般安靜；但入夜之後，飢餓的野獸與宵小會盯上我們的收成。」",
+        "「別擔心，指揮官！只要種好作物、蓋好機台、佈好防線，我們一定能守住這片田地。」",
+        "「來吧，讓我先帶您熟悉一下莊園的基本操作！」",
+    ]
+
+    # 【系統升級 Phase 8】互動式新手教學步驟。每一步是一個 dict：
+    #   instruction     顯示在教學對話框裡的指示文字。
+    #   selected_action 進入這一步時自動幫玩家選好對應的商店工具，玩家
+    #                   不用自己先去商店分頁裡翻找——跟 ActionCard 既有
+    #                   的 action_id 命名慣例共用同一個字串空間。
+    #   trigger_event   GameState 事件系統（EventType）裡，代表「這一步
+    #                   已經完成」的事件類型；_process_events() 收到這個
+    #                   事件、且目前正處在 'TUTORIAL' 狀態、且事件對應的
+    #                   這一步還沒完成時，就會推進 tutorial_step。用既有
+    #                   事件系統驅動，而不是每幀重新掃一次整張地圖比對
+    #                   狀態，一來效能更好，二來完全重用 place_building()/
+    #                   plant_crop()/demolish_tile() 本來就會 emit 的事件，
+    #                   不用另外為教學系統維護一份平行的判定邏輯。
+    #
+    # 三個步驟刻意都是「一次點擊立即完成」的動作（種植/建造/剷除），
+    # 不挑「等待作物成熟」這種需要時間流逝的步驟——'TUTORIAL' 狀態下
+    # self.game.update() 完全不會被呼叫（凍結世界模擬，見 run()
+    # 的說明），作物的 growth_timer 永遠不會前進，任何需要「等到成熟」
+    # 才能觸發的教學步驟在這個狀態下都是做不到的死路，所以三個步驟都
+    # 設計成不依賴時間流逝。
+    TUTORIAL_STEPS = [
+        {
+            "instruction": "指揮官，請點擊中央農田的任一空格，種下一顆白蘿蔔種子！",
+            "selected_action": "PLANT_RADISH",
+            "trigger_event": EventType.CROP_PLANTED,
+        },
+        {
+            "instruction": "很好！接著請在四周的莊園景觀區，建造一座伐木場，取得穩定的木材供給。",
+            "selected_action": "PLACE_LUMBERYARD",
+            "trigger_event": EventType.BUILDING_PLACED,
+        },
+        {
+            "instruction": "最後，請點擊下方工具列的鐵鏟，剷除剛剛種下的白蘿蔔或蓋好的伐木場，熟悉整地流程！",
+            "selected_action": "SHOVEL",
+            "trigger_event": EventType.TILE_CLEARED,
+        },
+    ]
+
     def __init__(self):
         # 全螢幕切換 (F11)：邏輯解析度固定在 SCREEN_WIDTH x SCREEN_HEIGHT，
         # 全螢幕時加上 pygame.SCALED，讓 SDL2 自動把這個邏輯畫面等比例縮放、
@@ -767,7 +819,19 @@ class NightwatchFarmApp:
         self.game = GameState()
         self.sound = SoundManager(sfx_enabled=True)
         self.loader = AssetLoader(cell_size=CELL_SIZE)
-        
+
+        # 【系統升級 Phase 8：打字機劇情與新手教學】app_state 沿用既有的
+        # 字串狀態機（'MENU'/'PLAYING'，見上面的說明），這次新增兩個中
+        # 間狀態，不是另外開一個獨立的狀態變數：
+        #   'STORY'    開場打字機劇情，點擊「新遊戲」後的第一站。
+        #   'TUTORIAL' 互動式新手教學，劇情播完後的第二站；教學步驟全部
+        #              完成才會真正切到 'PLAYING'（完全自由）。
+        # 這幾個追蹤變數在「新遊戲」被點擊時才會真正重置（見
+        # _handle_menu_mouse_down()），這裡先給預設值，避免屬性不存在。
+        self.story_index = 0
+        self.story_char_progress = 0.0
+        self.tutorial_step = 0
+
         self.show_intro = True
         self.show_pause_menu = False
         self.active_tab = "CROPS"
@@ -991,6 +1055,24 @@ class NightwatchFarmApp:
                         self._toggle_fullscreen()
                     continue
 
+                # 【系統升級 Phase 8】開場劇情狀態下，同樣把事件處理整個
+                # 攔截到獨立分支，理由跟上面 MENU 分支一致——這個狀態下
+                # 畫面上只有劇情文字、沒有任何農場地圖/商店可以互動，
+                # 讓滑鼠/鍵盤事件落到下面 PLAYING 專用的那一大串處理
+                # （點格子種田、P 暫停、O 訂單板…）完全沒有意義，而且
+                # self.game 這時候雖然已經建立好，但玩家根本還沒看到地
+                # 圖，任何游戲內互動都不該在這個階段被觸發。
+                # 只認滑鼠左鍵點擊與空白鍵：兩者效果相同——文字還沒打完
+                # 就直接顯示全句；已經顯示全句就換下一句（播完最後一句
+                # 自動切到 'TUTORIAL'）。F11 全螢幕維持任何狀態都能切換。
+                if self.app_state == 'STORY':
+                    if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1) or \
+                       (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE):
+                        self._advance_story()
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                        self._toggle_fullscreen()
+                    continue
+
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     self._handle_mouse_down(event)
                 elif event.type == pygame.MOUSEBUTTONUP:
@@ -1000,23 +1082,36 @@ class NightwatchFarmApp:
                 elif event.type == pygame.MOUSEWHEEL:
                     self._handle_mouse_wheel(event)
                 elif event.type == pygame.KEYDOWN:
+                    # 【系統升級 Phase 8】'TUTORIAL' 狀態會落到這裡（沒有
+                    # 像 MENU/STORY 那樣整段攔截——滑鼠事件需要正常往下
+                    # 流到 _handle_mouse_down() 讓種田/建造真的執行，見
+                    # 下面滑鼠分支跟 run() 開頭的說明），但下面這幾個
+                    # 「暫停/重開/切換訂單板/調速」快捷鍵在教學進行中沒
+                    # 有意義（暫停會讓教學卡住走不下去；重開/訂單板/調速
+                    # 也都跟「先照著三個步驟操作一次」這個當下的教學目的
+                    # 無關），額外加上 self.app_state == 'PLAYING' 限制，
+                    # 教學狀態下這幾個按鍵單純不生效，不會噴錯也不會打斷
+                    # 教學流程。K_RETURN(show_intro)/K_F11 這兩個不用另外
+                    # 加限制：show_intro 在教學期間本來就是 False（見
+                    # _handle_menu_mouse_down() 的說明），天生不會誤觸；
+                    # 全螢幕切換在任何狀態都應該能用。
                     if event.key == pygame.K_RETURN and self.show_intro:
                         self.show_intro = False
                     elif event.key == pygame.K_F11:
                         self._toggle_fullscreen()
-                    elif event.key == pygame.K_r and self.game.game_over:
+                    elif event.key == pygame.K_r and self.game.game_over and self.app_state == 'PLAYING':
                         self.game = GameState()
                         self.log_messages.clear()
                         self.log_messages.append("🌾 遊戲已重新開始！")
-                    elif event.key == pygame.K_SPACE:
+                    elif event.key == pygame.K_SPACE and self.app_state == 'PLAYING':
                         self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
-                    elif event.key == pygame.K_o:
+                    elif event.key == pygame.K_o and self.app_state == 'PLAYING':
                         # 暫停選單/開場教學開著的時候不能切換訂單佈告欄，
                         # 避免兩個彈窗疊在一起搶點擊；遊戲結束畫面同理。
                         if not self.show_pause_menu and not self.show_intro and not self.game.game_over:
                             self.show_order_board = not self.show_order_board
                             self.sound.play("ui_click")
-                    elif event.key == pygame.K_p:
+                    elif event.key == pygame.K_p and self.app_state == 'PLAYING':
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
                             self.time_scale = 0.0
@@ -1026,7 +1121,7 @@ class NightwatchFarmApp:
                             # 不是只能回到 1.0），恢復時原樣還原。
                             self.time_scale = self.time_scale_before_pause
                             self.log_messages.append(f"▶ 恢復 {self.time_scale:.1f}x")
-                    elif event.key == pygame.K_LEFTBRACKET:
+                    elif event.key == pygame.K_LEFTBRACKET and self.app_state == 'PLAYING':
                         # 直接 -0.1 運算，而不是查表。Python 浮點數
                         # 0.1 這種值沒辦法精確表示，連續相加減會累積誤差
                         # (例如 0.7 - 0.1 可能變成 0.5999999999999999)，
@@ -1037,7 +1132,7 @@ class NightwatchFarmApp:
                         self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
-                    elif event.key == pygame.K_RIGHTBRACKET:
+                    elif event.key == pygame.K_RIGHTBRACKET and self.app_state == 'PLAYING':
                         new_scale = round(self.time_scale + self.TIME_SCALE_STEP, 1)
                         self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
                         if self.time_scale > 0:
@@ -1060,16 +1155,63 @@ class NightwatchFarmApp:
                 if not self.show_pause_menu:
                     self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
                     self.particles = [p for p in self.particles if p.update(dt)]
+            elif self.app_state == 'STORY':
+                # 【系統升級 Phase 8】打字機逐字顯示：每幀累加「已顯示字
+                # 元數」，累加到超過目前這一句的全長就自動停在全長（不會
+                # 一直往上加到超出字串長度，下面 _render_story() 用
+                # int(self.story_char_progress) 去切字串，多出來的小數
+                # 部分不影響顯示，只是還沒被下一次累加吃到而已，停在原
+                # 地等玩家按空白鍵/點擊進到下一句）。self.game 這個階段
+                # 完全不會被 update()，農場世界還沒開始跑。
+                if self.story_index < len(self.STORY_LINES):
+                    current_line = self.STORY_LINES[self.story_index]
+                    if self.story_char_progress < len(current_line):
+                        self.story_char_progress = min(
+                            len(current_line), self.story_char_progress + STORY_CHARS_PER_SEC * dt)
+            elif self.app_state == 'TUTORIAL':
+                # 【系統升級 Phase 8】教學狀態：地圖/商店/HUD 照常渲染
+                # （見下面的渲染分流），但刻意不呼叫 self.game.update()——
+                # 這就是需求裡「凍結遊戲內的時間流逝 (dt=0)」的實作方式，
+                # 沿用這個專案本來就有的「MENU 狀態不跑 game.update()」
+                # 同一種模式，不是另外發明一個「傳 0 進去」的寫法（傳
+                # dt=0 進 game.update() 反而會讓那個方法白白被呼叫一次卻
+                # 什麼都不做，不如直接不呼叫更直接）。
+                # _process_events() 照常呼叫：place_building()/
+                # plant_crop()/demolish_tile() 這幾個教學步驟要用到的操作
+                # 都會正常 emit 事件；_process_events() 內部這次多了一段
+                # 「目前是不是 TUTORIAL 狀態、事件類型跟目前這一步的
+                # trigger_event 對不對得上」的比對，比對成功就推進
+                # tutorial_step——之所以直接改在 _process_events() 裡面
+                # 判斷、不是另外呼叫一個獨立方法重新 poll 一次事件佇列，
+                # 是因為 GameState.poll_events() 本身會把佇列清空
+                # （event_queue.clear()），事件只能被讀取一次，這裡沿用
+                # 同一次迴圈判斷，不會漏接任何事件，也不會重複扣。
+                # floating_texts/particles 照常更新，讓玩家點擊種田/建造
+                # 時該有的浮動文字/粒子特效正常播放，只有「世界模擬」
+                # （作物生長、日夜循環、建築生產、敵人 AI）被凍結，不是
+                # 整個畫面都靜止不動。
+                self._process_events()
+                self._update_card_states()
+                self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
+                self.particles = [p for p in self.particles if p.update(dt)]
             elif self.menu_message_timer > 0:
                 # 【Phase 7】選單提示訊息（例如「⚠ 沒有找到存檔」）的倒數，
                 # 只在 MENU 狀態才需要跑，PLAYING 狀態用不到這個計時器。
                 self.menu_message_timer = max(0.0, self.menu_message_timer - dt)
 
-            # 渲染同樣依 app_state 分流：MENU 只畫選單畫面，PLAYING 才
-            # 畫原本整套農場畫面（_render() 內部，含 HUD/地圖/商店/各種
-            # 彈窗，完全不動，只是現在只有 PLAYING 狀態才會被呼叫到）。
+            # 渲染依 app_state 分流：MENU 只畫選單畫面；STORY 只畫打字機
+            # 劇情畫面（完全不畫農場地圖，這個階段玩家還沒進農場）；
+            # TUTORIAL 則是「正常整套農場畫面 (_render()) 之上疊一層教學
+            # 對話框」——這正是需求裡「正常渲染農場地圖」的意思，農場
+            # 畫面本身完全不用改，只是額外多疊一層 UI；PLAYING 維持原本
+            # 只畫 _render()。
             if self.app_state == 'MENU':
                 self._render_main_menu()
+            elif self.app_state == 'STORY':
+                self._render_story()
+            elif self.app_state == 'TUTORIAL':
+                self._render()
+                self._render_tutorial()
             else:
                 self._render()
 
@@ -1224,8 +1366,7 @@ class NightwatchFarmApp:
             # 新遊戲：明確重置 GameState，清空原本進度（就算玩家先前已經
             # 玩過一局又回到選單，這裡也會拿到全新的一局，不會延續舊
             # 進度），一併清掉浮動文字/特效/訊息記錄，避免上一局的殘留
-            # 畫面元素飄進新的一局。show_intro 重設回 True，讓新手教學
-            # 彈窗在每次「新遊戲」都會重新出現一次。
+            # 畫面元素飄進新的一局。
             #
             # 【Phase 7】需求文字要求「刪除舊的 savegame.json（或覆蓋
             # 它）」，這裡選擇「覆蓋」而不是刪除檔案：立刻對這個全新的
@@ -1242,10 +1383,26 @@ class NightwatchFarmApp:
             self.floating_texts.clear()
             self.particles.clear()
             self.log_messages = ["🌾 歡迎來到夜巡農場！精緻像素莊園，中央為農田與防線，四周為景觀與寵物！"]
-            self.show_intro = True
+            # 【系統升級 Phase 8】新遊戲不再直接切到 'PLAYING'，改先進
+            # 'STORY'（開場打字機劇情），劇情播完自動接到 'TUTORIAL'
+            # （互動教學），教學步驟全部完成才會真正進到 'PLAYING'。
+            # story_index/story_char_progress/tutorial_step 這裡明確歸零
+            # ——如果玩家先前玩過一局又按「新遊戲」，這幾個追蹤變數不會
+            # 殘留上一局播到一半的進度。
+            #
+            # show_intro 這次改成 False（原本是 True，會在 PLAYING 狀態
+            # 第一幀跳出 _render_story_modal() 那個靜態的「新手速成指南」
+            # 三步驟卡片）：新的 STORY + TUTORIAL 流程本來就是要取代這個
+            # 舊的一次性靜態說明卡，兩套引導系統疊在一起會變成玩家好不
+            # 容易走完互動教學、一進 PLAYING 又立刻被另一個說明彈窗攔下
+            # 來，體驗上是重複且突兀的，所以這裡不再設成 True。
+            self.story_index = 0
+            self.story_char_progress = 0.0
+            self.tutorial_step = 0
+            self.show_intro = False
             self.show_pause_menu = False
             self.show_order_board = False
-            self.app_state = 'PLAYING'
+            self.app_state = 'STORY'
             self.sound.play("build")
         elif self.btn_continue_rect and self.btn_continue_rect.collidepoint(mx, my):
             # 【Phase 7】繼續遊戲：檢查 savegame.json 存不存在。存在就用
@@ -1707,6 +1864,30 @@ class NightwatchFarmApp:
             if len(self.log_messages) > 16:
                 self.log_messages.pop(0)
 
+            # --- Phase 8 新手教學：教學步驟推進判定 --------------------
+            # GameState.poll_events() 每次呼叫都會清空事件佇列，所以教學
+            # 步驟的比對只能放在這個既有的迴圈裡面做一次性判斷，不能另外
+            # 開一個方法再 poll 一次（那樣永遠只會拿到空清單）。這裡刻意
+            # 不用 elif 接在下面那條長長的 if/elif 鏈上，而是獨立一個 if
+            # 區塊：同一個事件（例如 CROP_PLANTED）除了推進教學步驟之外，
+            # 底下對應的 elif 分支通常沒有專門處理（CROP_PLANTED/
+            # BUILDING_PLACED/TILE_CLEARED 目前都沒有浮動文字特效），兩邊
+            # 互不影響，但保持獨立比較不會日後誰改了下面的鏈結果誤刪這段。
+            if self.app_state == 'TUTORIAL' and self.tutorial_step < len(self.TUTORIAL_STEPS):
+                current_step = self.TUTORIAL_STEPS[self.tutorial_step]
+                if ev.event_type == current_step["trigger_event"]:
+                    px = GRID_X + ev.data.get("x", 0) * CELL_SIZE + CELL_SIZE // 2
+                    py = GRID_Y + ev.data.get("y", 0) * CELL_SIZE
+                    self.floating_texts.append(FloatingText("✅ 完成！", px - 20, py - 20, C_TECH_GREEN, duration=1.5))
+                    self._spawn_particles(px, py, C_TECH_GREEN, count=10)
+                    self.tutorial_step += 1
+                    if self.tutorial_step >= len(self.TUTORIAL_STEPS):
+                        # 三個步驟都完成了，教學結束，交還完全自由的操作權。
+                        self.app_state = 'PLAYING'
+                        self.log_messages.append("🎉 新手教學完成！農場交給您了，指揮官！")
+                    else:
+                        self._enter_tutorial_step(self.tutorial_step)
+
             if ev.event_type == EventType.CROP_HARVESTED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE + CELL_SIZE // 2
@@ -2000,6 +2181,113 @@ class NightwatchFarmApp:
                     card.cost_text = f"CD: {self.game.flashlight_cooldown:.1f}s"
                 else:
                     card.cost_text = "就緒 | 暈眩2.5s"
+
+    # ==========================================
+    # 【系統升級 Phase 8】開場劇情 / 新手教學
+    # ==========================================
+    def _enter_tutorial_step(self, index):
+        """切換到 TUTORIAL_STEPS[index] 這一步時，把工具列自動切到對應
+        分頁、預先選好這一步要用的 selected_action，玩家一進到這一步
+        就能直接點格子操作，不用自己先去工具列找卡片。三個步驟目前分別
+        對應 CROPS/BUILDINGS/TOOLS 三個分頁，這裡用一個小 dict 對照，
+        避免 if/elif 越疊越長；未來教學步驟增加時只要在這個對照表裡加
+        一筆就好。"""
+        step = self.TUTORIAL_STEPS[index]
+        action = step["selected_action"]
+        self.tutorial_step = index
+        self.selected_action = action
+        tab_by_action = {
+            "PLANT_RADISH": "CROPS",
+            "PLACE_LUMBERYARD": "BUILDINGS",
+            "SHOVEL": "TOOLS",
+        }
+        self.active_tab = tab_by_action.get(action, self.active_tab)
+
+    def _advance_story(self):
+        """STORY 狀態下玩家按空白鍵/點滑鼠的統一處理：目前這句還沒打完
+        （story_char_progress < 這句字數）就直接補滿顯示全句；已經打完了
+        就換下一句、字元進度歸零重算。播到最後一句之後再按一次，代表
+        整段開場劇情結束，切到 TUTORIAL 並且用 _enter_tutorial_step()
+        設定好第一步要用的工具/分頁。"""
+        if self.story_index >= len(self.STORY_LINES):
+            return
+        current_line = self.STORY_LINES[self.story_index]
+        if self.story_char_progress < len(current_line):
+            self.story_char_progress = float(len(current_line))
+            return
+        self.story_index += 1
+        self.story_char_progress = 0.0
+        if self.story_index >= len(self.STORY_LINES):
+            self.app_state = 'TUTORIAL'
+            self._enter_tutorial_step(0)
+
+    def _render_story(self):
+        """打字機開場劇情畫面。背景沿用主選單同一張太空船背景圖
+        (self.title_bg)，找不到圖時退回跟 _render_main_menu() 一致的
+        深藍色純色背景 (12, 16, 38)，維持整個 App 缺圖時的後備行為一致。
+        文字用 draw_text_with_outline()（8 方向描邊），理由跟主選單標題
+        完全一樣：太空船背景圖亮度不可預期，弱描邊在亮的區域會吃色。"""
+        if self.title_bg:
+            self.screen.blit(self.title_bg, (0, 0))
+        else:
+            self.screen.fill((12, 16, 38))
+
+        # 半透明黑色遮罩：需求明確要求「加上半透明黑色遮罩」，這裡比
+        # 主選單的遮罩再暗一階 (alpha 140 vs 90)，因為劇情畫面需要玩家
+        # 專心閱讀對話文字，比起主選單只是襯托標題，這裡更需要壓低背景
+        # 的視覺干擾。
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        self.screen.blit(overlay, (0, 0))
+
+        if self.story_index < len(self.STORY_LINES):
+            current_line = self.STORY_LINES[self.story_index]
+            visible_text = current_line[:int(self.story_char_progress)]
+
+            # 對話框：畫在畫面下半部，用既有的 draw_wood_panel 木紋面板，
+            # 跟遊戲其他彈窗（暫停選單/訂單佈告欄）維持同一套視覺語言，
+            # 不是另外設計一套風格。
+            box_w, box_h = SCREEN_WIDTH - 160, 140
+            box_rect = pygame.Rect((SCREEN_WIDTH - box_w) // 2, SCREEN_HEIGHT - box_h - 60, box_w, box_h)
+            draw_wood_panel(self.screen, box_rect, self.loader, "ui_wood_button",
+                             (58, 44, 30), border_radius=14, depth=4)
+
+            # 柴犬管家的台詞用固定的「發話者」小標籤 + 內文兩層文字呈現，
+            # 內文用 draw_text_with_outline 確保跟木紋面板的對比度足夠。
+            blit_text_with_shadow(self.screen, FONT_SM, "🐕 柴犬管家", C_GOLD,
+                                   topleft=(box_rect.x + 24, box_rect.y + 16))
+            draw_text_with_outline(self.screen, visible_text, FONT_MD, C_TEXT_ON_DARK, (0, 0, 0),
+                                    center_pos=(box_rect.centerx, box_rect.centery + 10), outline_width=1)
+
+            # 完整顯示這句之後才提示「按空白鍵繼續」，避免玩家還沒看完
+            # 打字機動畫就被提示字樣分心；提示文字閃爍效果沿用既有
+            # int(time.time()*2)%2 這種簡單節奏（跟其他地方的提示閃爍
+            # 手法一致），不用額外的計時器屬性。
+            if self.story_char_progress >= len(current_line):
+                if int(pygame.time.get_ticks() / 400) % 2 == 0:
+                    blit_text_with_shadow(self.screen, FONT_XS, "▼ 按空白鍵或點擊滑鼠繼續", (220, 220, 220),
+                                           topleft=(box_rect.right - 220, box_rect.bottom - 26))
+
+    def _render_tutorial(self):
+        """TUTORIAL 狀態下疊加在正常 _render() 畫面之上的教學對話框。
+        呼叫端在 run() 的 render dispatch 已經先呼叫過 self._render()
+        把農場地圖/HUD/商店畫好了，這裡只負責疊加教學提示，不重畫地圖。
+        對話框固定畫在畫面上方（避開下方的工具列跟中央的農田格），跟
+        _render_story() 一樣用 draw_wood_panel 維持視覺一致性。"""
+        if self.tutorial_step >= len(self.TUTORIAL_STEPS):
+            return
+        step = self.TUTORIAL_STEPS[self.tutorial_step]
+
+        box_w, box_h = 620, 76
+        box_rect = pygame.Rect((SCREEN_WIDTH - box_w) // 2, 20, box_w, box_h)
+        draw_wood_panel(self.screen, box_rect, self.loader, "ui_wood_button",
+                         (58, 44, 30), border_radius=14, depth=4)
+
+        blit_text_with_shadow(self.screen, FONT_XS,
+                               f"📖 新手教學 ({self.tutorial_step + 1}/{len(self.TUTORIAL_STEPS)})",
+                               C_GOLD, topleft=(box_rect.x + 20, box_rect.y + 10))
+        draw_text_with_outline(self.screen, step["instruction"], FONT_MD, C_TEXT_ON_DARK, (0, 0, 0),
+                                center_pos=(box_rect.centerx, box_rect.centery + 16), outline_width=1)
 
     # ==========================================
     # 【Phase 6】外層遊戲狀態：主選單畫面
