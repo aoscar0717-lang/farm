@@ -150,6 +150,8 @@ class SoundManager:
             self.play("scare")
         elif t == EventType.DAILY_TAX_PAID:
             self.play("gold")
+        elif t == EventType.PROSPERITY_DIVIDEND:
+            self.play("gold")
         elif t == EventType.VAULT_RAIDED:
             self.play("stolen")
         elif t == EventType.CROP_STOLEN:

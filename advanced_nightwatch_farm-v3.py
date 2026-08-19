@@ -65,7 +65,7 @@ SCREEN_WIDTH = 1260
 SCREEN_HEIGHT = 800
 FPS = 60
 
-CELL_SIZE = 50
+CELL_SIZE = 60  # 原本 50，配合網格從 18x13 裁到 16x11 換來 +20% 放大
 GRID_X = 24
 GRID_Y = 86
 
@@ -370,13 +370,35 @@ class ActionCard:
                 surface.blit(ui_img, img_rect)
 
         text_x = icon_bg.right + 12
+        avail_w = self.rect.right - 8 - text_x
         lbl_col = C_TEXT_MUTED if self.is_locked else C_TEXT_MAIN
         lbl_y = self.rect.y + (self.rect.height // 2 - 22 if self.cost_text else self.rect.height // 2 - 10)
         surface.blit(FONT_MD.render(self.label, True, lbl_col), (text_x, lbl_y))
 
         if self.cost_text:
             cost_col = C_RED if self.is_locked else (230, 81, 0)
-            surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
+            if FONT_SM.render(self.cost_text, True, cost_col).get_width() <= avail_w:
+                surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
+            else:
+                # 側欄變窄後（例如景觀分頁的三段式文案「$300 | +220繁榮 |
+                # +66G/天」）FONT_SM 一行塞不下，依 " | " 分隔符貪婪地
+                # 換成最多兩行、改用較小的 FONT_XS，而不是任由文字被卡片
+                # 邊界硬生生切斷。
+                parts = self.cost_text.split(" | ")
+                lines, cur = [], ""
+                for part in parts:
+                    trial = f"{cur} | {part}" if cur else part
+                    if not cur or FONT_XS.render(trial, True, cost_col).get_width() <= avail_w:
+                        cur = trial
+                    else:
+                        lines.append(cur)
+                        cur = part
+                if cur:
+                    lines.append(cur)
+                cy = lbl_y + 21
+                for ln in lines[:2]:
+                    surface.blit(FONT_XS.render(ln, True, cost_col), (text_x, cy))
+                    cy += 15
 
         if self.is_locked:
             # 半透明深色遮罩蓋住整張卡片（圖示/文字都被壓暗），讓玩家一眼
@@ -475,19 +497,19 @@ class NightwatchFarmApp:
                 ("PLANT_STARLIGHT", "永恆星光果", "$300 | 30s熟", "starlight_mature"),
             ],
             "DECO": [
-                ("PLACE_PATH", "石板小徑", "$20 | +10繁榮", "stone_path"),
-                ("PLACE_FLOWER", "鮮花盆栽", "$35 | +20繁榮", "flower_bed"),
-                ("PLACE_BENCH", "休閒木椅", "$45 | +30繁榮", "garden_bench"),
-                ("PLACE_PINE", "針葉松樹", "$50 | +35繁榮", "pine_tree"),
-                ("PLACE_APPLE_TREE", "紅葉楓樹", "$60 | +40繁榮", "apple_tree"),
-                ("PLACE_LANTERN", "夜巡路燈", "$75 | +50繁榮", "soul_lantern"),
-                ("PLACE_SAKURA_TREE", "莊園大樹", "$85 | +55繁榮", "sakura_tree"),
-                ("PLACE_BIRD_BATH", "森林野菇", "$95 | +65繁榮", "bird_bath"),
-                ("PLACE_STATUE", "神秘寶箱", "$110 | +75繁榮", "ancient_statue"),
-                ("PLACE_PET_HOUSE", "木材柴堆", "$130 | +90繁榮", "pet_house"),
-                ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110", "fountain"),
-                ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160", "sundial_tower"),
-                ("PLACE_WINDMILL", "莊園木屋", "$300 | +220", "windmill"),
+                ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
+                ("PLACE_FLOWER", "鮮花盆栽", "$35 | +20繁榮 | +6G/天", "flower_bed"),
+                ("PLACE_BENCH", "休閒木椅", "$45 | +30繁榮 | +9G/天", "garden_bench"),
+                ("PLACE_PINE", "針葉松樹", "$50 | +35繁榮 | +10G/天", "pine_tree"),
+                ("PLACE_APPLE_TREE", "紅葉楓樹", "$60 | +40繁榮 | +12G/天", "apple_tree"),
+                ("PLACE_LANTERN", "夜巡路燈", "$75 | +50繁榮 | +15G/天", "soul_lantern"),
+                ("PLACE_SAKURA_TREE", "莊園大樹", "$85 | +55繁榮 | +16G/天", "sakura_tree"),
+                ("PLACE_BIRD_BATH", "森林野菇", "$95 | +65繁榮 | +19G/天", "bird_bath"),
+                ("PLACE_STATUE", "神秘寶箱", "$110 | +75繁榮 | +22G/天", "ancient_statue"),
+                ("PLACE_PET_HOUSE", "木材柴堆", "$130 | +90繁榮 | +27G/天", "pet_house"),
+                ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110繁榮 | +33G/天", "fountain"),
+                ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160繁榮 | +48G/天", "sundial_tower"),
+                ("PLACE_WINDMILL", "莊園木屋", "$300 | +220繁榮 | +66G/天", "windmill"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -943,7 +965,12 @@ class NightwatchFarmApp:
                 self.floating_texts.append(FloatingText(f"🚨 金庫被洗劫 -{ev.data['gold_lost']} G！", px - 40, py - 20, C_RED, duration=2.2))
                 self._spawn_particles(px, py, C_RED, count=25)
             elif ev.event_type == EventType.DAILY_TAX_PAID:
-                self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, 60, (239, 83, 80)))
+                # y=95：柴犬管家引導提示條是常駐元素（非僅教學期），佔用
+                # y=58~84 這一段，兩則「清晨結算」文字都得放到它下方才
+                # 不會疊在一起看不清楚。
+                self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, 95, (239, 83, 80)))
+            elif ev.event_type == EventType.PROSPERITY_DIVIDEND:
+                self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, 119, C_GOLD))
             elif ev.event_type == EventType.ENEMY_STUNNED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE

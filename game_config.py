@@ -92,6 +92,7 @@ class EventType(Enum):
     NIGHT_STARTED = "NIGHT_STARTED"
     BLOOD_MOON_WARNING = "BLOOD_MOON_WARNING"
     DAILY_TAX_PAID = "DAILY_TAX_PAID"
+    PROSPERITY_DIVIDEND = "PROSPERITY_DIVIDEND"
     VAULT_RAIDED = "VAULT_RAIDED"
     
     CROP_PLANTED = "CROP_PLANTED"
@@ -133,9 +134,14 @@ class EventType(Enum):
 # ==========================================
 
 MAP_CONFIG = {
-    "GRID_WIDTH": 18,
-    "GRID_HEIGHT": 11,
-    "FARM_X_RANGE": (4, 13),
+    "GRID_WIDTH": 15,   # 原本 18，裁 3 格換取格子等比放大 (50px -> 60px)，
+                        # 最後 1 格是犧牲右側景觀區換商店寬度 (294px)
+    "GRID_HEIGHT": 11,  # 原本 13，裁 2 行同上
+    # 農田範圍往左移 1 格 (原本 4-13)，搭配寬度縮減，讓左右佈景邊界維持
+    # 對稱（各 3 格），不是單純從右邊硬砍。GRID_WIDTH/HEIGHT 只會從右側/
+    # 下側裁切（兩者都是絕對格子座標），要維持左右對稱就得同步調整
+    # FARM_X_RANGE 起點；高度是從下方裁，起點不用動就能維持上下對稱。
+    "FARM_X_RANGE": (3, 12),
     "FARM_Y_RANGE": (2, 8),
     "VAULT_POS": (8, 5),
     "DAY_DURATION": 20.0,
@@ -144,6 +150,8 @@ MAP_CONFIG = {
     "INITIAL_GOLD": 300,
     "DAILY_TAX_BASE": 15,
     "DAILY_TAX_PER_DAY": 5,
+    "PROSPERITY_DIVIDEND_RATE": 0.3,  # 每點繁榮度、每天清晨結算發放的分紅金幣
+
     "FLASHLIGHT_COOLDOWN": 3.0,  # 3 秒強光手電筒冷卻時間
 }
 

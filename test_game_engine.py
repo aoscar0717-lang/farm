@@ -25,9 +25,10 @@ def test_dual_zones():
     
     # 中央為農田
     assert game.get_tile(6, 4).zone == ZoneType.FARM_ZONE
-    # 四周為景觀
+    # 四周為景觀（右下角座標從實際網格尺寸算，不寫死數字——網格大小
+    # 之後再調整也不會讓這個測試莫名其妙爆掉）
     assert game.get_tile(0, 0).zone == ZoneType.DECORATION_ZONE
-    assert game.get_tile(17, 10).zone == ZoneType.DECORATION_ZONE
+    assert game.get_tile(game.width - 1, game.height - 1).zone == ZoneType.DECORATION_ZONE
     print("  ✓ 中央農田與四周莊園景觀劃分正確！")
 
 

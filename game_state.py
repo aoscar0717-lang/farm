@@ -502,6 +502,20 @@ class GameState:
             {"tax": tax, "gold": self.gold}
         )
 
+        # 莊園分紅：依「目前擺著的」景觀總繁榮度發錢，讓景觀從一次性的
+        # 升級門檻變成持續生錢的資產。prosperity_score 是
+        # recalculate_prosperity() 每次從場上實際景觀重算出來的即時值
+        # （demolish_tile 拆除景觀時也會呼叫），不是累加值，所以「買了
+        # 領一次分紅、馬上鏟掉退錢」的套利在設計上就不成立。
+        dividend = int(self.prosperity_score * self.config.get("PROSPERITY_DIVIDEND_RATE", 0.3))
+        if dividend > 0:
+            self.gold += dividend
+            self._emit_event(
+                EventType.PROSPERITY_DIVIDEND,
+                f"🏡 莊園景觀帶來 {dividend} G 分紅收入！（繁榮度 {self.prosperity_score}）",
+                {"dividend": dividend, "prosperity": self.prosperity_score, "gold": self.gold}
+            )
+
         self._emit_event(
             EventType.DAY_STARTED,
             f"☀️ 第 {self.day_count} 天黎明破曉！殘餘敵人已散去，請把握白天耕作！",
