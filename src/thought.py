@@ -1002,7 +1002,6 @@ THOUGHT_ENTRIES = [
         "priority": 20,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "move"),
-        "required_tutorial": "move",
     },
     {
         "id": "learn_shop_intro",
@@ -1010,7 +1009,6 @@ THOUGHT_ENTRIES = [
         "priority": 20,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "shop_sell") and not ctx["shop_open"],
-        "required_tutorial": "shop_sell",
     },
     {
         "id": "learn_night_start",
@@ -1019,7 +1017,6 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "night_start"),
         "required_phase": "night",
-        "required_tutorial": "night_start",
     },
     {
         "id": "learn_night_end",
@@ -1028,7 +1025,6 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "night_end") and state.get("day_count", 1) >= 2,
         "required_phase": "day",
-        "required_tutorial": "night_end",
     },
     {
         "id": "learn_zone_switch",
@@ -1036,7 +1032,6 @@ THOUGHT_ENTRIES = [
         "priority": 22,
         "trigger": "always",
         "condition": lambda state, ctx: not _learned(state, "zone_switch"),
-        "required_tutorial": "zone_switch",
     },
     {
         "id": "learn_decor_place",
@@ -1045,7 +1040,6 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "decor_place"),
         "required_map": "decor",
-        "required_tutorial": "decor_place",
     },
     {
         "id": "learn_prosperity",
@@ -1053,7 +1047,6 @@ THOUGHT_ENTRIES = [
         "priority": 24,
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "prosperity") and state.get("prosperity_score", 0) > 0,
-        "required_tutorial": "prosperity",
     },
     {
         "id": "learn_farm_level",
@@ -1061,7 +1054,6 @@ THOUGHT_ENTRIES = [
         "priority": 24,
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "farm_level") and state.get("farm_level", 1) >= 2,
-        "required_tutorial": "farm_level",
     },
     {
         "id": "learn_carrot",
@@ -1071,7 +1063,6 @@ THOUGHT_ENTRIES = [
         "condition": lambda state, ctx: (
             not _learned(state, "carrot") and state.get("farm_level", 1) >= 2 and ctx["shop_open"]
         ),
-        "required_tutorial": "carrot",
     },
     {
         "id": "learn_pumpkin",
@@ -1081,7 +1072,6 @@ THOUGHT_ENTRIES = [
         "condition": lambda state, ctx: (
             not _learned(state, "pumpkin") and state.get("farm_level", 1) >= 3 and ctx["shop_open"]
         ),
-        "required_tutorial": "pumpkin",
     },
     {
         "id": "learn_advanced_defense",
@@ -1090,7 +1080,6 @@ THOUGHT_ENTRIES = [
         "trigger": "state",
         "condition": lambda state, ctx: not _learned(state, "advanced_defense") and state.get("day_count", 1) >= 5,
         "required_phase": "day",
-        "required_tutorial": "advanced_defense",
     },
 
     # -----------------------------------------------------------------
