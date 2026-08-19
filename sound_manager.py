@@ -99,6 +99,10 @@ class SoundManager:
             self.sounds["game_over"] = self._generate_tone(110.0, 0.8, volume=0.6, wave_type="square")
             self.sounds["night_alarm"] = self._generate_tone(493.88, 0.3, volume=0.4, wave_type="sine")
             self.sounds["error"] = self._generate_tone(160.0, 0.14, volume=0.35, wave_type="square")
+            # 通用 UI 點擊音（切換分頁、選取工具卡片...），要短促清脆、
+            # 跟「plant」那種比較柔和的種植音區分開，音量壓低一點避免
+            # 頻繁點擊時太吵。
+            self.sounds["ui_click"] = self._generate_tone(1000.0, 0.05, volume=0.22, wave_type="sine")
             self.bgm_channel = None
 
         except Exception as e:

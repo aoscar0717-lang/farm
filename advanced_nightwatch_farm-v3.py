@@ -639,6 +639,43 @@ class NightwatchFarmApp:
         else:
             self.hovered_grid = None
 
+    # 這幾個放置動作各自要求的地圖分區（跟 game_state.py 的
+    # place_decoration/place_defense/plant_crop 判斷條件一致，只用來畫
+    # 「這格能不能放」的視覺提示，不是權威判定——實際成功/失敗還是要
+    # 靠點擊後呼叫對應的 game.xxx() 函式，那邊的失敗原因字串已經在
+    # _apply_grid_action() 裡轉成紅色 FloatingText 顯示了，這裡不重複。
+    _DEFENSE_ACTION_IDS = {"PLACE_FENCE", "PLACE_TRAP", "PLACE_SCARECROW", "PLACE_BEEHIVE"}
+    # 各防禦設施的警戒/攻擊範圍（格數），只有真的有「範圍」概念的設施才會
+    # 在放置預覽時畫光圈；捕獸夾/木柵沒有範圍屬性，維持原樣不畫圈。
+    _DEFENSE_ACTION_RANGE = {
+        "PLACE_SCARECROW": DEFENSE_DATA.get(DefenseType.SCARECROW, {}).get("scare_radius"),
+        "PLACE_BEEHIVE": DEFENSE_DATA.get(DefenseType.BEEHIVE, {}).get("attack_range"),
+    }
+
+    def _grid_preview_is_invalid(self, gx: int, gy: int) -> bool:
+        """判斷目前選中的工具，放在 (gx, gy) 這格『大致上』會不會失敗，
+        純粹用來畫格子高光的顏色（白色=可以／紅色=不行），不影響任何
+        實際遊戲邏輯。成熟作物一律可以直接採收，所以永遠視為有效。"""
+        tile = self.game.get_tile(gx, gy)
+        if not tile:
+            return True
+        if tile.crop and tile.crop.is_mature:
+            return False
+
+        act = self.selected_action
+        if act.startswith("PLANT_") or act in self._DEFENSE_ACTION_IDS:
+            return tile.zone != ZoneType.FARM_ZONE or not tile.is_empty
+        if act.startswith("PLACE_"):
+            # 其餘 PLACE_* 都是景觀裝飾，只能放在莊園景觀區。
+            return tile.zone != ZoneType.DECORATION_ZONE or not tile.is_empty
+        if act == "WATER_CROP":
+            return not (tile.crop and not tile.crop.is_mature)
+        if act == "SHOVEL":
+            return tile.is_empty
+        if act == "HARVEST":
+            return not (tile.crop and tile.crop.is_mature)
+        return False
+
     def _handle_mouse_wheel(self, event):
         """商店清單捲動。只在滑鼠停在清單範圍內時生效，避免在地圖上
         滾滑鼠意外捲動到看不見的商店。"""
@@ -750,7 +787,7 @@ class NightwatchFarmApp:
         for tab_id, label, rect in self.tab_buttons:
             if rect.collidepoint(mx, my):
                 self.active_tab = tab_id
-                self.sound.play("plant")
+                self.sound.play("ui_click")
                 return
 
         # 卡片點擊
@@ -760,14 +797,18 @@ class NightwatchFarmApp:
                     success, msg = self.game.buy_guard_dog()
                     if not success:
                         self.log_messages.append(f"❌ {msg}")
+                        self.floating_texts.append(FloatingText(f"❌ {msg}", mx - 45, my - 12, C_RED))
+                        self.sound.play("error")
                 elif card.action_id == "BUY_CAT":
                     success, msg = self.game.buy_farm_cat()
                     if not success:
                         self.log_messages.append(f"❌ {msg}")
+                        self.floating_texts.append(FloatingText(f"❌ {msg}", mx - 45, my - 12, C_RED))
+                        self.sound.play("error")
                 else:
                     if not card.is_locked:
                         self.selected_action = card.action_id
-                        self.sound.play("plant")
+                        self.sound.play("ui_click")
                     else:
                         # 點到尚未解鎖的商品：不執行任何購買/選取邏輯，
                         # 在滑鼠位置跳出紅色浮動文字＋錯誤音效，讓玩家
@@ -1469,11 +1510,34 @@ class NightwatchFarmApp:
 
         if self.hovered_grid:
             gx, gy = self.hovered_grid
-            cx = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
-            cy = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
-            glow_s = pygame.Surface((CELL_SIZE * 2, CELL_SIZE * 2), pygame.SRCALPHA)
-            pygame.draw.circle(glow_s, (255, 255, 255, 110), (CELL_SIZE, CELL_SIZE), 24, 3)
-            self.screen.blit(glow_s, (cx - CELL_SIZE, cy - CELL_SIZE))
+            hx = GRID_X + gx * CELL_SIZE
+            hy = GRID_Y + gy * CELL_SIZE
+            cx = hx + CELL_SIZE // 2
+            cy = hy + CELL_SIZE // 2
+
+            # 網格瞄準高光：淺白色半透明填色 + 亮白邊框；如果目前選中的
+            # 工具放在這一格「大致上」會失敗（例如在莊園景觀區選種子），
+            # 動態變成淺紅色，點擊前就先給玩家提示，不用等點下去失敗
+            # 才看到 FloatingText。
+            is_invalid = self._grid_preview_is_invalid(gx, gy)
+            fill_col = (255, 90, 90, 90) if is_invalid else (255, 255, 255, 90)
+            border_col = (255, 120, 120) if is_invalid else (255, 255, 255)
+            highlight_s = pygame.Surface((CELL_SIZE, CELL_SIZE), pygame.SRCALPHA)
+            pygame.draw.rect(highlight_s, fill_col, highlight_s.get_rect(), border_radius=4)
+            pygame.draw.rect(highlight_s, border_col, highlight_s.get_rect(), width=2, border_radius=4)
+            self.screen.blit(highlight_s, (hx, hy))
+
+            # 防禦設施範圍預覽：目前選中的工具若有對應的警戒/攻擊範圍
+            # (稻草人的 scare_radius、蜂巢的 attack_range)，以懸停格為
+            # 圓心畫一個半透明淺藍色光圈，讓玩家下手前就能看到涵蓋範圍。
+            range_val = self._DEFENSE_ACTION_RANGE.get(self.selected_action)
+            if range_val:
+                radius_px = int(range_val * CELL_SIZE)
+                if radius_px > 0:
+                    range_s = pygame.Surface((radius_px * 2, radius_px * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(range_s, (135, 206, 250, 60), (radius_px, radius_px), radius_px)
+                    pygame.draw.circle(range_s, (135, 206, 250, 170), (radius_px, radius_px), radius_px, width=2)
+                    self.screen.blit(range_s, (cx - radius_px, cy - radius_px))
 
         # 即時情境【柴犬教官】動態新手對話框
         badge_txt, badge_bg, main_txt, txt_col, step_tag = self._get_mascot_guide_data()
@@ -1689,12 +1753,21 @@ class NightwatchFarmApp:
         self.tab_buttons = tabs
         for tab_id, label, rect in tabs:
             is_active = (self.active_tab == tab_id)
+            # 懸停高光：非當前分頁時，滑鼠移上去背景稍微變亮＋邊框變成
+            # 該分頁的主題色，讓玩家清楚知道這裡可以點。已經是當前分頁
+            # 的話就不用疊加懸停效果，維持原本的「已選中」樣式。
+            is_hover = (not is_active) and rect.collidepoint(self.mouse_pos)
             tint = SHOP_TAB_TINTS.get(tab_id, C_ORANGE)
-            bg_col = (255, 255, 255) if is_active else (240, 242, 245)
+            if is_active:
+                bg_col = (255, 255, 255)
+            elif is_hover:
+                bg_col = tuple(min(255, c + 25) for c in (240, 242, 245))
+            else:
+                bg_col = (240, 242, 245)
             pygame.draw.rect(self.screen, bg_col, rect, border_radius=8)
-            border_col = tint if is_active else (210, 212, 216)
-            pygame.draw.rect(self.screen, border_col, rect, width=2 if is_active else 1, border_radius=8)
-            txt_col = C_TEXT_MAIN if is_active else C_TEXT_MUTED
+            border_col = tint if (is_active or is_hover) else (210, 212, 216)
+            pygame.draw.rect(self.screen, border_col, rect, width=2 if (is_active or is_hover) else 1, border_radius=8)
+            txt_col = C_TEXT_MAIN if (is_active or is_hover) else C_TEXT_MUTED
             t_surf = FONT_XS.render(label, True, txt_col)
             self.screen.blit(t_surf, (rect.centerx - t_surf.get_width() // 2, rect.centery - t_surf.get_height() // 2))
 
