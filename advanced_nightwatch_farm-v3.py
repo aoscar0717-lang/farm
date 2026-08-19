@@ -1898,12 +1898,17 @@ class NightwatchFarmApp:
                 self.floating_texts.append(FloatingText(f"🚨 金庫被洗劫 -{ev.data['gold_lost']} G！", px - 40, py - 20, C_RED, duration=2.2))
                 self._spawn_particles(px, py, C_RED, count=25)
             elif ev.event_type == EventType.DAILY_TAX_PAID:
-                # y=95：柴犬管家引導提示條是常駐元素（非僅教學期），佔用
-                # y=58~84 這一段，兩則「清晨結算」文字都得放到它下方才
-                # 不會疊在一起看不清楚。
-                self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, 95, (239, 83, 80)))
+                # 【UI 佈局修復】原本 y=95 是配合舊版「柴犬管家」教學列
+                # （佔用 y=58~84）往下避開；舊版教學列已整段移除，改成
+                # 飛船 AI 任務橫幅常駐佔用
+                # MISSION_BANNER_Y ~ MISSION_BANNER_Y + MISSION_BANNER_H
+                # （目前是 y=84~116），這裡改成讀這兩個共用常數往下推，
+                # 兩則「清晨結算」文字才不會疊在任務橫幅上看不清楚。
+                y_base = self.MISSION_BANNER_Y + self.MISSION_BANNER_H + 10
+                self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, y_base, (239, 83, 80)))
             elif ev.event_type == EventType.PROSPERITY_DIVIDEND:
-                self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, 119, C_FLOATTEXT_GOLD))
+                y_base = self.MISSION_BANNER_Y + self.MISSION_BANNER_H + 34
+                self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, y_base, C_FLOATTEXT_GOLD))
             elif ev.event_type == EventType.ENEMY_STUNNED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
@@ -2023,106 +2028,22 @@ class NightwatchFarmApp:
                 self.selected_action = "FLASHLIGHT"
                 self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, C_FLOATTEXT_GOLD, duration=2.5))
 
-    def _get_mascot_guide_data(self) -> Tuple[str, tuple, str, tuple, str]:
-        """Returns (badge_text, badge_bg_color, main_dialogue, text_color, step_tag)"""
-        if self.game.phase == GamePhase.NIGHT:
-            if self.game.is_blood_moon:
-                return (
-                    "🩸 血月首領",
-                    (211, 47, 47),
-                    "【血月警報】巨型野豬首領來襲！點選【強光手電筒】滑鼠點擊 Boss 照暈，柴犬全力集火！",
-                    (255, 180, 180),
-                    "[滑鼠點擊 Boss 照暈]"
-                )
-            else:
-                return (
-                    "🔦 夜巡夜戰",
-                    (33, 150, 243),
-                    "【夜間防守】入侵者來襲！點選下方工具列【強光手電筒】，滑鼠直接點擊敵人照暈他！",
-                    (179, 229, 252),
-                    "[點選強光・滑鼠照暈]"
-                )
-
-        else:
-            # Daytime
-            crops_count = sum(1 for row in self.game.grid for tile in row if tile.crop)
-            mature_count = sum(1 for row in self.game.grid for tile in row if tile.crop and tile.crop.is_mature)
-
-            if self.game.day_count == 1:
-                if crops_count == 0:
-                    return (
-                        "🐶 柴犬管家",
-                        (255, 152, 0),
-                        "領主你好！快點選下方【白蘿蔔種子】，在中央金色農田點擊 3~5 格播種賺錢！",
-                        (255, 245, 157),
-                        "[步驟 1/3：播種]"
-                    )
-                elif mature_count > 0:
-                    return (
-                        "🌾 採收豐收",
-                        (76, 175, 80),
-                        "作物成熟泛出金黃光芒了！請【直接滑鼠點擊作物】採收，換取第一桶金！",
-                        (200, 230, 201),
-                        "[步驟 2/3：採收]"
-                    )
-                elif self.game.time_in_phase > 15.0:
-                    return (
-                        "🛡️ 防守備戰",
-                        (239, 83, 80),
-                        "天色即將變暗！請點擊【防禦】分頁，購買【看門柴犬 ($100)】或【刺藤木柵】保護農田！",
-                        (255, 204, 128),
-                        "[步驟 3/3：防禦]"
-                    )
-                else:
-                    return (
-                        "⏳ 生長觀察",
-                        (0, 188, 212),
-                        "作物正在快速生長中！可點擊【黃金澆水壺】加速進度，靜候成熟採收！",
-                        (220, 237, 200),
-                        "[生長觀察]"
-                    )
-            elif self.game.day_count == 2:
-                if mature_count > 0:
-                    return (
-                        "🌾 採收提醒",
-                        (76, 175, 80),
-                        "有成熟作物等待採收！天黑前記得收成，存活過夜作物更享有月光加成 +50%！",
-                        (200, 230, 201),
-                        "[點擊採收]"
-                    )
-                elif self.game.time_in_phase > 12.0:
-                    return (
-                        "🛡️ 防線加固",
-                        (239, 83, 80),
-                        "野豬即將加入夜襲！多配置幾條刺藤圍籬與捕獸夾，防止防線被衝破！",
-                        (255, 204, 128),
-                        "[佈置防禦]"
-                    )
-                else:
-                    return (
-                        "🌸 景觀擴建",
-                        (156, 39, 176),
-                        "第 2 天開始！到【景觀】分頁佈置果樹、噴泉提升繁榮度，解鎖甜玉米與草莓！",
-                        (245, 245, 245),
-                        "[莊園升級]"
-                    )
-            else:
-                if mature_count > 0:
-                    return (
-                        "🌾 豐收時刻",
-                        (76, 175, 80),
-                        "請及時採收成熟作物，為莊園籌措升級資金與繳納每日領地地租！",
-                        (200, 230, 201),
-                        "[點擊採收]"
-                    )
-                else:
-                    return (
-                        "🏛️ 領地經營",
-                        (156, 39, 176),
-                        f"第 {self.game.day_count} 天莊園繁榮度: {self.game.prosperity_score}！持續佈置景觀解鎖高級魔法南瓜！",
-                        (245, 245, 245),
-                        f"[Lv.{self.game.farm_level}]"
-                    )
+    # 【UI 佈局修復：解決任務橫幅重疊與移除舊版教學系統】
+    # 這裡原本是 _get_mascot_guide_data()，舊版「柴犬管家」動態教學列
+    # 的文字資料來源（依日夜/天數/採收狀態回傳徽章文字、對話、步驟
+    # 標籤），唯一呼叫端在 _render_flat_meadow_and_farm() 尾端，畫在
+    # y = GRID_Y - 28 ~ GRID_Y - 2（GRID_Y=86，也就是 y=58~84）。
+    #
+    # 新版「飛船 AI 任務橫幅」(self.missions / _render_mission_ui()，見
+    # 下方) 職責跟這套系統完全重疊（兩者都是畫在農場上方的常駐引導
+    # 文字），新版橫幅原本畫在 y=70 起，跟舊版的 y=58~84 大幅重疊，
+    # 兩條文字疊在一起互相遮擋——這正是這次回報的 UI 重疊問題的根本
+    # 原因。兩套系統只留一套，這裡連同 _render_flat_meadow_and_farm()
+    # 尾端呼叫這個方法、畫柴犬教官對話框的那一段程式碼一併整段刪除
+    # （不是註解掉）：只註解掉的話，方法本體跟呼叫端還留在檔案裡，
+    # 之後容易有人以為這套系統還在運作、繼續往裡面加新教學文案，反而
+    # 製造混淆；直接刪除能確保「柴犬管家教學列」不會再被任何地方
+    # 意外呼叫到、也不會再跟任何新版 UI 衝突版面。
 
 
 
@@ -2246,6 +2167,15 @@ class NightwatchFarmApp:
                     blit_text_with_shadow(self.screen, FONT_XS, "▼ 按空白鍵或點擊滑鼠繼續", (220, 220, 220),
                                            topleft=(box_rect.right - 220, box_rect.bottom - 26))
 
+    # 任務橫幅的頂部 Y 座標與高度，抽成類別常數而不是寫死在方法內部的
+    # 兩個數字：_process_events() 那邊的 DAILY_TAX_PAID/PROSPERITY_
+    # DIVIDEND 浮動文字需要知道這條橫幅實際佔用到哪個 y 才不會互相
+    # 重疊，兩處共用同一組常數，之後只要調這裡一個地方就好，不用同時
+    # 改兩個檔案位置裡各自寫死的魔術數字。
+    MISSION_BANNER_Y = 84       # 頭部資源列 (y:0~70) 正下方，落在需求
+                                # 要求的 y=80~90 區間內。
+    MISSION_BANNER_H = 32
+
     def _render_mission_ui(self):
         """PLAYING 狀態下、頭部資源列橫幅正下方的飛船 AI 任務橫幅。跟
         舊版 'TUTORIAL' 對話框最大的不同：這裡完全不擋任何點擊、不暫停
@@ -2253,36 +2183,46 @@ class NightwatchFarmApp:
         玩家可以完全無視它照樣自由遊玩。current_mission_idx 超出
         missions 範圍（理論上不會發生，因為 missions[-1] 是永遠比對不到
         的 "complete" 類型，見 _process_events()）時直接不畫，純防呆。
+
+        【UI 佈局修復】原本畫在 y=70（緊貼頭部資源列下緣），跟舊版
+        「柴犬管家」教學列 (y=58~84) 重疊；舊版已整段移除，這裡改讀
+        MISSION_BANNER_Y（=84），完整落在需求指定的 y=80~90 區間內，
+        兩者不再有任何重疊。
         """
         if self.current_mission_idx >= len(self.missions):
             return
         mission = self.missions[self.current_mission_idx]
 
-        # 頭部資源列橫幅 (_render_header_banner()) 固定佔用 y: 0~70，
-        # 這條任務橫幅緊接著畫在 y=70 開始的位置，寬度貼齊整個畫面，
         # 半透明黑底 + 青色邊框（需求明確要求的「科技感」配色），跟
         # 頭部資源列那種不透明木紋底刻意做出區隔，讓玩家一眼就能分辨
         # 「這是額外疊加的提示」而不是遊戲原生 HUD 的一部分。
-        banner_h = 34
-        banner_rect = pygame.Rect(0, 70, SCREEN_WIDTH, banner_h)
-        banner_surf = pygame.Surface((SCREEN_WIDTH, banner_h), pygame.SRCALPHA)
+        banner_rect = pygame.Rect(0, self.MISSION_BANNER_Y, SCREEN_WIDTH, self.MISSION_BANNER_H)
+        banner_surf = pygame.Surface((SCREEN_WIDTH, self.MISSION_BANNER_H), pygame.SRCALPHA)
         banner_surf.fill((10, 20, 24, 165))
         self.screen.blit(banner_surf, banner_rect.topleft)
         pygame.draw.rect(self.screen, C_CYAN, banner_rect, width=2)
 
-        # 左側：AI 對話文字（淡藍色）。右側：進度 (例如 0/1)。
+        # 左側：AI 對話文字（淡藍色）。右側：進度 (例如 0/1)。兩者都用
+        # center=(..., banner_rect.centery) 垂直置中對齊橫幅本身，而不是
+        # 像舊版那樣寫死 topleft y 偏移——banner_rect 的高度改動時（例如
+        # 之後又想再調整 MISSION_BANNER_H），文字位置會自動跟著置中，
+        # 不用每次改高度都手動重算文字的 y 偏移。
         # missions[-1]（"complete" 類型）沒有真正的 target/progress 概念
         # （target 存的是 0，純粹只是占位避免 KeyError），這裡一律讀
         # mission.get("target", 0)，是 0 的話就不顯示進度數字，只顯示
         # 那句完成提示文字，避免玩家看到令人困惑的「0/0」。
+        text_surf = FONT_SM.render(mission["text"], True, (140, 220, 255))
+        text_rect = text_surf.get_rect(midleft=(20, banner_rect.centery))
         blit_text_with_shadow(self.screen, FONT_SM, mission["text"], (140, 220, 255),
-                               topleft=(20, banner_rect.y + 7))
+                               topleft=text_rect.topleft)
 
         target = mission.get("target", 0)
         if target > 0:
             progress_text = f"{self.mission_progress}/{target}"
+            prog_surf = FONT_SM.render(progress_text, True, C_GOLD)
+            prog_rect = prog_surf.get_rect(midright=(SCREEN_WIDTH - 20, banner_rect.centery))
             blit_text_with_shadow(self.screen, FONT_SM, progress_text, C_GOLD,
-                                   topleft=(SCREEN_WIDTH - 70, banner_rect.y + 7))
+                                   topleft=prog_rect.topleft)
 
     # ==========================================
     # 【Phase 6】外層遊戲狀態：主選單畫面
@@ -2974,27 +2914,11 @@ class NightwatchFarmApp:
                     pygame.draw.circle(range_s, (135, 206, 250, 170), (radius_px, radius_px), radius_px, width=2)
                     self.screen.blit(range_s, (cx - radius_px, cy - radius_px))
 
-        # 即時情境【柴犬教官】動態新手對話框
-        badge_txt, badge_bg, main_txt, txt_col, step_tag = self._get_mascot_guide_data()
-        banner_h = 26
-        banner_rect = pygame.Rect(GRID_X, GRID_Y - 28, map_w, banner_h)
-        pygame.draw.rect(self.screen, (28, 37, 46, 235), banner_rect, border_radius=8)
-        pygame.draw.rect(self.screen, (70, 85, 100), banner_rect, width=1, border_radius=8)
-
-        # 左側膠囊徽章 (Badge)
-        badge_w = 95
-        badge_r = pygame.Rect(banner_rect.x + 4, banner_rect.y + 3, badge_w, banner_h - 6)
-        pygame.draw.rect(self.screen, badge_bg, badge_r, border_radius=6)
-        b_surf = FONT_XS.render(badge_txt, True, C_WHITE)
-        self.screen.blit(b_surf, (badge_r.centerx - b_surf.get_width() // 2, badge_r.centery - b_surf.get_height() // 2))
-
-        # 中間主引導對話
-        self.screen.blit(FONT_SM.render(main_txt, True, txt_col), (badge_r.right + 12, banner_rect.y + 4))
-
-        # 右側步驟進度標籤
-        tag_surf = FONT_XS.render(step_tag, True, (176, 190, 197))
-        self.screen.blit(tag_surf, (banner_rect.right - tag_surf.get_width() - 10, banner_rect.y + 5))
-
+        # 【UI 佈局修復】原本這裡是「即時情境【柴犬教官】動態新手對話
+        # 框」，畫在 GRID_Y - 28（y=58~84），跟新版飛船 AI 任務橫幅
+        # (_render_mission_ui()，畫在 y=70 起) 高度重疊、文字互相遮擋，
+        # 已整段移除，改由飛船 AI 任務橫幅統一負責常駐引導提示，不再
+        # 保留兩套並存的引導系統。
 
 
     def _render_night_overlay(self):
