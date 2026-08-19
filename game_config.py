@@ -75,6 +75,12 @@ class BuildingType(Enum):
     # -倒數」機台是完全不同的互動模型（見 BUILDING_DATA 裡的說明）。
     SPRINKLER = "SPRINKLER"              # 自動灑水器：加速周圍 3x3 作物生長
     AUTO_HARVESTER = "AUTO_HARVESTER"    # 自動採收機：自動採收周圍 3x3 成熟作物
+    # Phase 4.5 新增：最上游的基礎原料生產設施，「純資本工業流」——花
+    # 金幣蓋下去、開關切成 ON，之後不消耗任何原料、無限期自動產出。
+    # 走的仍然是 OVEN/FURNACE 那套「開關-配方-倒數」模型 (is_active/
+    # is_processing)，只是 recipe 是空字典（見 BUILDING_DATA 說明）。
+    LUMBERYARD = "LUMBERYARD"            # 伐木場：無消耗，定期產出 wood
+    MINE = "MINE"                        # 礦場：無消耗，定期產出 metal_ore
 
 
 class EnemyType(Enum):
@@ -570,6 +576,57 @@ BUILDING_DATA = {
         "scan_interval": 1.0,  # 每 1 秒掃描一次周圍成熟作物，不用每幀掃，省效能
         "walkable": False,
         "asset_key": "auto_harvester",
+    },
+    # Phase 4.5：打通上游生產線。伐木場/礦場刻意沿用 OVEN/FURNACE 那套
+    # 「開關-配方-倒數」模型（is_active/is_processing/toggle_building()/
+    # GameState._update_buildings() 既有的那段迴圈），而不是像 SPRINKLER/
+    # AUTO_HARVESTER 那樣走 passive_effect 分支——因為使用者的規格描述
+    # 本來就是「ON 時自動投料、倒數、產出，循環不止；OFF 就停止」，這正
+    # 好就是 Phase 3 開關式自動化的定義，唯一差別只在於「配方 (recipe)
+    # 是空字典，不消耗任何東西」。GameState._update_buildings() 對
+    # recipe 的處理本來就是「用 _check_recipe_shortfall(recipe) 檢查、
+    # 不夠就不開始」——recipe={} 時這個檢查天生就會回傳空列表 (沒有任何
+    # 項目需要檢查)，等於「永遠視為原料充足」，後面的
+    # `for item_key, need_qty in recipe.items(): self._consume_item(...)`
+    # 也因為 recipe 是空字典而完全不會執行、不扣任何東西。也就是說，
+    # 完全不需要為這兩座建築寫任何特例分支，只要 recipe 給空字典，
+    # 「無消耗、ON 了就會自動不斷循環生產」這個效果就會自動成立，跟
+    # 烤箱/熔爐共用同一套已經測試過、正確處理「這一輪跑完才停工」的
+    # 邏輯，不會有第二套邏輯路徑需要單獨維護/單獨測試。
+    #
+    # 【如實揭露】這兩座建築打通了 wood 跟 metal_ore 這兩種原料的
+    # 上游來源，但熔爐 (FURNACE) 的配方是 metal_ore + charcoal，
+    # charcoal（木炭）目前依然完全沒有任何生產/採集管道——Phase 2 當初
+    # 選擇 FURNACE 配方時就說明過，「wood -> charcoal」是被捨棄的另一個
+    # 選項，沒有實作。也就是說，這次改動之後 metal_ore 可以無限產出了，
+    # 但熔爐依然無法真正運作（缺 charcoal），連帶 SPRINKLER/AUTO_HARVESTER
+    # 需要的 metal_ingot 也還是拿不到——熔爐與自動化科技「還沒有完全打通」，
+    # 只打通了一半。這不是這次改動漏做，這次的需求範圍明確只要求
+    # LUMBERYARD/MINE 兩座設施；補上 charcoal 的生產來源（例如用伐木場
+    # 產出的 wood 去燒炭）建議留給下一階段。
+    BuildingType.LUMBERYARD: {
+        "name": "伐木場",
+        "unlock_level": 1,   # 最基礎的原料來源，刻意設成遊戲一開局就能蓋，不卡關
+        "build_cost_gold": 50,
+        "build_cost_tech": 0,
+        "recipe": {},              # 無消耗——見上方說明
+        "output_key": "wood",
+        "output_qty": 1,
+        "process_time": 10.0,
+        "walkable": False,
+        "asset_key": "lumberyard",
+    },
+    BuildingType.MINE: {
+        "name": "礦場",
+        "unlock_level": 2,   # 比伐木場高一階（成本也高 3 倍），但仍遠低於熔爐(3)，確保熔爐解鎖時礦場已經可以先蓋好
+        "build_cost_gold": 150,
+        "build_cost_tech": 0,
+        "recipe": {},              # 無消耗——見上方說明
+        "output_key": "metal_ore",
+        "output_qty": 1,
+        "process_time": 15.0,
+        "walkable": False,
+        "asset_key": "mine",
     },
 }
 

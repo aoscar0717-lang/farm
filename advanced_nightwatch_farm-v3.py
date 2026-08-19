@@ -665,7 +665,7 @@ class NightwatchFarmApp:
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
             ("CROPS", "農田耕作 (10)", pygame.Rect(0, 0, 0, 0)),
-            ("DECO", "莊園景觀 (17)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (19)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
@@ -716,6 +716,12 @@ class NightwatchFarmApp:
                 # 讓玩家一眼看出這兩張卡「要花的不是錢」。
                 ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 周圍3x3雙倍生長", "sprinkler"),
                 ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100科技 | 自動採收3x3", "auto_harvester"),
+                # Phase 4.5：打通上游生產線的基礎設施，一樣是「純資本」
+                # ——只花金幣，不消耗任何背包物品，所以說明文字維持跟
+                # 一般景觀裝飾一致的「$金額」格式，不用像灑水器/採收機
+                # 那樣特別標注「錠」。
+                ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木頭", "lumberyard"),
+                ("PLACE_MINE", "礦場", "$150 | 每15s產1礦石", "mine"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1302,6 +1308,10 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.SPRINKLER)
         elif act == "PLACE_AUTO_HARVESTER":
             success, msg = self.game.place_building(gx, gy, BuildingType.AUTO_HARVESTER)
+        elif act == "PLACE_LUMBERYARD":
+            success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
+        elif act == "PLACE_MINE":
+            success, msg = self.game.place_building(gx, gy, BuildingType.MINE)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -1599,19 +1609,22 @@ class NightwatchFarmApp:
             elif card.action_id in ("PLANT_PUMPKIN", "PLANT_BLUEBERRY", "PLANT_WHEAT"):
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
-            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER"):
-                # 烤箱/熔爐/灑水器/自動採收機的 unlock_level 都直接讀
-                # BUILDING_DATA 定義比對 self.game.farm_level，不用另外
-                # 走 is_crop_unlocked 那套只吃 CropType 的介面）。金幣/
-                # 科技點數/metal_ingot 材料不足都不會鎖卡——維持跟其餘
-                # 商店卡片一致的「可以點，點了會跳紅字說明缺什麼」既有
-                # 手感，只有等級這種「不管有沒有錢都做不到」的門檻才會
-                # 直接鎖卡。
+            elif card.action_id in ("PLACE_OVEN", "PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
+                                     "PLACE_LUMBERYARD", "PLACE_MINE"):
+                # 烤箱/熔爐/灑水器/自動採收機/伐木場/礦場的 unlock_level
+                # 都直接讀 BUILDING_DATA 定義比對 self.game.farm_level，
+                # 不用另外走 is_crop_unlocked 那套只吃 CropType 的介面。
+                # 金幣/科技點數/metal_ingot 材料不足都不會鎖卡——維持跟
+                # 其餘商店卡片一致的「可以點，點了會跳紅字說明缺什麼」
+                # 既有手感，只有等級這種「不管有沒有錢都做不到」的門檻
+                # 才會直接鎖卡。
                 _card_building_type = {
                     "PLACE_OVEN": BuildingType.OVEN,
                     "PLACE_FURNACE": BuildingType.FURNACE,
                     "PLACE_SPRINKLER": BuildingType.SPRINKLER,
                     "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
+                    "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
+                    "PLACE_MINE": BuildingType.MINE,
                 }[card.action_id]
                 req_lvl = BUILDING_DATA[_card_building_type]["unlock_level"]
                 card.is_locked = self.game.farm_level < req_lvl
@@ -2234,6 +2247,11 @@ class NightwatchFarmApp:
         BuildingType.OVEN: "🍞",
         BuildingType.SPRINKLER: "💧",
         BuildingType.AUTO_HARVESTER: "🤖",
+        # Phase 4.5：使用者這次明確建議用簡寫中文字（「伐」/「礦」）而不
+        # 是 emoji 圖示——FONT_MD.render() 對文字跟 emoji 是同一套呼叫，
+        # 不用另外處理，兩種風格混用在同一個字典裡完全沒問題。
+        BuildingType.LUMBERYARD: "伐",
+        BuildingType.MINE: "礦",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
