@@ -21,7 +21,7 @@ class AssetLoader:
         if os.path.exists(full_path):
             try:
                 img = pygame.image.load(full_path).convert_alpha()
-                return pygame.transform.smoothscale(img, size)
+                return pygame.transform.scale(img, size)
             except Exception as e:
                 print(f"[AssetLoader] 載入 {rel_path} 失敗: {e}")
         
@@ -31,6 +31,10 @@ class AssetLoader:
 
     def load_all(self):
         sz = (self.cell_size, self.cell_size)
+
+        # 0. 地磚 Tiles
+        self.images["grass_tile"] = self._load_image("tiles/grass_tile.png", sz)
+        self.images["soil_tile"] = self._load_image("tiles/soil_tile.png", sz)
         
         # 1. 作物 (10 種)
         crops = [
@@ -69,13 +73,14 @@ class AssetLoader:
         for key, path in decos:
             self.images[key] = self._load_image(path, sz)
 
-        # 3. 防禦設施
+        # 3. 防禦設施與工具
         defs = [
             ("wooden_fence", "defenses/wooden_fence.png"),
             ("bear_trap", "defenses/bear_trap.png"),
             ("scarecrow", "defenses/scarecrow.png"),
             ("beehive", "defenses/beehive.png"),
             ("watering_can", "defenses/watering_can.png"),
+            ("shovel", "defenses/shovel.png"),
         ]
         for key, path in defs:
             self.images[key] = self._load_image(path, sz)
@@ -91,6 +96,7 @@ class AssetLoader:
         ]
         for key, path in chars:
             self.images[key] = self._load_image(path, sz if key != "boss_boar" else (int(sz[0]*1.4), int(sz[1]*1.4)))
+
 
     def get(self, key: str) -> pygame.Surface:
         return self.images.get(key)

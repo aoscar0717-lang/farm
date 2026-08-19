@@ -364,9 +364,58 @@ class GameState:
         )
         return True, "購買成功！"
 
+    def demolish_tile(self, x: int, y: int) -> Tuple[bool, str, int]:
+        """使用鏟子挖除作物或拆除設施（退還 80% 建造金幣）"""
+        tile = self.get_tile(x, y)
+        if not tile or tile.is_empty:
+            return False, "此處為空地，無需剷除！", 0
+
+        # 1. 剷除作物 (不退款)
+        if tile.crop is not None:
+            name = tile.crop.config["name"]
+            tile.crop = None
+            self._emit_event(
+                EventType.TILE_CLEARED,
+                f"🌾 已剷除 ({x}, {y}) 的 {name} 作物！",
+                {"x": x, "y": y, "refund": 0}
+            )
+            return True, f"已剷除 {name} 作物！", 0
+
+        # 2. 拆除防禦設施 (退還 80% 金幣)
+        if tile.defense is not None:
+            name = tile.defense.config["name"]
+            cost = tile.defense.config["cost"]
+            refund = int(cost * 0.8)
+            self.gold += refund
+            tile.defense = None
+            self._emit_event(
+                EventType.TILE_CLEARED,
+                f"🔨 已拆除 ({x}, {y}) 的 {name}，退還 {refund} 金幣！",
+                {"x": x, "y": y, "refund": refund, "gold": self.gold}
+            )
+            return True, f"已拆除 {name}，退還 {refund} 金幣！", refund
+
+        # 3. 移除景觀設施 (退還 80% 金幣並扣回繁榮度)
+        if tile.decoration is not None:
+            name = tile.decoration.config["name"]
+            cost = tile.decoration.config["cost"]
+            refund = int(cost * 0.8)
+            self.gold += refund
+            tile.decoration = None
+            self.recalculate_prosperity()
+            self._emit_event(
+                EventType.TILE_CLEARED,
+                f"🌸 已移除 ({x}, {y}) 的 {name}，退還 {refund} 金幣！",
+                {"x": x, "y": y, "refund": refund, "gold": self.gold}
+            )
+            return True, f"已移除 {name}，退還 {refund} 金幣！", refund
+
+        return False, "無法剷除此處物品！", 0
+
     # =========================================================================
     # 日夜交替
     # =========================================================================
+
 
     def _start_night(self):
         self.phase = GamePhase.NIGHT

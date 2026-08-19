@@ -122,8 +122,10 @@ class EventType(Enum):
     CROP_STOLEN = "CROP_STOLEN"
     FENCE_ATTACKED = "FENCE_ATTACKED"
     FENCE_DESTROYED = "FENCE_DESTROYED"
+    TILE_CLEARED = "TILE_CLEARED"
     
     GAME_OVER = "GAME_OVER"
+
 
 
 # ==========================================

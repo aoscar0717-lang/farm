@@ -142,6 +142,28 @@ def test_starting_gold_and_fence_durability():
 
 
 
+def test_shovel_demolish_and_refund():
+    print("[測試 7] 鐵鏟剷除作物與拆除防禦退款測試...")
+    game = GameState()
+    
+    # 測試剷除作物
+    game.plant_crop(6, 4, CropType.WHITE_RADISH)
+    assert game.get_tile(6, 4).crop is not None
+    success, msg, refund = game.demolish_tile(6, 4)
+    assert success and refund == 0
+    assert game.get_tile(6, 4).crop is None
+    
+    # 測試拆除木柵（原價 15，退還 80% = 12）
+    gold_before = game.gold
+    game.place_defense(6, 4, DefenseType.WOODEN_FENCE)
+    assert game.gold == gold_before - 15
+    success, msg, refund = game.demolish_tile(6, 4)
+    assert success and refund == 12
+    assert game.gold == gold_before - 15 + 12
+    assert game.get_tile(6, 4).defense is None
+    print("  ✓ 鐵鏟剷除作物與拆除設施退款機制全數通過！")
+
+
 if __name__ == "__main__":
     print("==========================================")
     print(" 🚀 執行中央農田版「夜巡農場」測試套件")
@@ -152,7 +174,9 @@ if __name__ == "__main__":
     test_scarecrow_and_trap()
     test_game_over_bankruptcy()
     test_starting_gold_and_fence_durability()
+    test_shovel_demolish_and_refund()
     print("==========================================")
     print(" 🎉 所有底層測試 100% 通過！")
     print("==========================================")
+
 

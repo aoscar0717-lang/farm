@@ -255,10 +255,12 @@ class NightwatchFarmApp:
                 ("BUY_CAT", "招財小貓", "$80 | 白天贈金", "farm_cat"),
             ],
             "TOOLS": [
+                ("SHOVEL", "鐵鏟 / 拆除", "免費 | 挖除退80%", "shovel"),
                 ("WATER_CROP", "黃金澆水壺", "$5 | 加速50%", "watering_can"),
                 ("FLASHLIGHT", "強光手電筒", "就緒 | 3s充能", "soul_lantern"),
                 ("WHISTLE", "守衛指揮哨", "免費 | 指揮狗狗衝刺", "guard_dog"),
             ]
+
         }
 
         self.action_cards = []
@@ -345,20 +347,40 @@ class NightwatchFarmApp:
             self.hovered_grid = None
 
     def _handle_mouse_down(self, event):
-        if event.button != 1:
-            return
         mx, my = event.pos
 
         # 開場新手速成圖卡彈窗
         if self.show_intro:
-            modal_w, modal_h = 840, 580
-            mod_x = (SCREEN_WIDTH - modal_w) // 2
-            mod_y = (SCREEN_HEIGHT - modal_h) // 2
-            btn_start = pygame.Rect(mod_x + (modal_w - 280) // 2, mod_y + 500, 280, 54)
-            if btn_start.collidepoint(mx, my) or not pygame.Rect(mod_x, mod_y, modal_w, modal_h).collidepoint(mx, my):
-                self.show_intro = False
-                self.sound.play("build")
+            if event.button == 1:
+                modal_w, modal_h = 840, 580
+                mod_x = (SCREEN_WIDTH - modal_w) // 2
+                mod_y = (SCREEN_HEIGHT - modal_h) // 2
+                btn_start = pygame.Rect(mod_x + (modal_w - 280) // 2, mod_y + 500, 280, 54)
+                if btn_start.collidepoint(mx, my) or not pygame.Rect(mod_x, mod_y, modal_w, modal_h).collidepoint(mx, my):
+                    self.show_intro = False
+                    self.sound.play("build")
             return
+
+        # 滑鼠右鍵：一鍵快速鐵鏟剷除/拆除
+        if event.button == 3:
+            if self.hovered_grid:
+                gx, gy = self.hovered_grid
+                success, msg, refund = self.game.demolish_tile(gx, gy)
+                if success:
+                    px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
+                    py = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
+                    ref_str = f" +{refund}G" if refund > 0 else ""
+                    self.floating_texts.append(FloatingText(f"🔨 剷除{ref_str}", px - 25, py - 12, (200, 200, 200)))
+                    self._spawn_particles(px, py, (160, 140, 110), count=12)
+                    self.sound.play("build")
+                    self.log_messages.append(f"🔨 {msg}")
+                else:
+                    self.log_messages.append(f"ℹ️ {msg}")
+            return
+
+        if event.button != 1:
+            return
+
 
 
         # 遊戲結束
@@ -508,12 +530,22 @@ class NightwatchFarmApp:
         elif act == "PLACE_BEEHIVE":
             success, msg = self.game.place_defense(gx, gy, DefenseType.BEEHIVE)
         # 工具
+        elif act == "SHOVEL":
+            success, msg, refund = self.game.demolish_tile(gx, gy)
+            if success:
+                px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
+                py = GRID_Y + gy * CELL_SIZE + CELL_SIZE // 2
+                ref_str = f" +{refund}G" if refund > 0 else ""
+                self.floating_texts.append(FloatingText(f"🔨 剷除{ref_str}", px - 25, py - 12, (200, 200, 200)))
+                self._spawn_particles(px, py, (160, 140, 110), count=12)
+                self.sound.play("build")
         elif act == "HARVEST":
             success, reward, msg = self.game.harvest_crop(gx, gy)
         elif act == "WATER_CROP":
             success, msg = self.game.water_crop(gx, gy)
         else:
             success, msg = False, "未知操作"
+
 
         if not success:
             self.log_messages.append(f"❌ {msg}")
@@ -810,6 +842,26 @@ class NightwatchFarmApp:
         map_rect = pygame.Rect(GRID_X, GRID_Y, map_w, map_h)
         pygame.draw.rect(self.screen, C_MEADOW_BG, map_rect, border_radius=16)
 
+        grass_img = self.loader.get("grass_tile")
+        soil_img = self.loader.get("soil_tile")
+
+        # 繪製像素草地與農田底層地磚
+        for y in range(self.game.height):
+            for x in range(self.game.width):
+                px = GRID_X + x * CELL_SIZE
+                py = GRID_Y + y * CELL_SIZE
+                tile = self.game.grid[y][x]
+                if tile.zone == ZoneType.FARM_ZONE:
+                    if soil_img:
+                        self.screen.blit(soil_img, (px, py))
+                    else:
+                        pygame.draw.rect(self.screen, C_FARM_SOIL, (px, py, CELL_SIZE, CELL_SIZE))
+                else:
+                    if grass_img:
+                        self.screen.blit(grass_img, (px, py))
+                    else:
+                        pygame.draw.rect(self.screen, C_MEADOW_BG, (px, py, CELL_SIZE, CELL_SIZE))
+
         fx_min, fx_max = MAP_CONFIG["FARM_X_RANGE"]
         fy_min, fy_max = MAP_CONFIG["FARM_Y_RANGE"]
         farm_rx = GRID_X + fx_min * CELL_SIZE
@@ -817,9 +869,8 @@ class NightwatchFarmApp:
         farm_rw = (fx_max - fx_min + 1) * CELL_SIZE
         farm_rh = (fy_max - fy_min + 1) * CELL_SIZE
 
-        pygame.draw.rect(self.screen, C_FARM_SHADOW, (farm_rx - 4, farm_ry - 4, farm_rw + 8, farm_rh + 8), border_radius=20)
-        pygame.draw.rect(self.screen, C_FARM_BORDER, (farm_rx - 2, farm_ry - 2, farm_rw + 4, farm_rh + 4), border_radius=18)
-        pygame.draw.rect(self.screen, C_FARM_SOIL, (farm_rx, farm_ry, farm_rw, farm_rh), border_radius=16)
+        # 農田外框陰影與邊界線
+        pygame.draw.rect(self.screen, C_FARM_BORDER, (farm_rx - 2, farm_ry - 2, farm_rw + 4, farm_rh + 4), width=2, border_radius=8)
 
         # 中央農莊金庫標誌
         vx, vy = MAP_CONFIG["VAULT_POS"]
@@ -831,6 +882,7 @@ class NightwatchFarmApp:
 
         for y in range(self.game.height):
             for x in range(self.game.width):
+
                 tile = self.game.grid[y][x]
                 px = GRID_X + x * CELL_SIZE
                 py = GRID_Y + y * CELL_SIZE
