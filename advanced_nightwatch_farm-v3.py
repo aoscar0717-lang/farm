@@ -352,6 +352,7 @@ class NightwatchFarmApp:
         self.loader = AssetLoader(cell_size=CELL_SIZE)
         
         self.show_intro = True
+        self.show_pause_menu = False
         self.active_tab = "CROPS"
         self.selected_action = "PLANT_RADISH"
         
@@ -512,17 +513,18 @@ class NightwatchFarmApp:
                             self.time_scale_before_pause = self.time_scale
 
 
-            if not self.show_intro:
+            if not self.show_intro and not self.show_pause_menu:
                 self.game.update(dt * self.time_scale)
 
-            if self.flash_vfx_timer > 0:
+            if self.flash_vfx_timer > 0 and not self.show_pause_menu:
                 self.flash_vfx_timer = max(0.0, self.flash_vfx_timer - dt)
 
             self._process_events()
             self._update_card_states()
 
-            self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
-            self.particles = [p for p in self.particles if p.update(dt)]
+            if not self.show_pause_menu:
+                self.floating_texts = [ft for ft in self.floating_texts if ft.update(dt)]
+                self.particles = [p for p in self.particles if p.update(dt)]
 
             self._render()
 
@@ -583,14 +585,18 @@ class NightwatchFarmApp:
 
         # 倍速調整面板 [-]/[+] 點擊 -- 邏輯跟鍵盤 [ / ] 完全一樣，
         # 同一顆 self.time_scale，同樣的 round(...,1) + max/min 夾值。
-        if self.btn_speed_down_rect and self.btn_speed_down_rect.collidepoint(mx, my):
+        # 加上 not self.show_pause_menu：暫停選單開啟時這兩顆按鈕在畫面上
+        # 被暗色遮罩蓋住，但若不擋掉點擊，暫停中仍能偷改 time_scale，連
+        # 「暫停前速度」的記憶也會被覆蓋，導致按下「繼續」後速度跟暫停前
+        # 不一致。
+        if not self.show_pause_menu and self.btn_speed_down_rect and self.btn_speed_down_rect.collidepoint(mx, my):
             new_scale = round(self.time_scale - self.TIME_SCALE_STEP, 1)
             self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
             if self.time_scale > 0:
                 self.time_scale_before_pause = self.time_scale
             self.sound.play("build")
             return
-        if self.btn_speed_up_rect and self.btn_speed_up_rect.collidepoint(mx, my):
+        if not self.show_pause_menu and self.btn_speed_up_rect and self.btn_speed_up_rect.collidepoint(mx, my):
             new_scale = round(self.time_scale + self.TIME_SCALE_STEP, 1)
             self.time_scale = max(self.TIME_SCALE_MIN, min(self.TIME_SCALE_MAX, new_scale))
             if self.time_scale > 0:
@@ -606,6 +612,31 @@ class NightwatchFarmApp:
                 self.log_messages.clear()
                 self.log_messages.append("🌾 遊戲已重新開始！")
                 self.sound.play("harvest")
+            return
+
+        # 暫停選單開啟中：只有選單內的按鈕能點，其餘全部攔下
+        if self.show_pause_menu:
+            modal_w, modal_h = 420, 300
+            mx0 = (SCREEN_WIDTH - modal_w) // 2
+            my0 = (SCREEN_HEIGHT - modal_h) // 2
+            btn_resume = pygame.Rect(mx0 + (modal_w - 220) // 2, my0 + 150, 220, 52)
+            btn_restart2 = pygame.Rect(mx0 + (modal_w - 220) // 2, my0 + 216, 220, 52)
+            if btn_resume.collidepoint(mx, my):
+                self.show_pause_menu = False
+                self.sound.play("build")
+            elif btn_restart2.collidepoint(mx, my):
+                self.game = GameState()
+                self.log_messages.clear()
+                self.log_messages.append("🌾 遊戲已重新開始！")
+                self.show_pause_menu = False
+                self.sound.play("harvest")
+            return
+
+        # 右上角選單按鈕（☰）：點擊暫停遊戲並開啟選單
+        menu_btn_rect = pygame.Rect(SCREEN_WIDTH - 56, 15, 40, 40)
+        if menu_btn_rect.collidepoint(mx, my):
+            self.show_pause_menu = True
+            self.sound.play("build")
             return
 
         # 分頁標籤
@@ -842,7 +873,14 @@ class NightwatchFarmApp:
                 if self.active_tab == "TOOLS" or self.selected_action in ("FLASHLIGHT", "WHISTLE"):
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
-            elif ev.event_type == EventType.PHASE_CHANGED and ev.data.get("new_phase") == GamePhase.NIGHT:
+
+            # 夜晚降臨時（含血月）自動裝備強光手電筒，玩家不必再去商店手動點選。
+            # 特意寫成獨立的 if（不是掛在上面的 elif 鏈上）：BLOOD_MOON_WARNING
+            # 這個事件本身已經被上面的 elif 分支吃掉（顯示血月紅字），若把這段
+            # 也寫成 elif 就永遠輪不到它執行；獨立判斷才能讓一般夜晚與血月夜
+            # 都能觸發。原本這裡監聽的是 PHASE_CHANGED 事件，但 game_state.py
+            # 從未送出這個事件，所以自動裝備邏輯過去從來沒有真正執行過。
+            if ev.event_type in (EventType.NIGHT_STARTED, EventType.BLOOD_MOON_WARNING):
                 self.active_tab = "TOOLS"
                 self.selected_action = "FLASHLIGHT"
                 self.floating_texts.append(FloatingText("🔦 已裝備強光手電筒！滑鼠點擊敵人照暈！", SCREEN_WIDTH // 2 - 140, 200, (255, 235, 59), duration=2.5))
@@ -1010,6 +1048,37 @@ class NightwatchFarmApp:
             self._render_story_modal()
         elif self.game.game_over:
             self._render_game_over_modal()
+        elif self.show_pause_menu:
+            self._render_pause_menu()
+
+    def _render_pause_menu(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 190))
+        self.screen.blit(overlay, (0, 0))
+
+        modal_w, modal_h = 420, 300
+        mx = (SCREEN_WIDTH - modal_w) // 2
+        my = (SCREEN_HEIGHT - modal_h) // 2
+        modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
+
+        pygame.draw.rect(self.screen, C_WHITE, modal_rect, border_radius=14)
+        pygame.draw.rect(self.screen, C_BLUE, modal_rect, width=3, border_radius=14)
+
+        t1 = FONT_TITLE.render("⏸ 遊戲暫停", True, C_TEXT_MAIN)
+        self.screen.blit(t1, (mx + (modal_w - t1.get_width()) // 2, my + 40))
+
+        r1 = FONT_SM.render(f"第 {self.game.day_count} 天・繁榮度 {self.game.prosperity_score}", True, C_TEXT_MUTED)
+        self.screen.blit(r1, (mx + (modal_w - r1.get_width()) // 2, my + 90))
+
+        btn_resume = pygame.Rect(mx + (modal_w - 220) // 2, my + 150, 220, 52)
+        pygame.draw.rect(self.screen, C_GREEN, btn_resume, border_radius=8)
+        resume_txt = FONT_MD.render("▶ 繼續", True, C_WHITE)
+        self.screen.blit(resume_txt, (btn_resume.centerx - resume_txt.get_width() // 2, btn_resume.centery - resume_txt.get_height() // 2))
+
+        btn_restart = pygame.Rect(mx + (modal_w - 220) // 2, my + 216, 220, 52)
+        pygame.draw.rect(self.screen, C_ORANGE, btn_restart, border_radius=8)
+        restart_txt = FONT_MD.render("🔄 重新開始", True, C_WHITE)
+        self.screen.blit(restart_txt, (btn_restart.centerx - restart_txt.get_width() // 2, btn_restart.centery - restart_txt.get_height() // 2))
 
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)
@@ -1026,14 +1095,6 @@ class NightwatchFarmApp:
             phase_col = (255, 235, 59) if is_day else (129, 212, 250)
 
         self.screen.blit(FONT_MD.render(phase_txt, True, phase_col), (24, 40))
-
-        # Time-scale badge (P=pause, [/]=speed) -- small, top-right of the header.
-        if self.time_scale == 0:
-            speed_txt, speed_col = "⏸ 已暫停 (P)", (255, 100, 100)
-        else:
-            speed_txt, speed_col = f"{self.time_scale:.1f}x ([/]/P)", (200, 220, 255)
-        speed_surf = FONT_MD.render(speed_txt, True, speed_col)
-        self.screen.blit(speed_surf, (SCREEN_WIDTH - speed_surf.get_width() - 24, 24))
 
         max_dur = self.game.day_duration if is_day else self.game.night_duration
         rem_time = max(0.0, max_dur - self.game.time_in_phase)
@@ -1082,9 +1143,9 @@ class NightwatchFarmApp:
         self.screen.blit(FONT_SM.render("G", True, (60, 40, 0)), (gold_rect.x + 17, gold_rect.centery - 8))
         self.screen.blit(FONT_LG.render(f"{self.game.gold} 金幣", True, C_GOLD), (gold_rect.x + 44, gold_rect.centery - 11))
 
-        # 等級與繁榮度 (原本從 x=630 開始，因為金幣卡右移，這裡也跟著右移，
-        # 寬度縮減，右邊界維持在原本的 1236 不變: 745 + 491 = 1236)
-        lvl_rect = pygame.Rect(745, 12, 491, 44)
+        # 等級與繁榮度 (x=745 為金幣卡右移後的座標；寬度從 491 再縮短到 447，
+        # 右緣停在選單按鈕左側 [x=1204] 前留 12px 間距，避免被蓋住)
+        lvl_rect = pygame.Rect(745, 12, 447, 44)
         pygame.draw.rect(self.screen, (55, 71, 79), lvl_rect, border_radius=10)
         lvl_name = FARM_LEVELS[self.game.farm_level]["name"]
         self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_WHITE), (lvl_rect.x + 14, lvl_rect.y + 4))
@@ -1094,11 +1155,20 @@ class NightwatchFarmApp:
         curr_p = self.game.prosperity_score
         p_ratio = min(1.0, curr_p / next_goal)
 
-        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 300, 12)
+        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 270, 12)
         pygame.draw.rect(self.screen, (25, 30, 40), p_bar, border_radius=6)
         if p_ratio > 0:
             pygame.draw.rect(self.screen, C_PURPLE, (p_bar.x, p_bar.y, int(p_bar.width * p_ratio), p_bar.height), border_radius=6)
         self.screen.blit(FONT_SM.render(f"繁榮度: {curr_p} / {next_goal}", True, C_CYAN), (p_bar.right + 12, p_bar.y - 3))
+
+        # 右上角選單按鈕（☰）：特意畫在 header 方法的最後面，確保一定疊在
+        # 上方所有面板（金幣卡、莊園等級面板...）之上，不會被蓋住。
+        menu_btn_rect = pygame.Rect(SCREEN_WIDTH - 56, 15, 40, 40)
+        is_menu_hover = menu_btn_rect.collidepoint(self.mouse_pos)
+        pygame.draw.rect(self.screen, (68, 84, 92) if is_menu_hover else (54, 70, 78), menu_btn_rect, border_radius=8)
+        for i in range(3):
+            line_y = menu_btn_rect.y + 11 + i * 9
+            pygame.draw.line(self.screen, C_WHITE, (menu_btn_rect.x + 8, line_y), (menu_btn_rect.x + 32, line_y), 3)
 
     def _render_flat_meadow_and_farm(self):
         map_w = self.game.width * CELL_SIZE
@@ -1263,11 +1333,11 @@ class NightwatchFarmApp:
         local_mx = mx - GRID_X
         local_my = my - GRID_Y
         if 0 <= local_mx <= self.game.width * CELL_SIZE and 0 <= local_my <= self.game.height * CELL_SIZE:
-            # 挖空主視野圈
-            pygame.draw.circle(overlay, (0, 0, 0, 0), (local_mx, local_my), 115)
-            # 金黃柔光光暈
-            pygame.draw.circle(overlay, (255, 235, 150, 45), (local_mx, local_my), 125, 10)
-            pygame.draw.circle(overlay, (255, 235, 150, 20), (local_mx, local_my), 140, 12)
+            # 挖空主視野圈（原本 115px，縮減為一半 57）
+            pygame.draw.circle(overlay, (0, 0, 0, 0), (local_mx, local_my), 57)
+            # 金黃柔光光暈（原本 125/140px，同比例縮減為一半 62/70）
+            pygame.draw.circle(overlay, (255, 235, 150, 45), (local_mx, local_my), 62, 10)
+            pygame.draw.circle(overlay, (255, 235, 150, 20), (local_mx, local_my), 70, 12)
 
         if self.game.guard_dog:
             dx = int(self.game.guard_dog.x * CELL_SIZE + CELL_SIZE // 2)

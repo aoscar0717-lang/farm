@@ -237,12 +237,12 @@ class GameState:
         if self.flashlight_cooldown > 0:
             return False, f"強光手電筒充能中（剩餘 {self.flashlight_cooldown:.1f} 秒）！"
 
-        # 1. 優先照暈游標附近的敵人（放寬至 3.5 格範圍）
+        # 1. 優先照暈游標附近的敵人（範圍縮減為原本 3.5 格的一半：1.75 格）
         stunned_enemies = []
         for enemy in self.enemies:
             if enemy.state in (EnemyState.MOVING, EnemyState.ACTING):
                 dist = math.hypot(enemy.x - target_x, enemy.y - target_y)
-                if dist <= 3.5:
+                if dist <= 1.75:
                     stunned_enemies.append(enemy)
 
         # 2. 若游標周圍無敵人，自動輔助瞄準全場最近的入侵敵人
@@ -250,7 +250,7 @@ class GameState:
             active_enemies = [e for e in self.enemies if e.state in (EnemyState.MOVING, EnemyState.ACTING)]
             if active_enemies:
                 active_enemies.sort(key=lambda e: math.hypot(e.x - target_x, e.y - target_y))
-                if math.hypot(active_enemies[0].x - target_x, active_enemies[0].y - target_y) <= 6.0:
+                if math.hypot(active_enemies[0].x - target_x, active_enemies[0].y - target_y) <= 3.0:  # 原本 6.0 格，縮減為一半
                     stunned_enemies.append(active_enemies[0])
 
         if stunned_enemies:
