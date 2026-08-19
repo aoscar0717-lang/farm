@@ -49,7 +49,7 @@ from game_config import (
     GamePhase, ZoneType, CropType, CropStage, DecorationType,
     DefenseType, EnemyType, EnemyState, DogState, EventType,
     MAP_CONFIG, FARM_LEVELS, CROP_DATA, DECORATION_DATA, DEFENSE_DATA,
-    DOG_CONFIG, CAT_CONFIG, ENEMY_DATA, GameEvent
+    DOG_CONFIG, CAT_CONFIG, ENEMY_DATA, ORDER_CROP_ALIASES, GameEvent
 )
 from game_state import GameState
 from sound_manager import SoundManager
@@ -104,6 +104,10 @@ C_FLOATTEXT_GOLD = (255, 241, 118)
 # 未解鎖商品鎖定原因文字的紅色：原本 (255,130,130) 疊在半透明深色遮罩上
 # 對比度不夠，改用更亮的紅（跟浮動文字錯誤提示的 C_RED 系列同一個色階）。
 C_LOCK_TEXT_RED = (255, 85, 85)
+# 科技點數 HUD 專用的螢光「科技綠」：跟金幣的暖色系金黃、繁榮度進度條的
+# 沉穩草綠 (C_GREEN) 都拉開差距，一眼就能認出這是另一種資源，不會被
+# 誤認成金幣或繁榮度數字。
+C_TECH_GREEN = (0, 230, 130)
 C_GREEN = (76, 175, 80)
 C_RED = (239, 83, 80)
 C_BLUE = (33, 150, 243)
@@ -611,6 +615,18 @@ class NightwatchFarmApp:
         self.show_pause_menu = False
         self.active_tab = "CROPS"
         self.selected_action = "PLANT_RADISH"
+
+        # 每日訂單佈告欄面板開關；O 鍵或點擊頭部狀態列的「📋」按鈕切換。
+        # 面板開啟時攔截所有點擊（跟暫停選單一樣），但刻意不暫停遊戲時間
+        # ——訂單交付本來就該是「白天正常經營時隨手可以做的事」，不像
+        # 暫停選單是真的要停下整個遊戲。
+        self.show_order_board = False
+        # 這兩個由 _render_order_board() 每幀算好存起來，供
+        # _handle_mouse_down() 判斷點擊落在哪個「交付」按鈕/關閉按鈕上；
+        # 跟既有的 self.tab_buttons/self.action_cards 是同一套「渲染時
+        # 順便算好點擊判定矩形」的既有模式，不是新發明的寫法。
+        self._order_deliver_rects = []
+        self._order_board_close_rect = None
         
         self.floating_texts = []
         self.particles = []
@@ -748,6 +764,12 @@ class NightwatchFarmApp:
                         self.log_messages.append("🌾 遊戲已重新開始！")
                     elif event.key == pygame.K_SPACE:
                         self.log_messages.append("💡 提示：請點選下方工具列【強光手電筒】，用滑鼠直接點擊敵人發射強光照暈！")
+                    elif event.key == pygame.K_o:
+                        # 暫停選單/開場教學開著的時候不能切換訂單佈告欄，
+                        # 避免兩個彈窗疊在一起搶點擊；遊戲結束畫面同理。
+                        if not self.show_pause_menu and not self.show_intro and not self.game.game_over:
+                            self.show_order_board = not self.show_order_board
+                            self.sound.play("ui_click")
                     elif event.key == pygame.K_p:
                         if self.time_scale > 0:
                             self.time_scale_before_pause = self.time_scale
@@ -976,11 +998,54 @@ class NightwatchFarmApp:
                 self.sound.play("ui_click")
             return
 
+        # 訂單佈告欄開啟中：面板內的「交付」/「✕」按鈕優先判定，點擊
+        # 面板外的半透明遮罩、或再點一次「📋」按鈕，都當作關閉面板。
+        # 跟暫停選單一樣攔下這一輪剩下所有的點擊，不會讓點擊穿透到
+        # 底下的地圖/商店。
+        if self.show_order_board:
+            order_btn_rect = self._order_board_button_rect()
+            if self._order_board_close_rect and self._order_board_close_rect.collidepoint(mx, my):
+                self.show_order_board = False
+                self.sound.play("ui_click")
+                return
+            if order_btn_rect.collidepoint(mx, my):
+                self.show_order_board = False
+                self.sound.play("ui_click")
+                return
+            for order_id, deliver_rect in self._order_deliver_rects:
+                if deliver_rect.collidepoint(mx, my):
+                    # 成功時特意不在這裡直接播音效/跳浮動文字：跟既有的
+                    # 「採收成功」走同一套模式——GameState.fulfill_order()
+                    # 成功會 emit EventType.ORDER_FULFILLED，交給
+                    # _process_events() 的事件迴圈統一處理音效/浮動文字/
+                    # 粒子特效（讀 ev.data 裡的 reward_gold/reward_tech），
+                    # 這裡只負責呼叫。失敗則不會有事件（GameState 只在
+                    # 成功時 emit），所以失敗的音效/紅字回饋維持在點擊
+                    # 現場直接處理，這跟其餘商店卡片/採收失敗的既有寫法
+                    # 完全一致。
+                    success, msg = self.game.fulfill_order(order_id)
+                    if not success:
+                        self.sound.play("error")
+                        self.floating_texts.append(FloatingText(f"❌ {msg}", mx - 70, my - 20, C_RED, duration=1.6))
+                        self.log_messages.append(f"❌ {msg}")
+                    return
+            if not self._order_board_rect().collidepoint(mx, my):
+                self.show_order_board = False
+                self.sound.play("ui_click")
+            return
+
         # 右上角選單按鈕（☰）：點擊暫停遊戲並開啟選單
         menu_btn_rect = pygame.Rect(SCREEN_WIDTH - 56, 15, 40, 40)
         if menu_btn_rect.collidepoint(mx, my):
             self.show_pause_menu = True
             self.sound.play("build")
+            return
+
+        # 「📋 訂單」按鈕：開啟訂單佈告欄。位置緊貼在選單按鈕左側（見
+        # _order_board_button_rect() 的座標計算與版面配置說明）。
+        if self._order_board_button_rect().collidepoint(mx, my):
+            self.show_order_board = True
+            self.sound.play("ui_click")
             return
 
         # 分頁標籤（點擊切換分頁時捲動歸零，避免新分頁一開就是捲到一半的畫面）
@@ -1295,6 +1360,28 @@ class NightwatchFarmApp:
                 if self.active_tab == "TOOLS" or self.selected_action in ("FLASHLIGHT", "WHISTLE"):
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
+            elif ev.event_type == EventType.ORDER_FULFILLED:
+                # 交付成功的浮動文字/粒子特效統一在這裡處理（音效交給
+                # sound_manager.handle_game_event 映射 ORDER_FULFILLED ->
+                # "gold"），跟 CROP_HARVESTED 等既有的成功事件同一套模式。
+                # 座標固定畫在訂單佈告欄按鈕正下方附近，而不是滑鼠位置
+                # ——這個事件被 poll 到的當下，滑鼠可能已經移動，
+                # ev.data 裡也沒有存點擊當下的座標，用固定位置比較穩妥。
+                order_btn_rect = self._order_board_button_rect()
+                px, py = order_btn_rect.centerx - 60, order_btn_rect.bottom + 10
+                self.floating_texts.append(FloatingText(
+                    f"📦 +{ev.data['reward_gold']} G  +{ev.data['reward_tech']} 科技",
+                    px, py, C_TECH_GREEN, duration=1.8
+                ))
+                self._spawn_particles(order_btn_rect.centerx, order_btn_rect.bottom, C_TECH_GREEN, count=14)
+            elif ev.event_type == EventType.ORDERS_GENERATED:
+                # 被動通知，不用玩家點什麼——每天早上訂單自動刷新，用一
+                # 條浮動文字提醒「有新訂單」，玩家想看細節再自己按 O /
+                # 點📋按鈕開訂單佈告欄，這裡不用強制彈窗打斷操作。
+                order_count = len(ev.data.get("order_ids", []))
+                self.floating_texts.append(
+                    FloatingText(f"📋 今日新訂單 x{order_count}！按 O 查看", 460, 143, C_TECH_GREEN)
+                )
 
             # 夜晚降臨時（含血月）自動裝備強光手電筒，玩家不必再去商店手動點選。
             # 特意寫成獨立的 if（不是掛在上面的 elif 鏈上）：BLOOD_MOON_WARNING
@@ -1476,6 +1563,8 @@ class NightwatchFarmApp:
             self._render_game_over_modal()
         elif self.show_pause_menu:
             self._render_pause_menu()
+        elif self.show_order_board:
+            self._render_order_board()
 
     def _render_pause_menu(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1526,6 +1615,104 @@ class NightwatchFarmApp:
         muted = self.sound.music_muted
         _draw_menu_button(btn_mute, "🔊 取消靜音" if muted else "🔇 靜音",
                            (96, 88, 78) if muted else C_WOOD_MID)
+
+    def _render_order_board(self):
+        """訂單佈告欄面板：show_order_board 為 True 時畫在畫面正中央，
+        半透明遮罩擋住底下地圖跟商店（但遊戲本身仍在跑，不像暫停選單
+        會把 dt 歸零——訂單交付刻意設計成隨手可做的操作，見 __init__
+        裡 self.show_order_board 旁的註解）。"""
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        panel = self._order_board_rect()
+        # 跟暫停選單/結算畫面同一套 draw_wood_panel：目前 assets/ui/
+        # 還沒有 wood_panel.png，所以現在畫出來的是立體木頭色塊退回版；
+        # 貼圖之後放上去會自動生效。
+        draw_wood_panel(self.screen, panel, self.loader, "ui_wood_panel",
+                         C_WOOD_DARK, border_radius=16, depth=3)
+
+        header_rect = pygame.Rect(panel.x, panel.y, panel.width, 48)
+        pygame.draw.rect(self.screen, C_WOOD_BEVEL_DARK, header_rect,
+                          border_top_left_radius=16, border_top_right_radius=16)
+        blit_text_with_shadow(self.screen, FONT_TITLE, "📋 每日訂單佈告欄", C_GOLD,
+                               center=(header_rect.centerx, header_rect.centery))
+
+        close_rect = pygame.Rect(panel.right - 42, panel.y + 8, 32, 32)
+        self._order_board_close_rect = close_rect
+        is_close_hover = close_rect.collidepoint(self.mouse_pos)
+        draw_wood_panel(self.screen, close_rect, self.loader, "ui_wood_button",
+                         (150, 70, 60), border_radius=8, depth=2, pressed=is_close_hover)
+        blit_text_with_shadow(self.screen, FONT_MD, "✕", C_TEXT_ON_DARK, center=close_rect.center)
+
+        self.screen.blit(FONT_XS.render("按 O 鍵或點擊「✕」可關閉", True, (200, 190, 178)),
+                          (panel.x + 16, header_rect.bottom + 2))
+
+        self._order_deliver_rects = []
+
+        orders = self.game.active_orders
+        content_y = header_rect.bottom + 22
+        card_h = 96
+        card_gap = 12
+        card_w = panel.width - 28
+
+        if not orders:
+            blit_text_with_shadow(self.screen, FONT_MD, "今天的訂單都交付完了！明天清晨會有新訂單喔～",
+                                   C_TEXT_ON_DARK, center=(panel.centerx, panel.centery))
+            return
+
+        for i, order in enumerate(orders):
+            card_rect = pygame.Rect(panel.x + 14, content_y + i * (card_h + card_gap), card_w, card_h)
+            if card_rect.bottom > panel.bottom - 14:
+                # 面板放不下更多張的保險判斷：ORDER_CONFIG 目前一天最多
+                # 生成 3 張，正常情況下這裡永遠不會被觸發，寫出來只是
+                # 避免萬一以後把 MAX_ORDERS_PER_DAY 調大時畫出面板外。
+                break
+            draw_wood_panel(self.screen, card_rect, self.loader, "ui_wood_panel",
+                             C_PARCHMENT, border_radius=10, depth=2)
+
+            # 左側：逐項需求，跟 self.game.crop_inventory（未來也可能含
+            # self.game.inventory 的原料）比對目前持有量，滿足畫綠色、
+            # 不滿足畫紅色。pygame 沒有內建的多色 inline 文字，這裡手動
+            # 逐段畫、每段畫完用回傳的 Rect.right 往右累加下一段的 x。
+            seg_x = card_rect.x + 16
+            seg_y = card_rect.y + 14
+            label_surf = FONT_SM.render("需求：", True, C_TEXT_ON_LIGHT)
+            self.screen.blit(label_surf, (seg_x, seg_y))
+            seg_x += label_surf.get_width() + 4
+            for alias, need_qty in order.requirements.items():
+                crop_type = ORDER_CROP_ALIASES.get(alias)
+                display_name = CROP_DATA[crop_type]["name"] if crop_type else alias
+                have_qty = self.game.crop_inventory.get(alias, self.game.inventory.get(alias, 0))
+                met = have_qty >= need_qty
+                seg_text = f"{display_name} {have_qty}/{need_qty}   "
+                seg_color = C_GREEN if met else C_LOCK_TEXT_RED
+                seg_r = blit_text_with_shadow(self.screen, FONT_SM, seg_text, seg_color,
+                                               topleft=(seg_x, seg_y), shadow_color=(235, 228, 222))
+                seg_x = seg_r.right + 2
+
+            # 獎勵（金幣 + 科技點數，科技綠跟頭部 HUD 同一個顏色，讓玩家
+            # 一眼就能把「這裡的科技點」跟「頭部狀態列的科技點」連起來）。
+            reward_surf1 = FONT_SM.render(f"💰 {order.reward_gold} 金幣", True, (150, 108, 20))
+            self.screen.blit(reward_surf1, (card_rect.x + 16, card_rect.y + 48))
+            reward_surf2 = FONT_SM.render(f"⚡ {order.reward_tech} 科技點", True, (0, 140, 80))
+            self.screen.blit(reward_surf2, (card_rect.x + 16 + reward_surf1.get_width() + 16, card_rect.y + 48))
+
+            # 交付按鈕：物資不足時仍然可以點（點了會跳紅字錯誤提示，見
+            # _handle_mouse_down），但底色刻意調暗一階，讓玩家不用逐項
+            # 核對就能大概看出「這張現在還交不了」。
+            deliver_rect = pygame.Rect(card_rect.right - 132, card_rect.y + (card_h - 40) // 2, 116, 40)
+            can_deliver = all(
+                self.game.crop_inventory.get(a, self.game.inventory.get(a, 0)) >= q
+                for a, q in order.requirements.items()
+            )
+            is_hover = deliver_rect.collidepoint(self.mouse_pos)
+            btn_base = (90, 122, 74) if can_deliver else (95, 88, 80)
+            draw_wood_panel(self.screen, deliver_rect, self.loader, "ui_wood_button", btn_base,
+                             border_radius=8, depth=2, pressed=is_hover)
+            blit_text_with_shadow(self.screen, FONT_SM, "📦 交付", C_TEXT_ON_DARK, center=deliver_rect.center)
+
+            self._order_deliver_rects.append((order.order_id, deliver_rect))
 
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)
@@ -1595,21 +1782,33 @@ class NightwatchFarmApp:
         self.screen.blit(speed_txt_surf, speed_txt_surf.get_rect(center=speed_box_rect.center))
         _draw_speed_btn(self.btn_speed_up_rect, "+")
 
-        # 金幣卡 (原本從 x=430 開始，讓給左邊新增的倍速面板一些空間，
-        # 跟等級卡一起整組往右挪，右邊界維持在原本的 1236 不變)
-        # 【貼圖彈性預留】：這幾張狀態列小面板 (金幣卡/等級卡) 如果之後
-        # 想換成 assets/ui/ 裡的木牌貼圖，就是把 draw_beveled_rect() 這行
-        # 換成 screen.blit(貼圖, rect.topleft)，見 draw_beveled_rect() 的
+        # 金幣卡 / 科技點數卡 / 等級卡 (原本從 x=430 開始，讓給左邊新增的
+        # 倍速面板一些空間，之後又為了新增「📋 訂單」按鈕，把這三張卡
+        # 一起再瘦身、右邊界從 1204 再往左讓出 48px（40px 按鈕 + 8px
+        # 間距）給訂單按鈕，整組右緣維持在選單按鈕左側 [x=1204] 前留
+        # 8px 間距。三張卡的實際文字內容都用 assets/fonts 裡那套精簡
+        # 字型實測過寬度，確認在新寬度下不會被裁切——量測方式與數字見
+        # commit message，這裡不重覆貼落落長的計算過程。)
+        # 【貼圖彈性預留】：這幾張狀態列小面板如果之後想換成 assets/ui/
+        # 裡的木牌貼圖，就是把 draw_beveled_rect() 這行換成
+        # screen.blit(貼圖, rect.topleft)，見 draw_beveled_rect() 的
         # docstring 有完整範例寫法。
-        gold_rect = pygame.Rect(545, 12, 180, 44)
+        gold_rect = pygame.Rect(545, 12, 155, 44)
         draw_beveled_rect(self.screen, gold_rect, C_WOOD_MID, border_radius=10)
         pygame.draw.circle(self.screen, C_GOLD, (gold_rect.x + 22, gold_rect.centery), 12)
         self.screen.blit(FONT_SM.render("G", True, (60, 40, 0)), (gold_rect.x + 17, gold_rect.centery - 8))
         self.screen.blit(FONT_LG.render(f"{self.game.gold} 金幣", True, C_GOLD), (gold_rect.x + 44, gold_rect.centery - 11))
 
-        # 等級與繁榮度 (x=745 為金幣卡右移後的座標；寬度從 491 再縮短到 447，
-        # 右緣停在選單按鈕左側 [x=1204] 前留 12px 間距，避免被蓋住)
-        lvl_rect = pygame.Rect(745, 12, 447, 44)
+        # 科技點數卡：新的終局進度貨幣，用螢光科技綠 (C_TECH_GREEN) 跟
+        # 金幣的暖金色系拉開差距，一眼就能分辨這是不同的資源。
+        tech_rect = pygame.Rect(gold_rect.right + 8, 12, 145, 44)
+        draw_beveled_rect(self.screen, tech_rect, C_WOOD_MID, border_radius=10)
+        self.screen.blit(
+            FONT_SM.render(f"⚡ 科技點數: {self.game.tech_points}", True, C_TECH_GREEN),
+            (tech_rect.x + 10, tech_rect.centery - 8)
+        )
+
+        lvl_rect = pygame.Rect(tech_rect.right + 8, 12, 287, 44)
         draw_beveled_rect(self.screen, lvl_rect, C_WOOD_MID, border_radius=10)
         lvl_name = FARM_LEVELS[self.game.farm_level]["name"]
         self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_TEXT_ON_DARK), (lvl_rect.x + 14, lvl_rect.y + 4))
@@ -1619,7 +1818,11 @@ class NightwatchFarmApp:
         curr_p = self.game.prosperity_score
         p_ratio = min(1.0, curr_p / next_goal)
 
-        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 270, 12)
+        # 繁榮度進度條原本 270px 寬，這次讓給科技點數卡片，縮到 131px
+        # ——縮小後的長度已用文字量測結果核對過「進度條 + 右側的
+        # 繁榮度數字文字」仍完整落在 lvl_rect 範圍內，不會被裁切，只是
+        # 條本身視覺上變細一點。
+        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 131, 12)
         draw_beveled_rect(self.screen, p_bar, C_WOOD_BEVEL_DARK, border_radius=6, depth=1, pressed=True)
         if p_ratio > 0:
             # 原本是鮮豔的紫色，跟木質風格不搭；改用翠綠色，呼應「繁榮/
@@ -1636,6 +1839,24 @@ class NightwatchFarmApp:
         for i in range(3):
             line_y = menu_btn_rect.y + 11 + i * 9
             pygame.draw.line(self.screen, C_TEXT_ON_DARK, (menu_btn_rect.x + 8, line_y), (menu_btn_rect.x + 32, line_y), 3)
+
+        # 「📋 查看訂單」按鈕：緊貼在選單按鈕左側（座標見
+        # _order_board_button_rect()，畫這裡跟點擊判定共用同一份座標）。
+        # 目前有未交付訂單時，按鈕外框改用科技綠高亮描邊，提醒玩家「有
+        # 訂單可以交」，避免玩家忘了這個系統存在。
+        order_btn_rect = self._order_board_button_rect()
+        is_order_hover = order_btn_rect.collidepoint(self.mouse_pos)
+        order_btn_active = self.show_order_board
+        draw_beveled_rect(
+            self.screen, order_btn_rect,
+            (130, 96, 82) if (is_order_hover or order_btn_active) else C_WOOD_MID,
+            border_radius=8, pressed=(is_order_hover or order_btn_active)
+        )
+        has_orders = len(self.game.active_orders) > 0
+        if has_orders and not order_btn_active:
+            pygame.draw.rect(self.screen, C_TECH_GREEN, order_btn_rect, width=2, border_radius=8)
+        icon_surf = FONT_MD.render("📋", True, C_TEXT_ON_DARK)
+        self.screen.blit(icon_surf, icon_surf.get_rect(center=order_btn_rect.center))
 
     def _render_flat_meadow_and_farm(self):
         map_w = self.game.width * CELL_SIZE
@@ -1971,6 +2192,23 @@ class NightwatchFarmApp:
     # 側邊商店面板 -- 幾何常數集中在這三個 helper，畫面渲染與滑鼠點擊
     # 判定都呼叫同一份，位置不會不同步。
     # ==========================================
+    def _order_board_button_rect(self) -> pygame.Rect:
+        """頭部狀態列上「📋 查看訂單」按鈕的固定座標。刻意獨立成方法而
+        不是寫死在單一處，因為 _render_header_banner()（畫按鈕）跟
+        _handle_mouse_down()（判斷點到沒）兩處都要用同一組座標，寫成
+        方法保證兩邊永遠一致，不會有畫的位置跟點擊判定對不上的風險
+        ——跟既有的 _shop_panel_rect() 是同一種寫法。
+        緊貼在右上角「☰」選單按鈕 (x=SCREEN_WIDTH-56=1204) 左側，中間
+        留 8px 間距。"""
+        menu_btn_x = SCREEN_WIDTH - 56
+        return pygame.Rect(menu_btn_x - 8 - 40, 15, 40, 40)
+
+    def _order_board_rect(self) -> pygame.Rect:
+        w, h = 860, 560
+        x = (SCREEN_WIDTH - w) // 2
+        y = (SCREEN_HEIGHT - h) // 2
+        return pygame.Rect(x, y, w, h)
+
     def _shop_panel_rect(self) -> pygame.Rect:
         sb_x = GRID_X + self.game.width * CELL_SIZE + 18
         sb_w = SCREEN_WIDTH - sb_x - 24

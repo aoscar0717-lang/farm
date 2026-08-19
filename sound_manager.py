@@ -178,6 +178,10 @@ class SoundManager:
             self.play("gold")
         elif t == EventType.VAULT_RAIDED:
             self.play("stolen")
+        elif t == EventType.ORDER_FULFILLED:
+            self.play("gold")
+        elif t == EventType.ORDERS_GENERATED:
+            self.play("ui_click")
         elif t == EventType.CROP_STOLEN:
             self.play("stolen")
         elif t == EventType.DAY_STARTED:
