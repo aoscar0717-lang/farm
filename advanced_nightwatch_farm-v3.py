@@ -739,7 +739,14 @@ class NightwatchFarmApp:
         # 'PLAYING' = 原本整套農場遊戲。run() 主迴圈依這個狀態決定要
         # 攔截事件走選單分支、還是照舊跑遊戲的 update/render。
         self.app_state = 'MENU'
-        self.title_bg = self._load_title_bg()
+        # 【系統升級：動態劇情背景圖切換】self.title_bg /
+        # self._load_title_bg() 這條獨立於 AssetLoader 之外、自己用
+        # os.path + pygame.image.load() 讀 assets/title_bg.png 的路徑
+        # 已經整個移除——title_bg.png 現在跟 bg_crash.png/
+        # bg_iron_flower.png 一起統一交給 AssetLoader 管理（見下面
+        # self.loader = AssetLoader(...) 之後、_render_story()/
+        # _render_main_menu() 都改成呼叫 self.loader.get("title_bg")/
+        # get("bg_crash")），不再維護兩套各自獨立的背景圖載入邏輯。
         # 選單三顆按鈕的點擊判定 Rect，每幀由 _render_main_menu() 算好
         # 存起來，跟既有 self.btn_speed_down_rect 這種「渲染時順便算好
         # 點擊判定矩形」的既有模式一致，不是新發明的寫法。開機第一幀
@@ -766,11 +773,12 @@ class NightwatchFarmApp:
 
         self.game = GameState()
         self.sound = SoundManager(sfx_enabled=True)
-        # 【系統更新：主選單背景圖】AssetLoader 這次多了一個
-        # screen_size 參數，用來把 main_menu_bg（crops/bg_crash.png）
-        # 縮放到剛好貼滿整個視窗——這裡把 (SCREEN_WIDTH, SCREEN_HEIGHT)
-        # 傳進去，AssetLoader 本身不 import 這兩個常數（避免跟這個檔案
-        # 循環 import），單純把呼叫端已經算好的螢幕尺寸原樣轉交進去。
+        # 【系統升級：動態劇情背景圖切換】AssetLoader 的 screen_size
+        # 參數用來把 title_bg/bg_crash/bg_iron_flower 這三張全螢幕背景
+        # 圖（見 asset_loader.py load_all()）都強制縮放到剛好貼滿整個
+        # 視窗——這裡把 (SCREEN_WIDTH, SCREEN_HEIGHT) 傳進去，
+        # AssetLoader 本身不 import 這兩個常數（避免跟這個檔案循環
+        # import），單純把呼叫端已經算好的螢幕尺寸原樣轉交進去。
         self.loader = AssetLoader(cell_size=CELL_SIZE, screen_size=(SCREEN_WIDTH, SCREEN_HEIGHT))
 
         # 【系統升級：打字機開場劇情 + 無縫 AI 任務引導】app_state 沿用
@@ -782,22 +790,29 @@ class NightwatchFarmApp:
         #              PLAYING 就是完全自由的，教學改用不鎖操作的
         #              「飛船 AI 任務」橫幅（self.missions）在背景引導。
         #
-        # 劇情台詞/打字機速度改成使用者這次指定的實例屬性寫法（不是
-        # 上一版放在 class 層級的 STORY_LINES/STORY_CHARS_PER_SEC 共用
-        # 常數）：story_lines 是這次要求的全新 7 句台詞（飛船迫降開局，
-        # 取代舊版柴犬管家自我介紹的台詞），current_story_index/
-        # story_char_index/typing_speed 三個變數名稱跟型別都照使用者
-        # 給的程式碼片段實作，之後如果玩家「新遊戲」重玩一次，
-        # _handle_menu_mouse_down() 會把 current_story_index/
+        # 劇情台詞/打字機速度沿用實例屬性寫法（current_story_index/
+        # story_char_index/typing_speed），之後如果玩家「新遊戲」重玩
+        # 一次，_handle_menu_mouse_down() 會把 current_story_index/
         # story_char_index 重新歸零，這裡的初始值只是避免屬性不存在。
+        #
+        # 【系統升級：動態劇情背景圖切換】story_lines 這次從「純字串
+        # 陣列」改成「{"text":..., "bg_key":...} 字典陣列」——每一句
+        # 台詞現在都各自帶一個 bg_key，對應 self.loader.get(bg_key)
+        # 拿到的其中一張全螢幕背景圖（title_bg / bg_crash /
+        # bg_iron_flower，三張都在下面 self.loader = AssetLoader(...)
+        # 建立時的 load_all() 裡統一載入），_render_story() 會依目前
+        # 播到第幾句動態切換背景，不再像上一版整段劇情共用同一張
+        # title_bg.png。分鏡（哪句配哪張圖）照使用者這次指定的對照表
+        # 原樣套用；最後一句台詞內容也照這次給的新版本更新（「夜巡
+        # 農場」改成「夜巡計畫」）。
         self.story_lines = [
-            "警告：主引擎嚴重受損。即將迫降於未知行星座標...",
-            "系統重啟中... 偵測到外部環境充滿未知生命體。",
-            "指揮官，好消息是我們活下來了。更好的消息是，這裡的植物似乎能長出我們急需的工業金屬...",
-            "但壞消息是，飛船的防禦護盾已完全離線，而當地的變異生物對金屬的能量極度渴望。",
-            "每當夜幕降臨，它們就會蜂擁而至，試圖奪取資源並摧毀我們的機台。",
-            "生存的首要任務：開墾荒地，種植『富鐵花』，並盡快建立自動化防禦網。",
-            "『夜巡農場』基地防禦協議，正式啟動。請指揮官下達第一道指令！",
+            {"text": "警告：主引擎嚴重受損。即將迫降於未知行星座標...", "bg_key": "bg_crash"},
+            {"text": "系統重啟中... 偵測到外部環境充滿未知生命體。", "bg_key": "bg_crash"},
+            {"text": "指揮官，好消息是我們活下來了。更好的消息是，這裡的植物似乎能長出我們急需的工業金屬...", "bg_key": "bg_iron_flower"},
+            {"text": "但壞消息是，飛船的防禦護盾已完全離線，而當地的變異生物對金屬的能量極度渴望。", "bg_key": "bg_crash"},
+            {"text": "每當夜幕降臨，它們就會蜂擁而至，試圖奪取資源並摧毀我們的機台。", "bg_key": "bg_crash"},
+            {"text": "生存的首要任務：開墾荒地，種植『富鐵花』，並盡快建立自動化防禦網。", "bg_key": "bg_iron_flower"},
+            {"text": "『夜巡計畫』基地防禦協議，正式啟動。請指揮官下達第一道指令！", "bg_key": "title_bg"},
         ]
         self.current_story_index = 0
         self.story_char_index = 0.0
@@ -981,37 +996,6 @@ class NightwatchFarmApp:
                 r = pygame.Rect(0, 0, 0, 0)
                 self.action_cards.append(ActionCard(act_id, lbl, cost, tab_id, asset_key, r))
 
-    def _load_title_bg(self):
-        """載入主選單背景圖，縮放填滿整個螢幕。找不到檔案/載入失敗時
-        回傳 None，_render_main_menu() 會退回畫深藍色純色背景，不會讓
-        遊戲壞掉。
-
-        需求文字裡寫的檔名是 assets/title_bg.jpg，但實際放進
-        assets/ 目錄的真實檔案是 assets/title_bg.png（用
-        device_list_dir 實際列出目錄內容確認過，273KB 的 PNG，不是
-        JPG）——這裡直接用真實存在的檔名載入，不是照著需求文字裡的
-        假設檔名去找一個不存在的檔案。這張圖是全螢幕背景，不是套用在
-        地圖格子上的建築/裝飾貼圖，所以不透過 AssetLoader（那邊所有
-        _load_image() 呼叫都是把圖縮放成 CELL_SIZE x CELL_SIZE 的正方
-        形格子貼圖，套用在這裡尺寸會整個跑掉），改在這裡直接用
-        pygame.image.load() 讀取、縮放成 (SCREEN_WIDTH, SCREEN_HEIGHT)
-        兩個獨立步驟處理。用 convert()（不用 convert_alpha()）是因為
-        這是滿版背景，不需要保留透明度、直接吃底層 pixel format 效能
-        更好，跟遊戲內其他「需要疊在別的東西上面」的透明貼圖用途不同。
-        """
-        full_path = os.path.join(os.path.dirname(__file__), "assets", "title_bg.png")
-        if not os.path.exists(full_path):
-            print("[NightwatchFarmApp] 提示：assets/title_bg.png 不存在，"
-                  "主選單將退回深藍色純色背景，不影響遊戲運作。")
-            return None
-        try:
-            img = pygame.image.load(full_path).convert()
-            return pygame.transform.scale(img, (SCREEN_WIDTH, SCREEN_HEIGHT))
-        except Exception as e:
-            print(f"[NightwatchFarmApp] 警告：assets/title_bg.png 載入失敗（{e}），"
-                  f"主選單將退回深藍色純色背景。")
-            return None
-
     def _create_display(self, fullscreen: bool):
         flags = (pygame.FULLSCREEN | pygame.SCALED) if fullscreen else (pygame.RESIZABLE | pygame.SCALED)
         return pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
@@ -1150,10 +1134,14 @@ class NightwatchFarmApp:
                 # 玩家按空白鍵/點擊進到下一句）。self.game 這個階段完全
                 # 不會被 update()，農場世界還沒開始跑。
                 if self.current_story_index < len(self.story_lines):
-                    current_line = self.story_lines[self.current_story_index]
-                    if self.story_char_index < len(current_line):
+                    # 【系統升級：動態劇情背景圖切換】story_lines 現在是
+                    # {"text":..., "bg_key":...} 字典陣列，這裡跟下面
+                    # _advance_story()/_render_story() 三處都要改成讀
+                    # ["text"] 才能拿到真正的字串長度，不是整個 dict。
+                    current_text = self.story_lines[self.current_story_index]["text"]
+                    if self.story_char_index < len(current_text):
                         self.story_char_index = min(
-                            len(current_line), self.story_char_index + self.typing_speed * dt)
+                            len(current_text), self.story_char_index + self.typing_speed * dt)
             elif self.menu_message_timer > 0:
                 # 【Phase 7】選單提示訊息（例如「⚠ 沒有找到存檔」）的倒數，
                 # 只在 MENU 狀態才需要跑，PLAYING 狀態用不到這個計時器。
@@ -2114,9 +2102,9 @@ class NightwatchFarmApp:
         """
         if self.current_story_index >= len(self.story_lines):
             return
-        current_line = self.story_lines[self.current_story_index]
-        if self.story_char_index < len(current_line):
-            self.story_char_index = float(len(current_line))
+        current_text = self.story_lines[self.current_story_index]["text"]
+        if self.story_char_index < len(current_text):
+            self.story_char_index = float(len(current_text))
             return
         self.current_story_index += 1
         self.story_char_index = 0.0
@@ -2124,13 +2112,29 @@ class NightwatchFarmApp:
             self.app_state = 'PLAYING'
 
     def _render_story(self):
-        """打字機開場劇情畫面。背景沿用主選單同一張太空船背景圖
-        (self.title_bg)，找不到圖時退回跟 _render_main_menu() 一致的
-        深藍色純色背景 (12, 16, 38)，維持整個 App 缺圖時的後備行為一致。
+        """打字機開場劇情畫面。
+
+        【系統升級：動態劇情背景圖切換】背景圖不再固定用同一張
+        self.title_bg，改成依 self.story_lines[current_story_index]
+        ["bg_key"] 動態決定要畫哪一張——bg_key 是 "title_bg"/
+        "bg_crash"/"bg_iron_flower" 三者之一，實際 Surface 透過
+        self.loader.get(bg_key) 向 AssetLoader 拿（三張圖都在
+        AssetLoader.load_all() 裡統一載入、強制縮放成
+        (SCREEN_WIDTH, SCREEN_HEIGHT)，見 asset_loader.py）。
+        current_story_index 若已經跑到 len(story_lines)（理論上不會，
+        因為播完最後一句 _advance_story() 就會直接切到 'PLAYING'，
+        這裡是防呆）就沒有對應的 bg_key，退回跟其餘背景圖同一套後備
+        深藍色純色 (12, 16, 38)。
+
         文字用 draw_text_with_outline()（8 方向描邊），理由跟主選單標題
-        完全一樣：太空船背景圖亮度不可預期，弱描邊在亮的區域會吃色。"""
-        if self.title_bg:
-            self.screen.blit(self.title_bg, (0, 0))
+        完全一樣：背景圖亮度不可預期，弱描邊在亮的區域會吃色。"""
+        current_bg = None
+        if self.current_story_index < len(self.story_lines):
+            bg_key = self.story_lines[self.current_story_index]["bg_key"]
+            current_bg = self.loader.get(bg_key)
+
+        if current_bg:
+            self.screen.blit(current_bg, (0, 0))
         else:
             self.screen.fill((12, 16, 38))
 
@@ -2143,8 +2147,8 @@ class NightwatchFarmApp:
         self.screen.blit(overlay, (0, 0))
 
         if self.current_story_index < len(self.story_lines):
-            current_line = self.story_lines[self.current_story_index]
-            visible_text = current_line[:int(self.story_char_index)]
+            current_text = self.story_lines[self.current_story_index]["text"]
+            visible_text = current_text[:int(self.story_char_index)]
 
             # 對話框：畫在畫面下半部，用既有的 draw_wood_panel 木紋面板，
             # 跟遊戲其他彈窗（暫停選單/訂單佈告欄）維持同一套視覺語言，
@@ -2167,7 +2171,7 @@ class NightwatchFarmApp:
             # 打字機動畫就被提示字樣分心；提示文字閃爍效果沿用既有
             # pygame.time.get_ticks() 節奏（跟其他地方的提示閃爍手法
             # 一致），不用額外的計時器屬性。
-            if self.story_char_index >= len(current_line):
+            if self.story_char_index >= len(current_text):
                 if int(pygame.time.get_ticks() / 400) % 2 == 0:
                     blit_text_with_shadow(self.screen, FONT_XS, "▼ 按空白鍵或點擊滑鼠繼續", (220, 220, 220),
                                            topleft=(box_rect.right - 220, box_rect.bottom - 26))
@@ -2235,30 +2239,33 @@ class NightwatchFarmApp:
     def _render_main_menu(self):
         """開始畫面。
 
-        【系統更新：實裝主選單背景圖】背景圖來源這次從 self.title_bg
-        （__init__ 時用 os.path 直接讀 assets/title_bg.png 的獨立小
-        路徑，跟 AssetLoader 完全無關）改成 self.loader.get(
-        "main_menu_bg")（AssetLoader 統一管理、讀 assets/crops/
-        bg_crash.png、縮放到整個視窗大小）。self.title_bg 本身沒有被
-        刪除——_render_story() 開場劇情畫面仍然沿用它當背景，這裡只是
-        换了主選單專用的圖源，兩個畫面改成各自使用不同的背景圖，不是
-        誤刪或誤共用。
+        【系統升級：動態劇情背景圖切換】背景圖 key 這次從上一版的
+        "main_menu_bg"（讀 assets/crops/bg_crash.png）統一改成
+        "bg_crash"（讀 assets/bg_crash.png，根目錄，不在 crops/ 底下
+        了）——這次跟 title_bg/bg_iron_flower 一起放進同一組「三張
+        全螢幕劇情/選單背景圖」共用載入邏輯（見 asset_loader.py），不
+        再另外維護一個專門給主選單用、路徑指向 crops/ 底下的獨立
+        "main_menu_bg" key，兩者本來就是同一張圖，統一成一個 key 之後
+        _render_story() 播到最後一句（bg_key="title_bg"）跟這裡的主
+        選單背景圖也能共用完全同一套載入/取用機制。self.title_bg 這個
+        獨立於 AssetLoader 之外的舊載入路徑已經整個移除（見 __init__
+        的說明），STORY/MENU 兩個畫面現在統一透過 self.loader.get(...)
+        取用背景圖。
 
-        loader.get("main_menu_bg") 理論上不會是 None：AssetLoader.
-        load_all() 一律會呼叫 self._load_image("crops/bg_crash.png",
-        ...) 幫這個 key 賦值，就算檔案還沒放進 assets/crops/ 目錄，
-        _load_image() 內部的 except 也會自動退回
-        generate_placeholder() 生成一張佔位圖，而不是回傳 None。這裡
-        仍然保留 if/else 防呆判斷，跟這個檔案其餘 loader.get(...) 呼叫
-        點的既有寫法一致，避免之後如果 AssetLoader 的實作細節改變、
-        真的回傳 None 時整個畫面直接壞掉。
+        loader.get("bg_crash") 理論上不會是 None：AssetLoader.
+        load_all() 一律會呼叫 self._load_image("bg_crash.png", ...)
+        幫這個 key 賦值，就算檔案還沒放進 assets/ 目錄，_load_image()
+        內部的 except 也會自動退回 generate_placeholder() 生成一張
+        佔位圖，而不是回傳 None。這裡仍然保留 if/else 防呆判斷，跟這
+        個檔案其餘 loader.get(...) 呼叫點的既有寫法一致，避免之後如果
+        AssetLoader 的實作細節改變、真的回傳 None 時整個畫面直接壞掉。
 
         標題文字畫在正中央偏上，三顆按鈕直向排列在畫面下半部，跟既有
         _render_pause_menu() 一樣，用 draw_wood_panel（木紋面板，沒有
         真的貼圖時自動退回立體木頭色塊）+ blit_text_with_shadow（帶
         陰影文字，深色背景圖上也看得清楚）畫按鈕，維持跟遊戲其餘彈窗
         一致的視覺語言，不是另外設計一套風格。"""
-        main_menu_bg = self.loader.get("main_menu_bg")
+        main_menu_bg = self.loader.get("bg_crash")
         if main_menu_bg:
             self.screen.blit(main_menu_bg, (0, 0))
         else:

@@ -125,8 +125,9 @@ DOG_DAY_SIT_ROW = 2
 class AssetLoader:
     def __init__(self, cell_size: int = 50, screen_size: Tuple[int, int] = (1260, 800)):
         self.cell_size = cell_size
-        # 【系統更新：主選單背景圖】主選單背景 (main_menu_bg) 要縮放成
-        # 「整個遊戲視窗大小」，但 SCREEN_WIDTH/SCREEN_HEIGHT 這兩個常數
+        # 【系統升級：動態劇情背景圖切換】title_bg/bg_crash/
+        # bg_iron_flower 這三張全螢幕背景圖都要縮放成「整個遊戲視窗
+        # 大小」，但 SCREEN_WIDTH/SCREEN_HEIGHT 這兩個常數
         # 定義在 advanced_nightwatch_farm-v3.py（呼叫端），asset_loader.py
         # 不能反過來 import 那個檔案（那會是循環 import：主程式本來就要
         # import 這個檔案裡的 AssetLoader）。改成呼叫端在建立 AssetLoader
@@ -800,25 +801,48 @@ class AssetLoader:
         self._load_1x4_spritesheet("iron_flower", "crops/bg_iron_flower.png", sz,
                                     colorkey=None, placeholder_category="iron_flower")
 
-        # 【系統更新：主選單背景圖】main_menu_bg：墜毀太空船場景圖，
-        # 縮放至 self.screen_size（呼叫端傳入的 (SCREEN_WIDTH,
-        # SCREEN_HEIGHT)），讓它剛好貼滿整個遊戲視窗。
+        # 【系統升級：動態劇情背景圖切換】三張全螢幕劇情/選單背景圖，
+        # 統一強制縮放至 self.screen_size（呼叫端傳入的 (SCREEN_WIDTH,
+        # SCREEN_HEIGHT)），讓它們剛好貼滿整個遊戲視窗。
         #
-        # 這裡刻意存進既有的 self.images（用 get("main_menu_bg") 取用），
-        # 不是使用者需求文字裡寫的 self.assets['main_menu_bg']——
-        # AssetLoader 這個類別從頭到尾都只有 self.images 這一個「單一
-        # Surface、靠 get() 取用」的字典（見 __init__ 裡
-        # self.building_anim_frames 那段既有註解，之前就因為同樣理由
-        # 特地不引入 self.assets 這個新字典，避免兩套命名並存互相打
-        # 架），這次沿用同一個既有慣例，不新增第二套存放機制。
+        # 使用者這次明確指出三張圖「目前都統一放在 assets/ 根目錄
+        # 下」，不是 crops/ 子目錄——路徑因此都是 rel_path 直接給檔名，
+        # 不带 "crops/" 前綴。上一版 main_menu_bg 讀的是
+        # "crops/bg_crash.png"（子目錄），這次改成 "bg_crash.png"（根
+        # 目錄）；同時把上一版單獨的 main_menu_bg key 併入這組統一的
+        # 三張圖清單，key 直接命名成 "bg_crash"，跟 title_bg/
+        # bg_iron_flower 用同一套 key 命名風格（也是
+        # advanced_nightwatch_farm-v3.py 主選單改讀 "bg_crash" 這個 key
+        # 的原因），不再維護一個名稱不一致、單獨存在的 "main_menu_bg"。
         #
-        # 用既有的 _load_image() 而不是 _load_1x4_spritesheet()：這張圖
-        # 是單張完整的背景場景圖，不是 4 幀 Sprite Sheet，_load_image()
+        # 這裡刻意存進既有的 self.images（用 get(key) 取用），不是使用
+        # 者需求文字裡寫的 self.assets[...]——AssetLoader 這個類別從頭
+        # 到尾都只有 self.images 這一個「單一 Surface、靠 get() 取用」
+        # 的字典（見 __init__ 裡 self.building_anim_frames 那段既有註
+        # 解，之前就因為同樣理由特地不引入 self.assets 這個新字典，避
+        # 免兩套命名並存互相打架），這次沿用同一個既有慣例，不新增第二
+        # 套存放機制。
+        #
+        # 用既有的 _load_image() 而不是 _load_1x4_spritesheet()：這三張
+        # 都是單張完整的背景場景圖，不是 4 幀 Sprite Sheet，_load_image()
         # 本來就是給「單張圖片、縮放到指定尺寸、找不到就退回佔位圖」這
         # 種需求用的既有共用函式，不用另外寫新邏輯。
-        self.images["main_menu_bg"] = self._load_image(
-            "crops/bg_crash.png", self.screen_size, name="main_menu_bg"
-        )
+        #
+        # 特別注意 "bg_iron_flower" 這個 key 跟上面第 3e 節
+        # "crops/bg_iron_flower.png" 是兩張完全不同的圖、走完全不同的
+        # 用途：上面那張是農田格子上富鐵花作物本體的 1x4 sprite sheet
+        # （key="iron_flower"，透過 get_anim_frames() 取用），這裡這張
+        # 是劇情畫面用的全螢幕背景場景圖（key="bg_iron_flower"，透過
+        # get() 取用單一 Surface），兩者恰好都叫 bg_iron_flower.png、
+        # 但實際檔案路徑不同（"crops/bg_iron_flower.png" vs 根目錄的
+        # "bg_iron_flower.png"）、key 也刻意取得不一樣（"iron_flower"
+        # vs "bg_iron_flower"），不會互相覆蓋。
+        for bg_key, bg_filename in (
+            ("title_bg", "title_bg.png"),
+            ("bg_crash", "bg_crash.png"),
+            ("bg_iron_flower", "bg_iron_flower.png"),
+        ):
+            self.images[bg_key] = self._load_image(bg_filename, self.screen_size, name=bg_key)
 
         # 目前這個專案的 DefenseType 只有刺藤木柵/鋼鐵捕獸夾/農田稻草人/
         # 蜜蜂守衛巢四種，實際貼圖都已經存在於 assets/defenses/ 底下（見
