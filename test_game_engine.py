@@ -69,11 +69,25 @@ def test_night_day_cycle_transition():
     from game_config import Enemy
     game.enemies.append(Enemy(id="test_thief", enemy_type=EnemyType.THIEF, x=0.0, y=0.0))
     
-    # 模擬經過完整夜晚 (18秒)
+    # 模擬經過完整夜晚 (18秒)。注意：dt=20 這麼大的一次 update() 除了
+    # 觸發破曉之外，途中 _update_night_spawning() 也會依配置正常生怪，
+    # 所以場上最終殘留的敵人數量不保證只有一開始手動加的那隻，測試
+    # 只驗證「破曉當下的行為」，不假設確切數量。
     game.update(20.0)
     assert game.phase == GamePhase.DAY, "夜晚時間結束應自動破曉切換至白天！"
-    assert len(game.enemies) == 0, "白天殘餘敵人應被陽光驅散"
-    print("  ✓ 日夜循環切換無卡死，破曉機制運作完美！")
+    # 【AI 行為升級：白天的恐懼與逃跑機制】破曉不再讓殘餘敵人直接消失
+    # （len(enemies)==0），而是強制轉成 FLEEING 狀態、逃往地圖邊界，
+    # 移動到邊界格才會被真正移除，不是瞬間清空。
+    assert len(game.enemies) >= 1, "破曉當下應轉為逃跑，不是立刻消失"
+    assert all(e.state == EnemyState.FLEEING for e in game.enemies), "破曉當下場上所有敵人都應強制進入 FLEEING 狀態"
+    # 手動加的那隻敵人一開始就站在 (0, 0)——本身已經是地圖邊界——
+    # _set_enemy_flee_path() 算出的目標就是原地，DAY 階段的 update()
+    # 現在也會繼續呼叫 _update_enemies()，下一次呼叫就會判定牠已經在
+    # 邊界上並真正移除，驗證「移動到地圖邊界才移除」這條規則確實有
+    # 生效，不是永遠留在場上。
+    game.update(0.1)
+    assert not any(e.id == "test_thief" for e in game.enemies), "站在地圖邊界的逃跑敵人應在白天被真正移除"
+    print("  ✓ 日夜循環切換無卡死，破曉驅散改為合理的逃跑機制運作完美！")
 
 
 def test_scarecrow_and_trap():

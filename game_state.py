@@ -1291,7 +1291,31 @@ class GameState:
         self.day_count += 1
         self.day_duration = self.config.get("DAY_1_DURATION", 30.0) if self.day_count == 1 else self.config["DAY_DURATION"]
         self.is_blood_moon = False
-        self.enemies.clear()
+
+        # 【AI 行為升級：白天的恐懼與逃跑機制】原本這裡直接
+        # `self.enemies.clear()`，怪物在破曉瞬間憑空消失，缺乏邏輯性。
+        # 改成：場上還沒被消滅（DEAD）的怪物全部強制進入 FLEEING 狀態
+        # （_set_enemy_flee_path() 是既有方法，本來就用在「小偷被稻草人
+        # 嚇跑」「金庫被搬空後撤退」這兩種情境，這裡是第三種觸發時機，
+        # 沿用同一份邏輯：state 設成 FLEEING、算一條通往最近地圖邊界的
+        # 路徑），不管牠們原本是 MOVING/ACTING/STUNNED 哪個狀態，一律
+        # 蓋成 FLEEING，讓陽光「打斷」牠們正在做的事並開始逃跑。真正把
+        # 牠們從 self.enemies 移除的時機交給 update() 在 DAY 階段繼續
+        # 呼叫的 _update_enemies()：FLEEING 分支本來就會在牠們移動到
+        # 地圖邊界格時才真正移除（見該分支的 dead_or_escaped 判斷），
+        # 不是在這裡瞬間清空。
+        fleeing_count = 0
+        for enemy in self.enemies:
+            if enemy.state != EnemyState.DEAD:
+                self._set_enemy_flee_path(enemy)
+                fleeing_count += 1
+
+        if fleeing_count > 0:
+            self._emit_event(
+                EventType.ENEMIES_FLED_DAWN,
+                f"☀️ 陽光灑落，{fleeing_count} 隻入侵者被灼傷，尖叫著逃向地圖邊緣！",
+                {"count": fleeing_count}
+            )
 
         if self.guard_dog:
             self.guard_dog.state = DogState.RETURNING
@@ -1678,6 +1702,25 @@ class GameState:
         self._update_buildings(dt)
 
         if self.phase == GamePhase.DAY:
+            # 【AI 行為升級：白天的恐懼與逃跑機制】白天原本完全不會呼叫
+            # _update_enemies()（該方法本來只在夜晚被下面的 else 分支
+            # 呼叫），但 _start_day() 現在不再清空 self.enemies，而是把
+            # 殘餘怪物全部轉成 FLEEING 狀態、算好逃往地圖邊界的路徑，
+            # 所以白天也要繼續推進牠們的移動，直到真的跑出地圖邊界被
+            # 移除為止——否則怪物會卡在半路一動也不動，跟破曉瞬間直接
+            # 消失一樣不合邏輯，只是換了個位置卡住。
+            #
+            # 這裡刻意不呼叫 _update_night_spawning()（白天不該繼續生怪）
+            # 也不呼叫 _update_guard_dog()（看門狗白天的職責只有「跑回
+            # 狗屋」，_start_day() 已經直接把牠 teleport 回家、不需要
+            # 逐幀更新；而且 _update_guard_dog() 內部會主動追擊 FLEEING
+            # 敵人，那是夜間巡邏的行為，白天不需要狗再跑出去咬正在逃跑
+            # 中的怪物）。只單純呼叫 _update_enemies()，讓 FLEEING 分支
+            # 的移動/離開地圖判斷繼續運作即可，不影響其他白天限定的
+            # 系統。
+            if self.enemies:
+                self._update_enemies(dt)
+
             if self.time_in_phase >= self.day_duration:
                 self._start_night()
         else:

@@ -2240,6 +2240,20 @@ class NightwatchFarmApp:
                 if self.active_tab == "TOOLS" or self.selected_action in ("FLASHLIGHT", "WHISTLE"):
                     self.active_tab = "CROPS"
                     self.selected_action = "PLANT_RADISH"
+            elif ev.event_type == EventType.ENEMIES_FLED_DAWN:
+                # 【AI 行為升級：白天的恐懼與逃跑機制】破曉瞬間有殘餘怪物
+                # 被迫進入 FLEEING 狀態時的表現：借用既有的 flash_vfx_timer
+                # 全螢幕閃光機制（本來是給強光手電筒暈眩用的暖黃色閃光，
+                # 目前實際上沒有任何地方在設它，一直是 0，等於閒置——
+                # 拿來表現「陽光刺眼灼傷」在視覺質感上剛好合適，不用另外
+                # 寫一份全螢幕閃光渲染邏輯），音效交給 sound_manager.
+                # handle_game_event 映射 ENEMIES_FLED_DAWN -> "sizzle"。
+                self.flash_vfx_timer = 0.28
+                self.floating_texts.append(FloatingText(
+                    f"☀️ 陽光刺眼！{ev.data['count']} 隻入侵者嘶叫著逃跑！",
+                    SCREEN_WIDTH // 2 - 130, 220, C_GOLD, duration=2.2
+                ))
+                self._spawn_particles(SCREEN_WIDTH // 2, 240, (255, 235, 150), count=22)
             elif ev.event_type == EventType.ORDER_FULFILLED:
                 # 交付成功的浮動文字/粒子特效統一在這裡處理（音效交給
                 # sound_manager.handle_game_event 映射 ORDER_FULFILLED ->

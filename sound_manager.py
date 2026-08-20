@@ -123,6 +123,12 @@ class SoundManager:
             # 跟「plant」那種比較柔和的種植音區分開，音量壓低一點避免
             # 頻繁點擊時太吵。
             self.sounds["ui_click"] = self._generate_tone(1000.0, 0.05, volume=0.22, wave_type="sine")
+            # 【AI 行為升級：白天的恐懼與逃跑機制】怪物被陽光灼傷時的
+            # 「嘶嘶」燒灼聲：noise 波形本身就是白噪音，聽感類似灼燒/
+            # 蒸氣噴發聲，音量壓在 0.35（跟 trap 的 0.6 相比明顯輕一
+            # 點），因為破曉時可能同時有好幾隻怪物一起觸發，音量疊加
+            # 太大聲會嚇到玩家。
+            self.sounds["sizzle"] = self._generate_tone(2200.0, 0.3, volume=0.35, wave_type="noise")
             self.bgm_channel = None
 
         except Exception as e:
@@ -208,6 +214,8 @@ class SoundManager:
             self.play("stolen")
         elif t == EventType.DAY_STARTED:
             self.play_bgm(is_day=True)
+        elif t == EventType.ENEMIES_FLED_DAWN:
+            self.play("sizzle")
         elif t == EventType.NIGHT_STARTED:
             self.play_bgm(is_day=False)
             self.play("night_alarm")

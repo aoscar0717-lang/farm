@@ -159,6 +159,11 @@ class EventType(Enum):
     PHASE_CHANGED = "PHASE_CHANGED"
     DAY_STARTED = "DAY_STARTED"
     NIGHT_STARTED = "NIGHT_STARTED"
+    # 【AI 行為升級：白天的恐懼與逃跑機制】破曉瞬間，場上還沒被消滅的
+    # 怪物被迫進入 FLEEING 狀態（不是直接消失）時觸發一次，供 UI 畫
+    # 「陽光灼傷」閃光/嘶嘶音效、跟 DAY_STARTED 的一般破曉播報分開。
+    # 沒有殘餘怪物時（enemies 已空）不會 emit 這個事件。
+    ENEMIES_FLED_DAWN = "ENEMIES_FLED_DAWN"
     BLOOD_MOON_WARNING = "BLOOD_MOON_WARNING"
     DAILY_TAX_PAID = "DAILY_TAX_PAID"
     PROSPERITY_DIVIDEND = "PROSPERITY_DIVIDEND"
