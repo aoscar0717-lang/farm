@@ -1642,9 +1642,36 @@ class GameState:
 
     def _assign_enemy_target_and_path(self, enemy: Enemy):
         # 1. 優先搜尋農田區作物
+        #
+        # 【Bug 修復：所有怪物不會同時盯上同一株作物】原本這裡單純選
+        # 「全場價值最高的一株作物」（成熟 +1000 權重），每一隻怪物都
+        # 各自獨立跑同一套選擇邏輯，結果就是場上所有敵人不管幾隻，永遠
+        # 全部擠去圍攻同一株最值錢的作物，其餘作物完全沒有防守壓力，
+        # 也不合理（怪物之間應該要分散目標，不會笨到一窩蜂搶同一個）。
+        #
+        # 修法：先收集「目前已經被其他還活著、正在移動/行動中的敵人
+        # 鎖定」的作物座標集合 claimed_tiles（排除自己、排除已經在打
+        # 金庫的敵人——金庫不是作物、本來就允許多隻同時鎖定），選擇
+        # 目標時優先跳過已被佔用的作物；如果扣掉已佔用的之後還有未被
+        # 鎖定的作物可選，就從剩下的裡面挑價值最高的；只有在「未佔用
+        # 的作物已經一株都不剩」（例如怪物數量多過作物數量）時，才退回
+        # 原本「不管有沒有人在打，選全場最高價值」的邏輯，允許多隻怪物
+        # 共同圍攻同一株作物，總比明明有作物、卻因為找不到「專屬」目標
+        # 而錯誤判定成空田直接去洗劫金庫要合理。
+        claimed_tiles = {
+            e.target_grid
+            for e in self.enemies
+            if e is not enemy
+            and not e.is_targeting_vault
+            and e.target_grid is not None
+            and e.state in (EnemyState.MOVING, EnemyState.ACTING)
+        }
+
         best_crop_val = -1
         best_crop_tile = None
-        
+        best_unclaimed_val = -1
+        best_unclaimed_tile = None
+
         for row in self.grid:
             for tile in row:
                 if tile.zone == ZoneType.FARM_ZONE and tile.crop is not None:
@@ -1654,9 +1681,14 @@ class GameState:
                     if val > best_crop_val:
                         best_crop_val = val
                         best_crop_tile = (tile.x, tile.y)
-                        
-        if best_crop_tile:
-            target_pos = best_crop_tile
+                    if (tile.x, tile.y) not in claimed_tiles and val > best_unclaimed_val:
+                        best_unclaimed_val = val
+                        best_unclaimed_tile = (tile.x, tile.y)
+
+        chosen_tile = best_unclaimed_tile if best_unclaimed_tile is not None else best_crop_tile
+
+        if chosen_tile:
+            target_pos = chosen_tile
             enemy.is_targeting_vault = False
         else:
             # 2. 若農田無任何作物（玩家試圖空田防守）：直接突襲農莊金庫/糧倉！
