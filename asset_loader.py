@@ -895,10 +895,19 @@ class AssetLoader:
         # 但實際檔案路徑不同（"crops/bg_iron_flower.png" vs 根目錄的
         # "bg_iron_flower.png"）、key 也刻意取得不一樣（"iron_flower"
         # vs "bg_iron_flower"），不會互相覆蓋。
+        # 【系統修復與文本重構：綁定劇情背景圖與農場風文本全面替換】
+        # 遊戲從「硬派外星求生」轉型成「溫馨奇幻農場」，這三張全螢幕
+        # 背景圖的 key/檔名也跟著劇情一起換血：bg_crash（墜毀太空船）
+        # 改成 bg_abandoned（荒廢已久的祖傳農莊），bg_iron_flower（富鐵
+        # 花的宿主星球）改成 bg_premium_crop（劇情裡那株會發光的特級
+        # 農產）。title_bg 維持不變。使用者需求文字裡寫的是
+        # self.assets[key] = ...load(...)，但 AssetLoader 從頭到尾只有
+        # self.images 這一個字典（見上方既有註解，避免跟 self.assets
+        # 兩套命名並存），這裡繼續沿用既有慣例，透過 get(key) 取用。
         for bg_key, bg_filename in (
             ("title_bg", "title_bg.png"),
-            ("bg_crash", "bg_crash.png"),
-            ("bg_iron_flower", "bg_iron_flower.png"),
+            ("bg_abandoned", "bg_abandoned.png"),
+            ("bg_premium_crop", "bg_premium_crop.png"),
         ):
             self.images[bg_key] = self._load_image(bg_filename, self.screen_size, name=bg_key)
 

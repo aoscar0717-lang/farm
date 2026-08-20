@@ -196,14 +196,29 @@ class GameState:
         elif item_key in self.inventory:
             self.inventory[item_key] = max(0, self.inventory[item_key] - qty)
 
+    # 【系統修復與文本重構：農場風文本全面替換】原本這裡沒有中文名稱表，
+    # RESOURCE_KEYS（wood/metal_ore/metal_ingot/battery）會原樣把英文
+    # 代稱顯示給玩家看（例如訂單/建造缺料提示會直接寫「還差 2 個
+    # metal_ingot」）——這是遊戲从「硬派外星求生」轉型成「溫馨奇幻農場」
+    # 之後，UI 上唯一還會直接洩漏出英文工業代稱的地方，雖然不在使用者
+    # 這次列出的四個具體項目裡，但完全符合「檢查是否有遺漏的科幻名詞」
+    # 的要求，所以一併補上中文名稱，避免玩家在缺料提示裡看到裸英文。
+    _RESOURCE_DISPLAY_NAMES = {
+        "wood": "木料",
+        "metal_ore": "礦石結晶",
+        "metal_ingot": "精鐵錠",
+        "battery": "魔力電池",
+    }
+
     def _item_display_name(self, item_key: str) -> str:
         """把訂單/建築配方裡的物品 key 轉成給玩家看的中文名稱：作物代稱
         (ORDER_CROP_ALIASES 的 key) 轉成 CROP_DATA 裡的中文名稱；原料/
-        半成品 (RESOURCE_KEYS) 目前沒有中文名稱表，先照英文代稱原樣
-        顯示，以後要加中文名稱只要改這個函式，呼叫端不用動。"""
+        半成品 (RESOURCE_KEYS) 透過 _RESOURCE_DISPLAY_NAMES 查表，查不到
+        才照英文代稱原樣顯示（純防呆，理論上 RESOURCE_KEYS 四個都已經
+        在表裡）。"""
         if item_key in ORDER_CROP_ALIASES:
             return CROP_DATA[ORDER_CROP_ALIASES[item_key]]["name"]
-        return item_key
+        return self._RESOURCE_DISPLAY_NAMES.get(item_key, item_key)
 
     def _check_recipe_shortfall(self, requirements: Dict[str, int]) -> List[str]:
         """回傳每一項數量不足的物品描述（例如「小麥 還差 2 個」）的
@@ -314,11 +329,11 @@ class GameState:
 
         self._emit_event(
             EventType.ORDER_FULFILLED,
-            f"📦 訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 科技點數。",
+            f"📦 訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 工藝點數。",
             {"order_id": order_id, "reward_gold": order.reward_gold, "reward_tech": order.reward_tech,
              "total_gold": self.gold, "total_tech": self.tech_points}
         )
-        return True, f"訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 科技點數。"
+        return True, f"訂單交付成功！獲得 {order.reward_gold} 金幣、{order.reward_tech} 工藝點數。"
 
     # =========================================================================
     # 加工建築系統 (Building System) —— Phase 2
@@ -378,7 +393,7 @@ class GameState:
         if self.gold < cost_gold:
             return False, f"金幣不足！建造 {config['name']} 需要 {cost_gold} 金幣。"
         if self.tech_points < cost_tech:
-            return False, f"科技點數不足！建造 {config['name']} 需要 {cost_tech} 科技點數（目前 {self.tech_points} 點）。"
+            return False, f"工藝點數不足！建造 {config['name']} 需要 {cost_tech} 工藝點數（目前 {self.tech_points} 點）。"
         if cost_items:
             missing = self._check_recipe_shortfall(cost_items)
             if missing:
@@ -404,7 +419,7 @@ class GameState:
         if cost_gold:
             cost_desc_parts.append(f"{cost_gold} 金幣")
         if cost_tech:
-            cost_desc_parts.append(f"{cost_tech} 科技點數")
+            cost_desc_parts.append(f"{cost_tech} 工藝點數")
         for item_key, need_qty in cost_items.items():
             cost_desc_parts.append(f"{need_qty} 個{self._item_display_name(item_key)}")
         cost_desc = "、".join(cost_desc_parts) if cost_desc_parts else "0 成本"
@@ -451,7 +466,7 @@ class GameState:
         config = building.config
 
         if building.is_passive:
-            return False, f"{config['name']} 是被動永久生效的自動化科技，蓋下去就會持續運作，無需切換開關！"
+            return False, f"{config['name']} 是蓋下去就永久生效的巧妙裝置，會自己持續運作，無需切換開關！"
 
         if not building.is_active:
             # 準備開啟：閒置中才需要預檢查原料（如果這一輪其實還在跑，
@@ -1087,13 +1102,17 @@ class GameState:
             self.guard_dog.y = float(DOG_CONFIG["home_pos"][1])
             self.guard_dog.target_pos = None
 
-        # 每日領地地租/維護費（防止玩家空田掛機）
+        # 【系統修復與文本重構】每日固定扣款機制本身（防止玩家空田掛機）
+        # 完全不變，只是把「繳納地租」這種被動、硬派生存感的說法，改成
+        # 「完成每日農莊擴建目標」的正向框架——同一筆扣款，換一種說法
+        # 詮釋成玩家主動投入資金持續擴建農莊，跟遊戲整體從「硬派外星
+        # 求生」轉型成「溫馨奇幻農場」的調性一致。
         tax = self.config["DAILY_TAX_BASE"] + (self.day_count * self.config["DAILY_TAX_PER_DAY"])
         self.gold -= tax
 
         self._emit_event(
             EventType.DAILY_TAX_PAID,
-            f"🏛️ 支付第 {self.day_count} 天莊園地租與維護費 -{tax} G！",
+            f"🏡 完成第 {self.day_count} 天農莊擴建目標，投入 -{tax} G！",
             {"tax": tax, "gold": self.gold}
         )
 

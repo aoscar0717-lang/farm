@@ -360,7 +360,15 @@ CROP_DATA = {
     # 即使富鐵花被偷不會讓玩家平白損失原料產出的邏輯意義，也要有個跟
     # 其他作物一致、合理的「失竊代價」數字，不留 0 這種特例。
     CropType.IRON_FLOWER: {
-        "name": "富鐵花",
+        # 【系統修復與文本重構】原本充滿工業感的「富鐵花」改名為
+        # 「晨露高麗菜」，呼應遊戲從「硬派外星求生」轉型為「溫馨奇幻
+        # 農場」的世界觀；CropType.IRON_FLOWER 這個 enum 成員本身、
+        # output_key（仍是 metal_ore）都維持不變，只換玩家看得到的
+        # 名稱，理由跟下面 asset_key 保留 "iron_flower" 相同——這是
+        # 內部識別字，不是玩家看到的文字，改了反而會牽動存檔相容性、
+        # asset_loader.py 的貼圖 key、測試等一大串跟這次「文本替換」
+        # 無關的東西。
+        "name": "晨露高麗菜",
         "unlock_level": 3,
         "seed_cost": 150,
         "grow_time": 15.0,
@@ -558,7 +566,10 @@ DEFENSE_DATA = {
 # 生產鏈不必依賴任何已經被刪除的建築。
 BUILDING_DATA = {
     BuildingType.FURNACE: {
-        "name": "熔爐",
+        # 【系統修復與文本重構】「熔爐」改名為「磚造烤窯」，enum 成員
+        # BuildingType.FURNACE、recipe（metal_ore x2 -> metal_ingot）
+        # 都維持不變，只換名稱文字。
+        "name": "磚造烤窯",
         "unlock_level": 3,
         "build_cost_gold": 200,
         "build_cost_tech": 18,
@@ -680,7 +691,10 @@ BUILDING_DATA = {
     # 必要前置——目前完整生產鏈簡化為「礦場產 metal_ore -> 熔爐煉
     # metal_ingot -> 灑水器/自動採收機」。
     BuildingType.LUMBERYARD: {
-        "name": "伐木場",
+        # 【系統修復與文本重構】「伐木場」改名為「風車磨坊」，enum 成員
+        # BuildingType.LUMBERYARD、output_key（仍是 wood）都維持不變，
+        # 只換名稱文字。
+        "name": "風車磨坊",
         "unlock_level": 1,   # 最基礎的原料來源，刻意設成遊戲一開局就能蓋，不卡關
         "build_cost_gold": 50,
         "build_cost_tech": 0,

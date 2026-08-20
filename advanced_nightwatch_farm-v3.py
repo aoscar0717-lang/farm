@@ -804,27 +804,29 @@ class NightwatchFarmApp:
         # 一次，_handle_menu_mouse_down() 會把 current_story_index/
         # story_char_index 重新歸零，這裡的初始值只是避免屬性不存在。
         #
-        # 【系統升級：動態劇情背景圖切換（修正分鏡版）】story_lines 從
-        # 「純字串陣列」改成「{"text":..., "bg_key":...} 字典陣列」——
-        # 每一句台詞現在都各自帶一個 bg_key，對應 self.loader.get(
-        # bg_key) 拿到的其中一張全螢幕背景圖（title_bg / bg_crash /
-        # bg_iron_flower，三張都在下面 self.loader = AssetLoader(...)
-        # 建立時的 load_all() 裡統一載入），_render_story() 會依目前
-        # 播到第幾句動態切換背景，不再整段劇情共用同一張圖。
-        #
-        # 這次是「修正分鏡版」，跟上一版的對照表不同：title_bg 這次改
-        # 成只在第一句破題用（原本是放在最後一句），最後一句改回
-        # bg_crash（原本是 title_bg）——第 2~6 句的 bg_crash/
-        # bg_iron_flower 分配維持不變。照使用者這次指定的新對照表原樣
-        # 套用。
+        # 【系統修復與文本重構：綁定劇情背景圖與農場風文本全面替換】
+        # story_lines 維持「{"text":..., "bg_key":...} 字典陣列」這個
+        # 既有結構不變（上一個任務就已經是這個結構，不是這次才改的），
+        # 這次真正變動的是兩件事：
+        #   1. bg_key 對應的三張背景圖鍵名跟著世界觀重新命名，從
+        #      title_bg/bg_crash/bg_iron_flower 改成
+        #      title_bg/bg_abandoned/bg_premium_crop（見 asset_loader.py
+        #      對應的載入清單），不再是「墜毀太空船」跟「富鐵花宿主
+        #      星球」這種硬派外星求生場景。
+        #   2. 台詞內容整段重寫：遊戲已經從「硬派外星求生」轉型成
+        #      「溫馨奇幻農場」，原本「主引擎受損／迫降未知星球／工業
+        #      金屬／防禦護盾／變異生物」這些科幻詞彙全部替換掉，改成
+        #      「繼承一座荒廢已久的祖傳農莊、重新開墾、守護收成」的
+        #      溫馨故事線，跟新的 bg_abandoned（荒廢農莊）/
+        #      bg_premium_crop（發光的特級農產）背景圖意境呼應。
         self.story_lines = [
-            {"text": "警告：主引擎嚴重受損。即將迫降於未知行星座標...", "bg_key": "title_bg"},
-            {"text": "系統重啟中... 偵測到外部環境充滿未知生命體。", "bg_key": "bg_crash"},
-            {"text": "指揮官，好消息是我們活下來了。更好的消息是，這裡的植物似乎能長出我們急需的工業金屬...", "bg_key": "bg_iron_flower"},
-            {"text": "但壞消息是，飛船的防禦護盾已完全離線，而當地的變異生物對金屬的能量極度渴望。", "bg_key": "bg_crash"},
-            {"text": "每當夜幕降臨，它們就會蜂擁而至，試圖奪取資源並摧毀我們的機台。", "bg_key": "bg_crash"},
-            {"text": "生存的首要任務：開墾荒地，種植『富鐵花』，並盡快建立自動化防禦網。", "bg_key": "bg_iron_flower"},
-            {"text": "『夜巡計畫』基地防禦協議，正式啟動。請指揮官下達第一道指令！", "bg_key": "bg_crash"},
+            {"text": "在遙遠的山谷深處，有一座被世人遺忘許久的農莊，靜靜等待著它的新主人。", "bg_key": "title_bg"},
+            {"text": "荒煙蔓草間，古老的柵欄早已傾頹，土地也失去了往日的生機……", "bg_key": "bg_abandoned"},
+            {"text": "但當你踏入這片土地時，卻在角落發現一株散發微光的『晨露高麗菜』——傳說中的特級農產！", "bg_key": "bg_premium_crop"},
+            {"text": "只不過，夜晚的森林裡，總有一些貪嘴的野生動物，會被作物的香氣悄悄吸引而來。", "bg_key": "bg_abandoned"},
+            {"text": "你得重新豎起柵欄、佈置一些巧妙的機關，才能守護得來不易的每一份收成。", "bg_key": "bg_abandoned"},
+            {"text": "只要用心耕耘，這片荒地終將重新綻放，成為遠近馳名的夢幻莊園。", "bg_key": "bg_premium_crop"},
+            {"text": "『夜巡農場』的故事，就從今天，由你親手寫下第一頁。準備好了嗎？", "bg_key": "title_bg"},
         ]
         self.current_story_index = 0
         self.story_char_index = 0.0
@@ -837,13 +839,17 @@ class NightwatchFarmApp:
         # 背景默默推進進度（見 _process_events()）。missions[5]（完成）
         # 是純提示訊息，沒有 target/type，達到之後橫幅固定停在這句，
         # 不會再繼續比對任何事件。
+        # 【系統修復與文本重構】任務引導的發話者從「飛船AI」改成
+        # 「莊園精靈」，措辭也一併從「資金/防禦單位/鐵礦/科技樹」這種
+        # 硬派外星求生用語，換成溫馨奇幻農場該有的口吻；type/target 等
+        # 判定邏輯完全不動，只換玩家看得到的文字。
         self.missions = [
-            {"text": "飛船AI：生存需要資金。請打開商店，種植任意基礎作物。", "type": "plant_crop", "exclude_iron": True, "target": 1},
-            {"text": "飛船AI：作物成熟需要時間。請等待其成熟後點擊採收，以賺取金幣。", "type": "harvest_crop", "exclude_iron": True, "target": 1},
-            {"text": "飛船AI：偵測到夜間生物活動。請在商店購買並部署任意防禦單位。", "type": "place_defense", "target": 1},
-            {"text": "飛船AI：防線已建立。資金充足，請開始種植『富鐵花』獲取鐵礦。", "type": "plant_crop", "iron_only": True, "target": 1},
-            {"text": "飛船AI：金屬資源已就緒。請建造伐木場或熔爐，啟動科技樹。", "type": "place_building_2x2", "target": 1},
-            {"text": "飛船AI：基地運作穩定。指揮官，防禦協議與科技系統已全面解鎖，祝您好運。", "type": "complete", "target": 0},
+            {"text": "莊園精靈：想讓農莊運作起來，需要一點資金喔。打開商店，種下任意一種基礎作物吧！", "type": "plant_crop", "exclude_iron": True, "target": 1},
+            {"text": "莊園精靈：作物成熟需要一點時間，耐心等它長大後點擊採收，就能換得金幣囉。", "type": "harvest_crop", "exclude_iron": True, "target": 1},
+            {"text": "莊園精靈：夜幕降臨後，附近的野生動物會伺機而動。快去商店部署一些防禦設施吧！", "type": "place_defense", "target": 1},
+            {"text": "莊園精靈：防線穩固、資金也充裕了，來試著種下珍貴的『晨露高麗菜』吧！", "type": "plant_crop", "iron_only": True, "target": 1},
+            {"text": "莊園精靈：材料已經備齊，快建造風車磨坊或磚造烤窯，讓農莊的手藝更上一層樓！", "type": "place_building_2x2", "target": 1},
+            {"text": "莊園精靈：農莊已經穩定運作了。往後的故事，就交給你親手書寫，祝你順心如意！", "type": "complete", "target": 0},
         ]
         self.current_mission_idx = 0
         self.mission_progress = 0  # 目前這個任務已經達成幾次（跟 target 比對）
@@ -932,7 +938,17 @@ class NightwatchFarmApp:
                 # 成長比例挑幀，見渲染層的說明），卡片圖示要跟著改，不然
                 # loader.get("iron_flower_mature") 會拿到 None，卡片會沒
                 # 有圖示。
-                ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石", "iron_flower"),
+                # 【系統修復與文本重構】原本充滿工業感的「富鐵花」改名為
+                # 「晨露高麗菜」——action_id/asset_key（"PLANT_IRON_
+                # FLOWER"/"iron_flower"）跟 CropType.IRON_FLOWER 這個
+                # enum 成員維持不變（只是內部識別字，玩家看不到，改了
+                # 反而要動到存檔相容性/測試等一大串東西，超出這次純文本
+                # 替換的範圍），output_key 也仍然是 metal_ore（供應熔爐
+                # 改名後的磚造烤窯煉製）——這裡把它解讀成「這株奇特蔬菜
+                # 吸收了地脈礦砂，篩出來的礦石結晶」，而不是硬派科幻的
+                # 「工業金屬」，機制不變、只是說法換了一套更貼合溫馨奇幻
+                # 農場世界觀的解釋。
+                ("PLANT_IRON_FLOWER", "晨露高麗菜", "$150 | 15s熟 | 產1礦石結晶", "iron_flower"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -961,7 +977,17 @@ class NightwatchFarmApp:
                 # 處理分支（見上方 _handle_mouse_up 已同步移除）。熔爐的
                 # 配方也同步從「metal_ore + charcoal」改成單純
                 # 「metal_ore x2」，不再依賴已刪除的炭窯產出的 charcoal。
-                ("PLACE_FURNACE", "熔爐", "$200+18科技 | 煉礦石→鋼錠", "furnace"),
+                # 【系統修復與文本重構】「熔爐」改名為「磚造烤窯」——
+                # action_id/asset_key/BuildingType.FURNACE 這個 enum
+                # 成員都不動，只換玩家看到的名稱/說明文字。使用者建議的
+                # 說明文字是「用溫暖的柴火烘焙特級農產品，提升作物附加
+                # 價值」，但這棟建築實際的配方是 metal_ore x2 ->
+                # metal_ingot（煉礦石成鐵錠，供應風車磨坊/灑水器等機台
+                # 的建造成本），並不是消耗作物、也不是幫作物加值——如果
+                # 照字面套用會變成文字騙人、跟實際點下去的效果對不上。
+                # 這裡改用一句貼合實際配方、但用詞從「熔爐煉鋼」換成更
+                # 溫馨的「柴火烤窯煉礦」講法，維持機制與文本一致。
+                ("PLACE_FURNACE", "磚造烤窯", "$200+18工藝 | 柴火烘烤礦石→精鐵錠", "furnace"),
                 # Phase 4：自動化農業科技，一樣沿用同一個 DECO 分頁、同一
                 # 個「四周莊園景觀區」放置規則，理由跟 Phase 2 加熔爐時
                 # 一樣——沒有另外開新分頁。花費是 metal_ingot（背包
@@ -973,8 +999,12 @@ class NightwatchFarmApp:
                 # 「需要玩家開啟，開啟後每隔一段時間對周圍作物澆水一次」
                 # ——跟 game_config.py BUILDING_DATA[SPRINKLER] 的
                 # water_interval=8.0 秒對應。
-                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 開啟後每8秒自動澆水3x3", "sprinkler"),
-                ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100科技 | 自動採收3x3", "auto_harvester"),
+                # 【系統修復與文本重構】說明文字改成使用者要求的「木製
+                # 水車齒輪自動運轉、提供潔淨溪水」的意象，取代原本偏機械
+                # 感的「自動澆水」講法；名稱「自動灑水器」維持不變（使用
+                # 者這次只要求改描述，沒有要求改名）。
+                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 水車齒輪自動運轉，每8秒為周圍3x3灌溉溪水", "sprinkler"),
+                ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100工藝 | 自動採收3x3", "auto_harvester"),
                 # Phase 4.5：打通上游生產線的基礎設施，一樣是「純資本」
                 # ——只花金幣，不消耗任何背包物品，所以說明文字維持跟
                 # 一般景觀裝飾一致的「$金額」格式，不用像灑水器/採收機
@@ -984,7 +1014,17 @@ class NightwatchFarmApp:
                 # 樣的 metal_ore 產出角色。伐木場同一階段改成 2x2 佔地
                 # （BUILDING_DATA[LUMBERYARD]["size"]），卡片說明文字/
                 # 售價/產出不變，只有實際佔地格數變大。
-                ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木頭", "lumberyard"),
+                # 【系統修復與文本重構】「伐木場」改名為「風車磨坊」，
+                # action_id/asset_key/BuildingType.LUMBERYARD 不動。
+                # 使用者建議的說明是「利用風力磨製麵粉，產出農莊所需的
+                # 基礎工藝點數」，但這棟建築實際的 output_key 是
+                # "wood"（每 10 秒產 1 木頭），不是工藝點數——工藝點數
+                # 目前在遊戲裡完全沒有任何被動產出來源（只透過訂單交付
+                # 拿到），如果照字面改成「產出工藝點數」會變成文字騙人。
+                # 這裡維持「風車磨坊」這個溫馨改名，但說明文字照實際
+                # output_key 寫成「風力研磨，產出農莊建設所需的木料」，
+                # 機制跟文本才對得上。
+                ("PLACE_LUMBERYARD", "風車磨坊", "$50 | 風力研磨作物與林木，每10s產1木料", "lumberyard"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1887,9 +1927,9 @@ class NightwatchFarmApp:
                         self.current_mission_idx += 1
                         self.mission_progress = 0
                         if self.current_mission_idx < len(self.missions):
-                            self.log_messages.append(f"🛰️ {self.missions[self.current_mission_idx]['text']}")
+                            self.log_messages.append(f"✨ {self.missions[self.current_mission_idx]['text']}")
                         else:
-                            self.log_messages.append("🛰️ 飛船AI：全部任務已完成！")
+                            self.log_messages.append("✨ 莊園精靈：全部任務已完成！")
 
             if ev.event_type == EventType.CROP_HARVESTED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
@@ -1915,7 +1955,12 @@ class NightwatchFarmApp:
                 # （目前是 y=84~116），這裡改成讀這兩個共用常數往下推，
                 # 兩則「清晨結算」文字才不會疊在任務橫幅上看不清楚。
                 y_base = self.MISSION_BANNER_Y + self.MISSION_BANNER_H + 10
-                self.floating_texts.append(FloatingText(f"🏛️ 地租維護費 -{ev.data['tax']} G", 460, y_base, (239, 83, 80)))
+                # 【系統修復與文本重構】原本「地租維護費」的說法比較像
+                # 硬派生存遊戲的資源壓力機制，改成「農莊擴建投資」——
+                # 扣款的金額/時機/邏輯完全不變，只是把「每天被迫繳一筆
+                # 租金」的說法，換成「每天投入一筆資金持續擴建農莊」的
+                # 溫馨框架。
+                self.floating_texts.append(FloatingText(f"🏡 農莊擴建投資 -{ev.data['tax']} G", 460, y_base, (239, 83, 80)))
             elif ev.event_type == EventType.PROSPERITY_DIVIDEND:
                 y_base = self.MISSION_BANNER_Y + self.MISSION_BANNER_H + 34
                 self.floating_texts.append(FloatingText(f"🏡 莊園分紅 +{ev.data['dividend']} G", 460, y_base, C_FLOATTEXT_GOLD))
@@ -1973,7 +2018,7 @@ class NightwatchFarmApp:
                 order_btn_rect = self._order_board_button_rect()
                 px, py = order_btn_rect.centerx - 60, order_btn_rect.bottom + 10
                 self.floating_texts.append(FloatingText(
-                    f"📦 +{ev.data['reward_gold']} G  +{ev.data['reward_tech']} 科技",
+                    f"📦 +{ev.data['reward_gold']} G  +{ev.data['reward_tech']} 工藝",
                     px, py, C_TECH_GREEN, duration=1.8
                 ))
                 self._spawn_particles(order_btn_rect.centerx, order_btn_rect.bottom, C_TECH_GREEN, count=14)
@@ -2131,13 +2176,17 @@ class NightwatchFarmApp:
     def _render_story(self):
         """打字機開場劇情畫面。
 
-        【系統升級：動態劇情背景圖切換】背景圖不再固定用同一張
-        self.title_bg，改成依 self.story_lines[current_story_index]
-        ["bg_key"] 動態決定要畫哪一張——bg_key 是 "title_bg"/
-        "bg_crash"/"bg_iron_flower" 三者之一，實際 Surface 透過
-        self.loader.get(bg_key) 向 AssetLoader 拿（三張圖都在
+        【系統修復與文本重構】背景圖依 self.story_lines[current_story_
+        index]["bg_key"] 動態決定要畫哪一張——bg_key 是 "title_bg"/
+        "bg_abandoned"/"bg_premium_crop" 三者之一（世界觀重構後的鍵
+        名，取代原本的 "bg_crash"/"bg_iron_flower"），實際 Surface
+        透過 self.loader.get(bg_key) 向 AssetLoader 拿（三張圖都在
         AssetLoader.load_all() 裡統一載入、強制縮放成
-        (SCREEN_WIDTH, SCREEN_HEIGHT)，見 asset_loader.py）。
+        (SCREEN_WIDTH, SCREEN_HEIGHT)，見 asset_loader.py）。這裡刻意
+        用既有的 loader.get()，不是使用者需求文字裡寫的
+        self.loader.assets[bg_key]——AssetLoader 從頭到尾沒有 assets
+        這個字典，直接這樣寫會是 AttributeError，get() 是唯一正確的
+        存取方式，效果完全等價。
         current_story_index 若已經跑到 len(story_lines)（理論上不會，
         因為播完最後一句 _advance_story() 就會直接切到 'PLAYING'，
         這裡是防呆）就沒有對應的 bg_key，退回跟其餘背景圖同一套後備
@@ -2175,11 +2224,11 @@ class NightwatchFarmApp:
             draw_wood_panel(self.screen, box_rect, self.loader, "ui_wood_button",
                              (58, 44, 30), border_radius=14, depth=4)
 
-            # 這次劇情台詞是飛船 AI/系統廣播口吻（迫降開局），不是特定
-            # 角色的對話，發話者標籤改成「⚠ 飛船AI廣播」，跟後面 PLAYING
-            # 狀態的任務橫幅（同樣以「飛船AI：」開頭）語氣一致，強化這是
-            # 同一套敘事延續下去的感覺。
-            blit_text_with_shadow(self.screen, FONT_SM, "⚠ 飛船AI廣播", C_CYAN,
+            # 【系統修復與文本重構】劇情台詞從「飛船AI廣播」改成溫馨奇幻
+            # 農場口吻的全知旁白，發話者標籤同步改成「🌙 農莊物語」，跟
+            # 後面 PLAYING 狀態任務橫幅的「莊園精靈：」語氣呼應，都是
+            # 溫暖、帶點奇幻色彩的敘事聲音，不再是冰冷的系統廣播。
+            blit_text_with_shadow(self.screen, FONT_SM, "🌙 農莊物語", C_CYAN,
                                    topleft=(box_rect.x + 24, box_rect.y + 16))
             draw_text_with_outline(self.screen, visible_text, FONT_MD, C_TEXT_ON_DARK, (0, 0, 0),
                                     center_pos=(box_rect.centerx, box_rect.centery + 10), outline_width=1)
@@ -2259,14 +2308,10 @@ class NightwatchFarmApp:
     def _render_main_menu(self):
         """開始畫面。
 
-        【修復：主選單背景圖與標題文字更新】背景圖 key 這次從
-        "bg_crash"（墜毀太空船場景圖，語意上是「已經迫降之後」的劇情
-        畫面用圖，不該出現在玩家連新遊戲都還沒點的最初主選單）改回
-        "title_bg"——title_bg 才是專屬給主選單用的標題背景圖。
-        bg_crash 本身沒有被刪除，_render_story() 的分鏡表裡（見
-        __init__ 的 self.story_lines）第 2/4/5/7 句仍然照舊使用它，
-        這裡單純是主選單改用另一個 key，兩張圖各自的用途沒有互相
-        影響。
+        主選單背景圖固定使用 "title_bg" 這個 key——title_bg 才是專屬給
+        主選單用的標題背景圖，跟 _render_story() 分鏡表裡動態切換的
+        "bg_abandoned"/"bg_premium_crop"（見 __init__ 的
+        self.story_lines）是各自獨立的用途，不會互相影響。
 
         loader.get("title_bg") 理論上不會是 None：AssetLoader.
         load_all() 一律會呼叫 self._load_image("title_bg.png", ...)
@@ -2312,19 +2357,19 @@ class NightwatchFarmApp:
         title_band.fill((0, 0, 0, 100))
         self.screen.blit(title_band, (0, title_band_y))
 
-        # 【修復：主選單標題與副標題文字更新】文案改成科幻求生風格，
-        # 呼應 title_bg 的迫降場景跟 STORY 開場劇情的敘事口吻（主引擎
-        # 受損、迫降未知座標），不再是原本偏休閒農場模擬的「經典精緻
-        # 像素塔防農場」說法。
+        # 【系統修復與文本重構】主選單文案這次跟著遊戲整體從「硬派外星
+        # 求生」轉型成「溫馨奇幻農場」再改一次：拿掉上一版「主引擎受損
+        # ／迫降未知座標」那套科幻求生說法，改成呼應新版 STORY 開場
+        # 劇情（繼承一座荒廢已久的祖傳農莊）的溫馨副標題。
         #
         # 主標題/副標題改用 draw_text_with_outline()：8 方向黑色描邊 +
         # 正中央黃色/米白色主體文字，比原本 blit_text_with_shadow() 的
         # 4 方向 1px 描邊更強，搭配上面既有的局部遮罩，雙重解決背景圖
         # 亮度不可預期造成的吃色問題——這套「描邊 + 局部遮罩」的組合是
         # 既有機制，換了背景圖跟文案之後同樣適用，不需要另外加強。
-        draw_text_with_outline(self.screen, "夜巡計畫：異星拓荒 (Project Nightwatch)", FONT_TITLE, C_GOLD, (0, 0, 0),
+        draw_text_with_outline(self.screen, "夜巡農場：奇幻拓荒記 (Nightwatch Farm)", FONT_TITLE, C_GOLD, (0, 0, 0),
                                 center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 180), outline_width=2)
-        draw_text_with_outline(self.screen, "「伊甸號」迫降於未知座標。通訊中斷，引擎損毀...", FONT_SM, C_TEXT_ON_DARK, (0, 0, 0),
+        draw_text_with_outline(self.screen, "一座被世人遺忘的祖傳農莊，正等待你重新拾起鋤頭與柵欄……", FONT_SM, C_TEXT_ON_DARK, (0, 0, 0),
                                 center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140), outline_width=2)
 
         def _draw_menu_button(rect, label, base_color, disabled=False):
@@ -2552,7 +2597,7 @@ class NightwatchFarmApp:
             # 一眼就能把「這裡的科技點」跟「頭部狀態列的科技點」連起來）。
             reward_surf1 = FONT_SM.render(f"💰 {order.reward_gold} 金幣", True, (150, 108, 20))
             self.screen.blit(reward_surf1, (card_rect.x + 16, card_rect.y + 48))
-            reward_surf2 = FONT_SM.render(f"⚡ {order.reward_tech} 科技點", True, (0, 140, 80))
+            reward_surf2 = FONT_SM.render(f"⚡ {order.reward_tech} 工藝點", True, (0, 140, 80))
             self.screen.blit(reward_surf2, (card_rect.x + 16 + reward_surf1.get_width() + 16, card_rect.y + 48))
 
             # 交付按鈕：物資不足時仍然可以點（點了會跳紅字錯誤提示，見
@@ -2670,7 +2715,7 @@ class NightwatchFarmApp:
         tech_rect = pygame.Rect(gold_rect.right + 8, 12, 130, 44)
         draw_beveled_rect(self.screen, tech_rect, C_WOOD_MID, border_radius=10)
         self.screen.blit(
-            FONT_SM.render(f"⚡ 科技點數: {self.game.tech_points}", True, C_TECH_GREEN),
+            FONT_SM.render(f"⚡ 工藝點數: {self.game.tech_points}", True, C_TECH_GREEN),
             (tech_rect.x + 10, tech_rect.centery - 8)
         )
 
@@ -3561,7 +3606,7 @@ class NightwatchFarmApp:
         btn_start = pygame.Rect(mx + (modal_w - 280) // 2, my + 500, 280, 54)
         pygame.draw.rect(self.screen, C_GREEN, btn_start, border_radius=12)
         pygame.draw.rect(self.screen, (56, 142, 60), btn_start, width=2, border_radius=12)
-        btn_txt = FONT_LG.render("🚀 我瞭解了，開始農莊冒險！", True, C_WHITE)
+        btn_txt = FONT_LG.render("🌾 我瞭解了，開始農莊冒險！", True, C_WHITE)
         self.screen.blit(btn_txt, (btn_start.centerx - btn_txt.get_width() // 2, btn_start.centery - btn_txt.get_height() // 2))
 
 
