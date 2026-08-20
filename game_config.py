@@ -849,16 +849,21 @@ BUILDING_DATA = {
         # 【使用者確認：農業風車改成物品成本】原本是純金幣/工藝點數
         # (500G + 60工藝)，完全沒有背包物品成本。使用者確認後的最終
         # 規格：金幣改成 0（物品成本取代金幣）、工藝點數降到 30、新增
-        # build_cost_items 需要 metal_ore x3 + wood x10——原始需求寫的
-        # 「ore_crystal」這個 key 在程式碼裡不存在，這裡改用真實存在的
-        # "metal_ore"（玩家看到的顯示名稱是「礦石結晶」，透過收成富鐵花
-        # (CropType.IRON_FLOWER) 取得，_item_display_name() 已經有這個
-        # 對照）。build_cost_items 是既有的通用欄位（SPRINKLER 已經在
-        # 用），place_building() 本來就會讀取並檢查/扣除，不用改動任何
-        # 建造邏輯，只需要修改這裡的設定值。
+        # build_cost_items 需要 metal_ingot x3 + wood x10。
+        # 【後續修正：改用「燒過的礦物」】使用者後來明確指出風車要的
+        # 是「燒過的礦物」，不是生礦——原本寫的 "metal_ore" 對應的顯示
+        # 名稱是「礦石結晶」（未經加工的原礦，透過收成富鐵花直接取得），
+        # 這是未燒過的生礦，不符合需求。真正「燒過的礦物」是
+        # "metal_ingot"（顯示名稱「精鐵錠」），要用熔爐 (FURNACE) 把
+        # metal_ore 煉燒過才能得到，兩者是生產鏈上下游不同的兩個 key，
+        # 不能混用。這裡把 build_cost_items 的 key 從 "metal_ore" 改成
+        # "metal_ingot"，數量維持 3（使用者只糾正物品種類，沒有要求
+        # 改動數量）。build_cost_items 是既有的通用欄位（SPRINKLER 已經
+        # 在用），place_building() 本來就會讀取並檢查/扣除，不用改動
+        # 任何建造邏輯，只需要修改這裡的設定值。
         "build_cost_gold": 0,
         "build_cost_tech": 30,
-        "build_cost_items": {"metal_ore": 3, "wood": 10},
+        "build_cost_items": {"metal_ingot": 3, "wood": 10},
         # passive_effect 用全新的 "FARM_WINDMILL" 值（不是複用
         # AUTO_HARVESTER/SPRINKLER/STATIC），讓 _update_buildings() 走
         # 專屬分支：跳過一般開關-配方-倒數迴圈，改成每隔 scan_interval
