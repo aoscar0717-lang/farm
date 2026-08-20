@@ -697,7 +697,21 @@ BUILDING_DATA = {
                                      # 加成幅度（grow_time * 0.5）一致。
         "walkable": False,
         "asset_key": "sprinkler",
-        "size": (2, 2),
+        # 【系統邏輯更新：灑水器改為 1x1 建築】使用者要求把灑水器從
+        # 2x2 縮回原本 Phase 4 設計的 1x1 佔地。place_building() 的
+        # footprint 展開/合法性檢查、_render_building_tile() 的貼圖
+        # 定位、_grid_preview_is_invalid() 的建造預覽框，全部都是讀
+        # 這個 "size" 欄位動態算 span，改這裡一個值即可，不需要另外
+        # 改任何一處寫死 2x2 的邏輯（這幾處早在先前幾次「XX 改成 2x2」
+        # 的任務裡就已經被改成通用讀 size 的寫法）。
+        # 【建造地形限制的連動影響】上一個任務新增的 "required_zone":
+        # ZoneType.FARM_ZONE 不變——玩家现在只需要在中央農田找一格
+        # 空地（不再需要湊出完整 2x2 的空地）就能蓋，比 2x2 時代更容易
+        # 放置。
+        # 【貼圖縮放的連動影響】asset_loader.py 的 BUILDING_SPRITE_
+        # GRID_SPAN["sprinkler"] 這份對照表原本是跟這裡的 "size" 手動
+        # 保持一致的，這次一併同步改成 (1, 1)，見該檔案的說明。
+        "size": (1, 1),
     },
     # 【系統邏輯更新：隱藏「收割機」建築】使用者確認目前不需要自動採收
     # 機，這裡整組 BUILDING_DATA 設定註解掉（不是刪除 BuildingType.

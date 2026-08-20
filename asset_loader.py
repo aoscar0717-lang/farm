@@ -828,9 +828,11 @@ class AssetLoader:
         BUILDING_SPRITE_GRID_SPAN = {
             "furnace": (2, 2),
             "lumberyard": (2, 2),
-            # 【系統更新：自動灑水器 2x2 建築邏輯】跟 game_config.py
-            # BUILDING_DATA[SPRINKLER]["size"] 手動保持一致。
-            "sprinkler": (2, 2),
+            # 【系統邏輯更新：灑水器改為 1x1 建築】跟 game_config.py
+            # BUILDING_DATA[SPRINKLER]["size"] 手動保持一致，改回 1x1，
+            # sprinkler_sz 會變回跟 CELL_SIZE 一樣大，貼圖/動畫幀縮放
+            # 尺寸自動跟著縮小，不用另外改下面 3d-2. 那段載入邏輯。
+            "sprinkler": (1, 1),
             # 【系統更新：藍頂木屋 2x2 建築】跟 game_config.py
             # BUILDING_DATA[BLUE_WOOD_HOUSE]["size"] 手動保持一致。
             "blue_wood_house": (2, 2),
