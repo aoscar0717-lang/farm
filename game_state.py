@@ -1299,19 +1299,21 @@ class GameState:
             self.guard_dog.y = float(DOG_CONFIG["home_pos"][1])
             self.guard_dog.target_pos = None
 
-        # 【系統修復與文本重構】每日固定扣款機制本身（防止玩家空田掛機）
-        # 完全不變，只是把「繳納地租」這種被動、硬派生存感的說法，改成
-        # 「完成每日農莊擴建目標」的正向框架——同一筆扣款，換一種說法
-        # 詮釋成玩家主動投入資金持續擴建農莊，跟遊戲整體從「硬派外星
-        # 求生」轉型成「溫馨奇幻農場」的調性一致。
-        tax = self.config["DAILY_TAX_BASE"] + (self.day_count * self.config["DAILY_TAX_PER_DAY"])
-        self.gold -= tax
-
-        self._emit_event(
-            EventType.DAILY_TAX_PAID,
-            f"🏡 完成第 {self.day_count} 天農莊擴建目標，投入 -{tax} G！",
-            {"tax": tax, "gold": self.gold}
-        )
+        # 【遊戲平衡與 UI/UX 體驗大優化】取消每日扣錢系統：玩家原本每天
+        # 破曉都會被動扣除「地租/農莊擴建投資」金幣（DAILY_TAX_BASE +
+        # day_count * DAILY_TAX_PER_DAY，逐日遞增），即使前一晚完全沒
+        # 出手也照樣過夜損失金幣，不符合「不無故損失金幣」的體驗需求。
+        # 這裡完全停用扣款與對應事件通知，只保留 tax 變數的計算式（設
+        # 成 0）而不是整段刪除，方便之後如果想改成「有條件扣款」（例如
+        # 農莊等級越高才開始收租）時可以直接復用 DAILY_TAX_BASE /
+        # DAILY_TAX_PER_DAY 這兩個既有設定值，不用重新設計數值。
+        tax = 0
+        # self.gold -= tax  # 停用：不再每日扣款
+        # self._emit_event(
+        #     EventType.DAILY_TAX_PAID,
+        #     f"🏡 完成第 {self.day_count} 天農莊擴建目標，投入 -{tax} G！",
+        #     {"tax": tax, "gold": self.gold}
+        # )
 
         # 莊園分紅：依「目前擺著的」景觀總繁榮度發錢，讓景觀從一次性的
         # 升級門檻變成持續生錢的資產。prosperity_score 是
@@ -1811,6 +1813,10 @@ class GameState:
                 trap = tile.defense
                 dot_damage = trap.tick_trap_damage(dt)
                 if dot_damage > 0:
+                    # 【Bug 修復】累加「這段節流間隔內」的實際總傷害，而不是
+                    # 只看單幀的 dot_damage（單幀傷害通常 < 1，顯示時無條件
+                    # 捨去幾乎都會變成 0，跟怪物實際掉的血對不上）。
+                    trap.pending_dot_damage += dot_damage
                     trap.dot_tick_timer -= dt
                     should_pulse = trap.dot_tick_timer <= 0
                     if should_pulse:
@@ -1822,13 +1828,16 @@ class GameState:
                             f"💀 {enemy.config['name']} 被地刺陷阱的持續傷害消滅！",
                             {"enemy_id": enemy.id}
                         )
+                        trap.pending_dot_damage = 0.0
                         dead_or_escaped.append(enemy)
                         continue
                     elif should_pulse:
+                        shown_damage = trap.pending_dot_damage
+                        trap.pending_dot_damage = 0.0
                         self._emit_event(
                             EventType.TRAP_TRIGGERED,
                             f"💥 地刺陷阱在 ({grid_x}, {grid_y}) 持續刺傷 {enemy.config['name']}！",
-                            {"x": grid_x, "y": grid_y, "enemy_id": enemy.id, "damage": dot_damage}
+                            {"x": grid_x, "y": grid_y, "enemy_id": enemy.id, "damage": shown_damage}
                         )
 
             # 刺藤木柵尖刺反傷 (Thorn Damage to nearby enemies)

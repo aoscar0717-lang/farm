@@ -155,13 +155,14 @@ def test_shovel_demolish_and_refund():
     assert success and refund == 0
     assert game.get_tile(6, 4).crop is None
     
-    # 測試拆除木柵（原價 15，退還 80% = 12）
+    # 測試拆除木柵（【遊戲平衡與 UI/UX 體驗大優化】原價 15 調降至 5，
+    # 退還 80% = 4）
     gold_before = game.gold
     game.place_defense(6, 4, DefenseType.WOODEN_FENCE)
-    assert game.gold == gold_before - 15
+    assert game.gold == gold_before - 5
     success, msg, refund = game.demolish_tile(6, 4)
-    assert success and refund == 12
-    assert game.gold == gold_before - 15 + 12
+    assert success and refund == 4
+    assert game.gold == gold_before - 5 + 4
     assert game.get_tile(6, 4).defense is None
     print("  ✓ 鐵鏟剷除作物與拆除設施退款機制全數通過！")
 

@@ -648,6 +648,14 @@ class ActionCard:
         self.is_hovered = False
         self.is_locked = False
         self.lock_reason = ""
+        # 【遊戲平衡與 UI/UX 體驗大優化】商店物品描述過長被遮擋修復：
+        # draw() 畫售價/描述文字時，如果連換兩行都塞不下（例如風車卡片
+        # 「30工藝+3礦石結晶+10木料 | 需種在農田上，手持種子點擊可3x3範圍
+        # 播種，並每3秒自動收成」這種長文案），就把這個旗標設成 True，
+        # 主迴圈渲染商店面板時檢查這個旗標 + 滑鼠是否懸停在這張卡片上，
+        # 決定要不要額外畫一個跟著滑鼠位置、貼齊視窗邊界的完整內容
+        # tooltip（見 NightwatchFarmApp._render_shop_card_tooltip）。
+        self.desc_truncated = False
 
     def draw(self, surface, is_selected: bool, loader: AssetLoader):
         tint = SHOP_TAB_TINTS.get(self.tab_id, C_ORANGE)
@@ -717,15 +725,34 @@ class ActionCard:
         # 鎖定的卡片不畫售價：下面的鎖定遮罩會在同一個位置改印解鎖條件
         # 文字（例如「🔒 需莊園等級 Lv.2」），兩段文字疊在同一個座標會
         # 透過半透明遮罩互相穿插變成看不懂的亂碼，售價本來就該讓位。
+        self.desc_truncated = False
         if self.cost_text and not self.is_locked:
             cost_col = (230, 81, 0)
             if FONT_SM.render(self.cost_text, True, cost_col).get_width() <= avail_w:
                 surface.blit(FONT_SM.render(self.cost_text, True, cost_col), (text_x, lbl_y + 22))
             else:
                 # 側欄變窄後（例如景觀分頁的三段式文案「$300 | +220繁榮 |
-                # +66G/天」）FONT_SM 一行塞不下，依 " | " 分隔符貪婪地
-                # 換成最多兩行、改用較小的 FONT_XS，而不是任由文字被卡片
-                # 邊界硬生生切斷。
+                # +66G/天」）FONT_SM 一行塞不下，依 " | " 分隔符貪婪地換行，
+                # 改用較小的 FONT_XS。跟舊版不同的是：(1) 任何單一片段本身
+                # 就超過 avail_w 時（例如中文長句沒有空白可斷），改成逐字元
+                # 貪婪換行，不會整段原封不動溢出卡片邊界；(2) 卡片固定只有
+                # 64px 高，最多隻能安全畫 2 行，超過 2 行不再直接砍字丟棄，
+                # 而是設定 desc_truncated=True，交給滑鼠懸停 tooltip
+                # （_render_shop_card_tooltip）顯示完整內容，確保文字「看
+                # 得到」而不是「被默默遮住」。
+                def _wrap_by_char(text, font, max_w):
+                    out, cur_line = [], ""
+                    for ch in text:
+                        trial = cur_line + ch
+                        if cur_line and font.render(trial, True, cost_col).get_width() > max_w:
+                            out.append(cur_line)
+                            cur_line = ch
+                        else:
+                            cur_line = trial
+                    if cur_line:
+                        out.append(cur_line)
+                    return out
+
                 parts = self.cost_text.split(" | ")
                 lines, cur = [], ""
                 for part in parts:
@@ -733,14 +760,25 @@ class ActionCard:
                     if not cur or FONT_XS.render(trial, True, cost_col).get_width() <= avail_w:
                         cur = trial
                     else:
-                        lines.append(cur)
-                        cur = part
+                        if cur:
+                            lines.append(cur)
+                        # 這個 part 本身可能還是太長（貪婪合併失敗），先
+                        # 檢查再決定要不要逐字元拆行。
+                        if FONT_XS.render(part, True, cost_col).get_width() <= avail_w:
+                            cur = part
+                        else:
+                            sub_lines = _wrap_by_char(part, FONT_XS, avail_w)
+                            lines.extend(sub_lines[:-1])
+                            cur = sub_lines[-1] if sub_lines else ""
                 if cur:
                     lines.append(cur)
+
                 cy = lbl_y + 21
                 for ln in lines[:2]:
                     surface.blit(FONT_XS.render(ln, True, cost_col), (text_x, cy))
                     cy += 15
+                if len(lines) > 2:
+                    self.desc_truncated = True
 
         if self.is_locked:
             # 半透明深色遮罩蓋住整張卡片（圖示/文字都被壓暗），讓玩家一眼
@@ -917,6 +955,15 @@ class NightwatchFarmApp:
         # 順便算好點擊判定矩形」的既有模式，不是新發明的寫法。
         self._order_deliver_rects = []
         self._order_board_close_rect = None
+        # 【遊戲平衡與 UI/UX 體驗大優化】每日訂單公告欄按鈕視覺提示：
+        # 每天早上 ORDERS_GENERATED 事件觸發時設成 True（見事件處理迴圈），
+        # 代表「今天有新訂單玩家還沒點開看過」；玩家用 O 鍵或點擊📋按鈕
+        # 打開訂單佈告欄時清成 False。按鈕渲染時 (_render_header) 依這個
+        # 旗標疊加閃爍發光外框 + 紅點徽章，跟原本「有未交付訂單就常駐畫
+        # 綠框」的 has_orders 邏輯是兩件事：has_orders 是「還有訂單沒交」，
+        # order_board_unread 是「有新東西玩家還沒看過」，兩者分開判斷、
+        # 分開畫，才能同時表達「有訂單待交」跟「有新內容沒讀」兩種語意。
+        self.order_board_unread = False
         
         self.floating_texts = []
         self.particles = []
@@ -1133,7 +1180,7 @@ class NightwatchFarmApp:
                 ("PLACE_BLUE_WOOD_HOUSE", "藍頂莊園木屋", "$300 | +220繁榮 | +66G/天", "blue_wood_house"),
             ],
             "DEFENSE": [
-                ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
+                ("PLACE_FENCE", "原木木柵", "$5 | 阻擋+反傷", "wooden_fence"),
                 ("PLACE_TRAP", "地刺陷阱", "$20 | 120傷害", "bear_trap"),
                 ("PLACE_SCARECROW", "農田稻草人", "$35 | 驚嚇小偷", "scarecrow"),
                 ("PLACE_BEEHIVE", "蜜蜂守衛巢", "$85 | 自動射擊", "beehive"),
@@ -1243,6 +1290,8 @@ class NightwatchFarmApp:
                         # 避免兩個彈窗疊在一起搶點擊；遊戲結束畫面同理。
                         if not self.show_pause_menu and not self.show_intro and not self.game.game_over:
                             self.show_order_board = not self.show_order_board
+                            if self.show_order_board:
+                                self.order_board_unread = False
                             self.sound.play("ui_click")
                     elif event.key == pygame.K_p and self.app_state == 'PLAYING':
                         if self.time_scale > 0:
@@ -1723,6 +1772,7 @@ class NightwatchFarmApp:
         # _order_board_button_rect() 的座標計算與版面配置說明）。
         if self._order_board_button_rect().collidepoint(mx, my):
             self.show_order_board = True
+            self.order_board_unread = False
             self.sound.play("ui_click")
             return
 
@@ -2155,7 +2205,12 @@ class NightwatchFarmApp:
             elif ev.event_type == EventType.TRAP_TRIGGERED:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE + CELL_SIZE // 2
-                self.floating_texts.append(FloatingText(f"💥 {int(ev.data['damage'])}", px - 15, py - 15, C_RED))
+                # 【Bug 修復】ev.data["damage"] 現在是 game_state.py 累加過的
+                # 「這段節流間隔內的總傷害」，改用 round() 四捨五入並且至少
+                # 顯示 1（累加值理論上 > 0 才會走到這個分支，但四捨五入到
+                # 0.4 這種邊界值時 max(1, ...) 保底，避免又出現顯示 0 的情況）。
+                shown = max(1, round(ev.data["damage"]))
+                self.floating_texts.append(FloatingText(f"💥 -{shown}", px - 15, py - 15, C_RED))
                 self._spawn_particles(px, py, (220, 50, 50), count=16)
             elif ev.event_type == EventType.DOG_ATTACK:
                 if self.game.guard_dog:
@@ -2200,6 +2255,7 @@ class NightwatchFarmApp:
                 # 條浮動文字提醒「有新訂單」，玩家想看細節再自己按 O /
                 # 點📋按鈕開訂單佈告欄，這裡不用強制彈窗打斷操作。
                 order_count = len(ev.data.get("order_ids", []))
+                self.order_board_unread = True
                 self.floating_texts.append(
                     FloatingText(f"📋 今日新訂單 x{order_count}！按 O 查看", 460, 143, C_TECH_GREEN)
                 )
@@ -2967,6 +3023,24 @@ class NightwatchFarmApp:
         has_orders = len(self.game.active_orders) > 0
         if has_orders and not order_btn_active:
             pygame.draw.rect(self.screen, C_TECH_GREEN, order_btn_rect, width=2, border_radius=8)
+
+        # 【遊戲平衡與 UI/UX 體驗大優化】order_board_unread 為 True（今天
+        # 有新訂單、玩家還沒點開看過）時，額外疊加「閃爍發光外框」：用
+        # self.anim_time 的 sin 波形算出一個 0~1 的呼吸亮度，讓外框寬度/
+        # 亮度隨時間脈動，比固定的靜態綠框更容易吸引玩家注意力。面板已
+        # 開啟時 (order_btn_active) 不畫，因為玩家這一刻已經在看訂單了。
+        if self.order_board_unread and not order_btn_active:
+            pulse = (math.sin(self.anim_time * 6.0) + 1.0) / 2.0  # 0.0 ~ 1.0 呼吸亮度
+            glow_width = 2 + int(pulse * 2)
+            pygame.draw.rect(self.screen, C_RED, order_btn_rect.inflate(4, 4), width=glow_width, border_radius=10)
+
+            # 紅色通知小紅點：畫在按鈕右上角，一旦玩家點擊打開公告欄
+            # （_handle_mouse_down / K_o 快捷鍵都會把 order_board_unread
+            # 清成 False），下一幀就不會再畫出來。
+            dot_center = (order_btn_rect.right - 4, order_btn_rect.top + 2)
+            pygame.draw.circle(self.screen, C_RED, dot_center, 6)
+            pygame.draw.circle(self.screen, (255, 255, 255), dot_center, 6, width=1)
+
         icon_surf = FONT_MD.render("📋", True, C_TEXT_ON_DARK)
         self.screen.blit(icon_surf, icon_surf.get_rect(center=order_btn_rect.center))
 
@@ -3749,11 +3823,22 @@ class NightwatchFarmApp:
         items = self._layout_shop_list()
         prev_clip = self.screen.get_clip()
         self.screen.set_clip(area)
+        hovered_truncated_card = None
         for card in items:
             if card.rect.bottom < area.y or card.rect.top > area.bottom:
                 continue
             card.draw(self.screen, is_selected=(self.selected_action == card.action_id), loader=self.loader)
+            if card.is_hovered and card.desc_truncated and card.rect.collidepoint(self.mouse_pos):
+                hovered_truncated_card = card
         self.screen.set_clip(prev_clip)
+
+        # 【遊戲平衡與 UI/UX 體驗大優化】商店卡片本身固定只有 64px 高，
+        # 描述文字塞不下兩行時（desc_truncated=True）額外畫一個跟著滑鼠
+        # 位置、貼齊視窗邊界自動調整位置的完整內容 tooltip，確保長描述
+        # 不會被卡片邊界擋住看不到。要放在 set_clip 還原之後才畫，
+        # 否則 tooltip 溢出商店面板的部分會被商店清單的裁切區域切掉。
+        if hovered_truncated_card:
+            self._render_shop_card_tooltip(hovered_truncated_card.cost_text)
 
         # 內容超出可視範圍才畫捲軸滑塊，提示「還能往下滑」。捲軸軌道/
         # 滑塊原本是淺灰色，是設計給白色面板背景用的對比色，現在面板底色
@@ -3768,6 +3853,57 @@ class NightwatchFarmApp:
             thumb_y = area.y + int((area.height - thumb_h) * (scroll / max_scroll))
             thumb = pygame.Rect(track.x, thumb_y, 4, thumb_h)
             pygame.draw.rect(self.screen, C_TEXT_ON_DARK, thumb, border_radius=2)
+
+    def _render_shop_card_tooltip(self, full_text: str):
+        """商店卡片描述過長時的完整內容浮動提示框：文字依卡片可用寬度的
+        再寬一點 (280px) 自動換行(逐字元，中文沒有空白可斷)，框本身的
+        位置跟著滑鼠，並依視窗邊界自動夾住 (clamp)，保證不管滑鼠停在
+        畫面哪個角落，整個提示框都完整落在可視範圍內、不會被螢幕邊緣
+        切掉一部分。"""
+        max_w = 280
+        pad = 10
+        cost_col = (255, 236, 210)
+
+        def _wrap(text, font, w):
+            out, cur = [], ""
+            for ch in text:
+                trial = cur + ch
+                if cur and font.render(trial, True, cost_col).get_width() > w:
+                    out.append(cur)
+                    cur = ch
+                else:
+                    cur = trial
+            if cur:
+                out.append(cur)
+            return out
+
+        lines = []
+        for part in full_text.split(" | "):
+            lines.extend(_wrap(part, FONT_XS, max_w))
+
+        line_h = 16
+        box_w = max_w + pad * 2
+        box_h = len(lines) * line_h + pad * 2
+
+        mx, my = self.mouse_pos
+        box_x = mx + 16
+        box_y = my + 16
+        # 貼齊視窗邊界自動調整位置：右側/下側放不下就翻到滑鼠左側/上側，
+        # 最後再用 clamp 保底，避免翻過去之後另一側又超出畫面。
+        if box_x + box_w > SCREEN_WIDTH:
+            box_x = mx - box_w - 16
+        if box_y + box_h > SCREEN_HEIGHT:
+            box_y = my - box_h - 16
+        box_x = max(4, min(box_x, SCREEN_WIDTH - box_w - 4))
+        box_y = max(4, min(box_y, SCREEN_HEIGHT - box_h - 4))
+
+        box_rect = pygame.Rect(box_x, box_y, box_w, box_h)
+        draw_beveled_rect(self.screen, box_rect, C_WOOD_DARK, border_radius=8, depth=2)
+        pygame.draw.rect(self.screen, C_GOLD, box_rect, width=1, border_radius=8)
+        cy = box_rect.y + pad
+        for ln in lines:
+            self.screen.blit(FONT_XS.render(ln, True, cost_col), (box_rect.x + pad, cy))
+            cy += line_h
 
     # ==========================================
     # 開場新手速成圖卡彈窗
@@ -3808,7 +3944,7 @@ class NightwatchFarmApp:
                 (255, 248, 238),
                 [
                     "1. 天黑前切換至【防禦】分頁，購買【看門柴犬 ($100)】自動撲咬敵人！",
-                    "2. 在農田四周建造【刺藤木柵 ($15)】阻擋怪物，或設置【鋼鐵捕獸夾 ($20)】。",
+                    "2. 在農田四周建造【刺藤木柵 ($5)】阻擋怪物，或設置【鋼鐵捕獸夾 ($20)】。",
                     "3. 存活過夜的作物隔日採收享有【月光滋養 +50% 巨額金幣】回報！"
                 ]
             ),

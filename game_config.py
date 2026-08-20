@@ -547,7 +547,12 @@ DECORATION_DATA = {
 DEFENSE_DATA = {
     DefenseType.WOODEN_FENCE: {
         "name": "刺藤木柵",
-        "cost": 15,
+        # 【遊戲平衡與 UI/UX 體驗大優化】原價 15 金幣調降至 5 金幣，
+        # 讓新手在資金吃緊的第一天也能負擔得起基礎防線，不用先苦等
+        # 存夠 15 金才能圍牆。商店卡片文案 ("$15 | 阻擋+反傷") 跟新手
+        # 指南彈窗裡的 "刺藤木柵 ($15)" 兩處硬編碼價格文字要一併同步
+        # 改成 $5，否則畫面顯示跟實際扣款金額會對不上。
+        "cost": 5,
         "max_hp": 80.0,
         "walkable": False,
         "asset_key": "wooden_fence",
@@ -1012,6 +1017,16 @@ class DefenseStructure:
     # 脈動」，跟實際扣血量無關（扣血每幀都精確按 dt 計算）。預設 0，
     # 讓敵人一站上陷阱就立刻有第一次脈動回饋。
     dot_tick_timer: float = 0.0
+    # 【遊戲平衡與 UI/UX 體驗大優化 - Bug 修復】地刺陷阱傷害/文字提示
+    # 不符：舊版浮動文字直接顯示「這一幀」的 dot_damage（damage * dt，
+    # 例如 15 DPS * 0.016s ≈ 0.24），`int()` 無條件捨去小數之後幾乎必
+    # 定顯示成 0，玩家看到的「扣 0」跟怪物血條其實有掉血完全對不上。
+    # 修法：每一幀造成的 DoT 傷害持續累加進這個欄位，直到節流計時器
+    # (dot_tick_timer) 觸發脈動的那一刻，才把「這段期間累積的總傷害」
+    # 一次性當作浮動文字顯示的數字（並清空累加器），文字顯示的傷害
+    # 就會等於這段期間敵人實際被扣掉的血量，不再是被無條件捨去的
+    # 單幀零頭。
+    pending_dot_damage: float = 0.0
 
     def __post_init__(self):
         self.max_hp = float(self.config.get("max_hp", 80.0))
