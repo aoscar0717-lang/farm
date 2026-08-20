@@ -148,7 +148,10 @@ def draw_beveled_rect(surface, rect, base_color, border_radius=8, depth=2, press
     前面插入類似：
         wood_tex = loader.get("ui_wood_panel")  # 需要先在 asset_loader.py 建立對應的載入邏輯
         if wood_tex:
-            scaled = pygame.transform.smoothscale(wood_tex, rect.size)
+            # 用 scale()（最近鄰）不用 smoothscale()（雙線性內插），保持
+            # 像素邊緣銳利，跟專案其餘貼圖縮放（見 draw_9_slice()/
+            # asset_loader.py）用同一套規則。
+            scaled = pygame.transform.scale(wood_tex, rect.size)
             surface.blit(scaled, rect.topleft)
         else:
             pygame.draw.rect(surface, base_color, rect, border_radius=border_radius)
@@ -188,7 +191,12 @@ def draw_9_slice(surface, rect, texture, border=16):
     if rw < 2 * b or rh < 2 * b:
         # 目標矩形比貼圖的邊框還小，九宮格切法會出錯，退化成整張貼圖
         # 直接等比例縮放貼滿，勉強堪用總比噴例外好。
-        scaled = pygame.transform.smoothscale(texture, (max(1, rw), max(1, rh)))
+        # 【系統修復與 UI 優化：字體模糊問題】原本用 smoothscale()（雙
+        # 線性內插）會讓像素貼圖的邊緣糊掉，改用 scale()（最近鄰內插），
+        # 跟這個檔案其餘貼圖縮放（下面 9-slice 的 top/bottom/left/
+        # right/center 五塊）、asset_loader.py 全部貼圖載入用的都是同一
+        # 種縮放方式，維持整體風格一致的銳利邊緣。
+        scaled = pygame.transform.scale(texture, (max(1, rw), max(1, rh)))
         surface.blit(scaled, rect.topleft)
         return
 
@@ -462,16 +470,42 @@ def safe_text(text) -> str:
     )
 
 
+# 【系統修復與 UI 優化：字體模糊問題】使用者要求「像素風格就該把
+# antialias 關掉」，但這個專案全程是中文 UI，「像素字型」跟「系統向量
+# 字型」兩者關掉抗鋸齒的效果完全不同：Cubic_11.ttf 是刻意設計成整數
+# 倍率點陣輸出的真正像素字型，關掉抗鋸齒才會如預期銳利；但
+# _find_system_cjk_font_path() 找到的微軟正黑體/蘋方這類系統向量字型，
+# 或是 _find_bundled_font_path() 掃到的 NotoSansTC-GameSubset.otf 這種
+# 一般向量字型，關掉抗鋸齒只會讓筆畫變成鋸齒狀、中文字更難辨識，不是
+# 「銳利的像素感」。所以這裡不是全域無腦關閉，而是只在「目前真的載入
+# 到 Cubic_11.ttf 這個像素字型」時才關閉抗鋸齒，其餘情況維持抗鋸齒
+# （包括 SysFont 最終備援），避免為了追求像素感反而讓文字更難讀。
+_USING_PIXEL_FONT = (
+    _RESOLVED_FONT_PATH is not None
+    and os.path.basename(_RESOLVED_FONT_PATH) == PREFERRED_FONT_FILENAME
+)
+
+
 class _SafeFont:
     """包住 pygame.font.Font 的輕量代理：.render() 前自動呼叫 safe_text()
     過濾，其他方法（.size()、.get_height() 等）原封不動轉發給底層字型，
-    行為跟直接用 pygame.font.Font 完全一樣，呼叫端不需要知道有這層包裝。"""
+    行為跟直接用 pygame.font.Font 完全一樣，呼叫端不需要知道有這層包裝。
 
-    def __init__(self, font: pygame.font.Font):
+    【系統修復與 UI 優化：字體模糊問題】新增 force_no_antialias 參數：
+    True 時 .render() 不管呼叫端傳進來的 antialias 是什麼，一律強制用
+    False（銳利點陣輸出），只在確認目前載入的是真正的像素字型
+    （Cubic_11.ttf）時才會是 True——這樣不用把全檔案 40 幾處
+    `FONT_XX.render(text, True, color)` 呼叫點一個一個手動改成 False，
+    在唯一的 .render() 入口統一攔截即可，呼叫端完全不用知道底層字型是
+    像素字型還是向量字型。"""
+
+    def __init__(self, font: pygame.font.Font, force_no_antialias: bool = False):
         self._font = font
+        self._force_no_antialias = force_no_antialias
 
     def render(self, text, antialias, color, *args, **kwargs):
-        return self._font.render(safe_text(text), antialias, color, *args, **kwargs)
+        actual_antialias = False if self._force_no_antialias else antialias
+        return self._font.render(safe_text(text), actual_antialias, color, *args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._font, name)
@@ -482,7 +516,7 @@ def get_font(size: int, bold: bool = False):
         try:
             f = pygame.font.Font(_RESOLVED_FONT_PATH, size)
             f.set_bold(bold)
-            return _SafeFont(f)
+            return _SafeFont(f, force_no_antialias=_USING_PIXEL_FONT)
         except Exception:
             pass
     return _SafeFont(pygame.font.SysFont('arial', size, bold=bold))
@@ -3463,7 +3497,7 @@ class NightwatchFarmApp:
         # 前面插入類似：
         #     wood_tex = self.loader.get("ui_wood_panel_large")
         #     if wood_tex:
-        #         self.screen.blit(pygame.transform.smoothscale(wood_tex, panel.size), panel.topleft)
+        #         self.screen.blit(pygame.transform.scale(wood_tex, panel.size), panel.topleft)
         #     else:
         #         draw_beveled_rect(self.screen, panel, C_WOOD_DARK, border_radius=14, depth=3)
         # 貼圖版一樣可以保留 draw_beveled_rect() 疊加的高光/陰影刻痕，
