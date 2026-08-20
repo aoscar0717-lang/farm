@@ -590,21 +590,56 @@ BUILDING_DATA = {
     # 是：礦場 (MINE) 產 metal_ore -> 熔爐 (FURNACE) 消耗 metal_ore
     # 煉出 metal_ingot，兩者都已經是可以直接蓋、可以直接運作的建築，
     # 不再是「摸不到」的狀態。
+    # 【系統更新：自動灑水器 2x2 建築邏輯】SPRINKLER 這次從「蓋下去就
+    # 永久被動生效、沒有開關」的模型（Phase 4 原始設計，見下面
+    # "toggleable" 這個新欄位的說明）改成「跟 FURNACE/LUMBERYARD 一樣
+    # 可以開關、需要玩家手動啟動才會運作」，同時佔地從 1x1 放大成
+    # 2x2、加成方式從「每幀持續疊加生長速度」改成「每隔一段時間對周圍
+    # 作物一次性『自動澆水』」——三項改動理由分別是：
+    #   1. size=(2,2)：呼應新的 1x4 Sprite Sheet 素材（灑水器.png），
+    #      跟 FURNACE/LUMBERYARD 用同一套 2x2 footprint 規格。
+    #   2. toggleable=True：新增的旗標，讓 Building.is_passive（見
+    #      Building dataclass 的說明）在 SPRINKLER 身上回傳 False，
+    #      GameState.toggle_building() 因此不會再擋下玩家對它的點擊
+    #      開關——AUTO_HARVESTER 沒有這個旗標，維持原本「蓋下去就永久
+    #      生效、點擊無效」的行為不變。
+    #   3. 加成方式改成「週期性自動澆水」：GameState._update_buildings()
+    #      的 SPRINKLER 分支現在只在 is_active=True 時才生效，每隔
+    #      water_interval 秒對 effect_radius 範圍內每一格未成熟的作物
+    #      各執行一次「自動版 water_crop()」（growth_timer 直接加上
+    #      grow_time * water_boost_ratio，不扣金幣），並 emit 跟玩家
+    #      手動點擊澆水壺完全相同的 EventType.CROP_WATERED 事件（沿用
+    #      既有的 💧 浮動文字/音效 UI 回饋，不用另外寫一套）。這取代了
+    #      舊版「每幀持續疊加 dt」的連續加成模型，也是舊版
+    #      _get_sprinkler_boosted_tiles()/growth_bonus_dt_mult 這兩個
+    #      東西在 game_state.py 裡被移除的原因。
     BuildingType.SPRINKLER: {
         "name": "自動灑水器",
         "unlock_level": 4,   # 比熔爐(3)高一階，符合「高階科技」的定位
         "build_cost_gold": 0,
         "build_cost_tech": 0,
         "build_cost_items": {"metal_ingot": 2},
-        "passive_effect": "SPRINKLER",
-        "effect_radius": 1,  # 以自身為中心的 3x3（radius=1 代表左右上下各 1 格）
-        # 生長加成用「額外疊加的 dt」表示，而不是直接乘 growth_timer，
-        # 這樣不管 update_growth() 內部怎麼算 ratio 都不用改——寫成
-        # 1.0 代表「額外再疊加一份 dt」，也就是雙倍生長速度；未來想調
-        # 強度只要改這個數字，不用碰 game_state.py 的邏輯。
-        "growth_bonus_dt_mult": 1.0,
+        "recipe": {},  # 開關式機台的既有介面需要這個欄位（跟 LUMBERYARD
+                        # 一樣「無消耗」），toggle_building() 開啟前的
+                        # 原料預檢查會讀它；SPRINKLER 本身不會真的走
+                        # is_processing/tick() 那套投料倒數迴圈（見下方
+                        # passive_effect 分支的說明），純粹是介面相容。
+        "passive_effect": "SPRINKLER",  # 仍然用來讓 _update_buildings()
+                                          # 跳過一般開關機台的投料/倒數
+                                          # 迴圈，改走自己專屬的週期性
+                                          # 自動澆水分支。
+        "toggleable": True,   # 新增旗標：跟 AUTO_HARVESTER 不同，這台
+                               # 可以被玩家開關。
+        "effect_radius": 1,   # 以自身為中心的 3x3（radius=1 代表左右
+                               # 上下各 1 格；未來想擴大成 5x5 只要把這
+                               # 個值改成 2）。
+        "water_interval": 8.0,      # 每隔幾秒自動澆水一次
+        "water_boost_ratio": 0.5,   # 每次澆水疊加 grow_time 的比例，
+                                     # 跟玩家手動點擊 water_crop() 的
+                                     # 加成幅度（grow_time * 0.5）一致。
         "walkable": False,
         "asset_key": "sprinkler",
+        "size": (2, 2),
     },
     BuildingType.AUTO_HARVESTER: {
         "name": "自動採收機",
@@ -867,10 +902,15 @@ class Building:
     building_type: BuildingType
     x: int
     y: int
-    is_active: bool = False        # 開關：True=自動運作中，False=關閉（預設關閉）——只對 OVEN/FURNACE 有意義
-    is_processing: bool = False    # 目前這一輪配方是否正在倒數——只對 OVEN/FURNACE 有意義
+    is_active: bool = False        # 開關：True=自動運作中，False=關閉（預設關閉）——對 OVEN/FURNACE/
+                                    # LUMBERYARD 跟現在可開關的 SPRINKLER 都有意義（見 is_passive 的說明）
+    is_processing: bool = False    # 目前這一輪配方是否正在倒數——只對 OVEN/FURNACE/LUMBERYARD 有意義，
+                                    # SPRINKLER 走自己的 passive_effect 分支，不會用到這個欄位
     processing_time_left: float = 0.0
-    scan_timer: float = 0.0        # 只對 AUTO_HARVESTER 有意義：累積到 scan_interval 就掃描一次周圍作物
+    scan_timer: float = 0.0        # 泛用的「這種被動機台自己的週期計時器」：AUTO_HARVESTER 用它累積到
+                                    # scan_interval 就掃描一次周圍作物，SPRINKLER 【系統更新：自動灑水器
+                                    # 2x2 建築邏輯】之後也改用同一個欄位累積到 water_interval 就自動澆水
+                                    # 一次，兩者互不影響（各自的 Building 實例各有一份）
 
     @property
     def config(self) -> dict:
@@ -882,10 +922,19 @@ class Building:
 
     @property
     def is_passive(self) -> bool:
-        """True 代表這是「蓋下去就永久生效、沒有開關」的自動化科技機台
-        (SPRINKLER/AUTO_HARVESTER)；False 代表這是走 Phase 3 開關式自動
-        化那套邏輯的機台 (OVEN/FURNACE)。"""
-        return bool(self.config.get("passive_effect"))
+        """True 代表這是「蓋下去就永久生效、沒有開關，玩家點擊無效」的
+        自動化科技機台 (AUTO_HARVESTER)；False 代表這台可以被
+        toggle_building() 開關——包含原本 Phase 3 那套開關式自動化機台
+        (OVEN/FURNACE/LUMBERYARD)，以及【系統更新：自動灑水器 2x2
+        建築邏輯】之後也改成可開關的 SPRINKLER。
+
+        判斷邏輯：config 裡有 "passive_effect" 代表這台走
+        GameState._update_buildings() 裡專屬的被動分支（跳過一般的
+        投料/倒數迴圈）；但這不再直接等於「不能開關」——多檢查一個
+        "toggleable" 旗標，True 的話（目前只有 SPRINKLER）代表雖然走
+        專屬分支，玩家仍然可以點擊切換 is_active，只是關閉時不會像
+        AUTO_HARVESTER 那樣被完全擋下。"""
+        return bool(self.config.get("passive_effect")) and not self.config.get("toggleable", False)
 
     def start_processing(self):
         self.is_processing = True

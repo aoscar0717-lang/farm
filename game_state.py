@@ -8,7 +8,7 @@ import math
 import os
 import random
 import uuid
-from typing import List, Tuple, Optional, Dict, Any, Set
+from typing import List, Tuple, Optional, Dict, Any
 
 from game_config import (
     GamePhase, ZoneType, CropType, CropStage, DecorationType,
@@ -544,8 +544,61 @@ class GameState:
                             self.harvest_crop(nx, ny)
                 continue
             elif passive_effect == "SPRINKLER":
-                # 灑水器本身在這裡不用做任何事，加成邏輯在
-                # _update_crops_growth() 裡現算，見上方說明。
+                # 【系統更新：自動灑水器 2x2 建築邏輯】改成需要玩家手動
+                # 開啟（is_active，透過 toggle_building()）才會運作，
+                # 不再是蓋下去就永久生效——is_active 預設 False（跟
+                # FURNACE/LUMBERYARD 一樣），沒開啟就完全不做事。
+                if not building.is_active:
+                    continue
+                # 夜晚不澆水，理由跟玩家手動 water_crop() 完全一致
+                # （見該方法「夜晚無法澆水」的檢查），自動版沿用同一個
+                # 限制，不會在夜晚偷偷幫玩家澆水。
+                if self.phase == GamePhase.NIGHT:
+                    continue
+                # scan_timer 這個欄位原本只給 AUTO_HARVESTER 用，現在
+                # SPRINKLER 也借用同一個欄位當作自己的週期計時器（見
+                # Building dataclass 該欄位的說明），累積到
+                # water_interval 秒才真正澆水一次，不是每幀都澆——這是
+                # 使用者這次規格明確要求的「每隔一段時間」，不是像舊版
+                # 那樣連續疊加。
+                building.scan_timer += dt
+                interval = config.get("water_interval", 8.0)
+                if building.scan_timer < interval:
+                    continue
+                building.scan_timer = 0.0
+                # 【系統更新：自動灑水器 2x2 建築邏輯】舊版 1x1 時，用
+                # building.x/building.y（左上角錨點＝唯一格）往外展開
+                # radius 是對稱的；但現在建築是 2x2，若還是只從錨點
+                # 一格往外算 radius，會讓灑水範圍偏向左上角、右下邊緣
+                # 反而澆不到，不是玩家理解的「以整棟建築為中心往外一
+                # 圈」。改成先算出整個 2x2 footprint 涵蓋的座標範圍，
+                # 再各自往外展開 radius，這樣不管 size 是 1x1 還是
+                # 2x2（甚至以後更大），效果範圍都會正確地把「建築本體
+                # +外圍一圈」涵蓋進去。
+                size_w, size_h = config.get("size", (1, 1))
+                radius = config.get("effect_radius", 1)
+                boost_ratio = config.get("water_boost_ratio", 0.5)
+                for dy in range(-radius, size_h + radius):
+                    for dx in range(-radius, size_w + radius):
+                        nx, ny = building.x + dx, building.y + dy
+                        ntile = self.get_tile(nx, ny)
+                        if ntile and ntile.crop is not None and not ntile.crop.is_mature:
+                            # 「自動版 water_crop()」：邏輯完全比照玩家
+                            # 手動點擊水壺（grow_time * boost_ratio 疊加
+                            # 進 growth_timer），差別只在不扣金幣、不用
+                            # 玩家自己點——自動化機台的產出/加成本來就
+                            # 不該再收一次費用。emit 同一個
+                            # EventType.CROP_WATERED 事件，讓既有的 💧
+                            # 浮動文字/音效 UI 回饋照常觸發，不用另外
+                            # 為自動澆水寫一套 UI 提示。
+                            crop = ntile.crop
+                            crop.growth_timer += crop.grow_time * boost_ratio
+                            crop.update_growth(0.0)
+                            self._emit_event(
+                                EventType.CROP_WATERED,
+                                f"💧 自動灑水滋養！{crop.config['name']} 生長加速！",
+                                {"x": nx, "y": ny}
+                            )
                 continue
 
             if building.is_processing:
@@ -1420,43 +1473,18 @@ class GameState:
 
         self.check_game_over()
 
-    def _get_sprinkler_boosted_tiles(self) -> Set[Tuple[int, int]]:
-        """Phase 4：掃一遍 self.buildings 找出所有 SPRINKLER，把它們周圍
-        3x3（effect_radius=1）範圍內的座標全部收進一個 set 回傳，供
-        _update_crops_growth() 查詢「這一格是否在某個灑水器的加成範圍
-        內」。self.buildings 通常只有個位數到十幾個元素，每幀重新算一
-        次而不快取，效能上完全不是問題，也不用煩惱機台被拆除/新增時
-        快取要不要失效的問題。座標超出地圖邊界的部分用 get_tile 的隱含
-        邊界檢查（0 <= x < width）自然濾掉，不會 index error。"""
-        boosted: Set[Tuple[int, int]] = set()
-        for building in self.buildings:
-            if building.building_type != BuildingType.SPRINKLER:
-                continue
-            radius = building.config.get("effect_radius", 1)
-            for dy in range(-radius, radius + 1):
-                for dx in range(-radius, radius + 1):
-                    nx, ny = building.x + dx, building.y + dy
-                    if 0 <= nx < self.width and 0 <= ny < self.height:
-                        boosted.add((nx, ny))
-        return boosted
-
     def _update_crops_growth(self, dt: float):
-        # Phase 4：灑水器加成——在 SPRINKLER 的 3x3 範圍內的作物格子，
-        # 除了原本的 dt，額外再疊加 dt * growth_bonus_dt_mult（目前設
-        # 1.0，等於雙倍生長速度）。用「額外疊加的 dt」而不是直接乘
-        # growth_timer，這樣完全不用改 Crop.update_growth() 的內部計算
-        # 邏輯，呼叫端多送一點 dt 進去就好，作物本身不需要知道自己是不
-        # 是被灑水器加成。
-        boosted_tiles = self._get_sprinkler_boosted_tiles()
-        sprinkler_bonus_mult = BUILDING_DATA[BuildingType.SPRINKLER].get("growth_bonus_dt_mult", 0.0)
-
+        # 【系統更新：自動灑水器 2x2 建築邏輯】原本這裡有一段「灑水器
+        # 3x3 範圍內持續疊加 dt」的連續加成邏輯（_get_sprinkler_boosted_
+        # tiles() + growth_bonus_dt_mult），這次整段移除——SPRINKLER
+        # 的加成方式改成 _update_buildings() 裡專屬分支的「週期性自動
+        # 澆水」（每 water_interval 秒對範圍內作物各執行一次
+        # growth_timer 一次性加值），不再需要這裡的每幀連續加成，兩套
+        # 機制不會同時存在。
         for row in self.grid:
             for tile in row:
                 if tile.crop is not None:
-                    effective_dt = dt
-                    if (tile.x, tile.y) in boosted_tiles:
-                        effective_dt += dt * sprinkler_bonus_mult
-                    new_stage = tile.crop.update_growth(effective_dt)
+                    new_stage = tile.crop.update_growth(dt)
                     if new_stage == CropStage.MATURE:
                         self._emit_event(
                             EventType.CROP_MATURED,

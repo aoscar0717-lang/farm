@@ -712,10 +712,25 @@ class AssetLoader:
         BUILDING_SPRITE_GRID_SPAN = {
             "furnace": (2, 2),
             "lumberyard": (2, 2),
+            # 【系統更新：自動灑水器 2x2 建築邏輯】跟 game_config.py
+            # BUILDING_DATA[SPRINKLER]["size"] 手動保持一致。
+            "sprinkler": (2, 2),
         }
         buildings = [
             ("furnace", "buildings/furnace.png", "furnace"),
             ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
+            # 【系統更新：自動灑水器 2x2 建築邏輯】跟 furnace/lumberyard
+            # 同一個理由補上這筆：下面 _load_1x4_spritesheet("sprinkler",
+            # ...) 成功時會覆寫 self.images["sprinkler"] = frames[0]，
+            # 但如果 decorations/灑水器.png 缺檔或載入失敗，
+            # _load_1x4_spritesheet() 只會補 building_anim_frames，不會
+            # 補 self.images——這裡先用這份清單把 self.images["sprinkler"]
+            # 賦值成一張佔位圖（buildings/sprinkler.png 目前也還沒放進
+            # assets/，一樣會走 generate_placeholder()），保證商店卡片
+            # （ActionCard.draw() 只呼叫 loader.get("sprinkler")，不知道
+            # 動畫幀那條路徑）不管哪一層載入失敗都至少有圖可以顯示，不
+            # 會是空白卡片。
+            ("sprinkler", "buildings/sprinkler.png", "sprinkler"),
         ]
         for key, path, category in buildings:
             span_w, span_h = BUILDING_SPRITE_GRID_SPAN.get(key, (1, 1))
@@ -775,6 +790,37 @@ class AssetLoader:
         lumberyard_sz = (self.cell_size * lumberyard_span_w, self.cell_size * lumberyard_span_h)
         self._load_1x4_spritesheet("lumberyard", "decorations/伐木場.png", lumberyard_sz,
                                     colorkey=None, placeholder_category="lumberyard")
+
+        # 3d-2. 自動灑水器 Sprite Sheet 特定影格動畫。
+        # 【系統更新：自動灑水器 2x2 建築邏輯】使用者已經把
+        # decorations/灑水器.png 放進 assets/，明確說明是「1x4 的橫向
+        # 長條圖」——跟伐木場/富鐵花是同一種規格，直接沿用同一份通用的
+        # _load_1x4_spritesheet()，不需要另外寫一套載入邏輯。
+        #
+        # colorkey 傳 None：需求文字寫「若背景為純白則 set_colorkey
+        # ((255,255,255))，若有 Alpha 通道則 convert_alpha()」，這正是
+        # _load_1x4_spritesheet() 內部 colorkey=None 時的既有自動偵測
+        # 行為（讀 raw.get_masks()[3] 判斷來源圖是否原生帶 alpha，有就
+        # convert_alpha()，沒有就退回 convert() + set_colorkey
+        # ((255,255,255))），完全符合規格描述，不用另外手寫判斷式。
+        #
+        # 縮放尺寸用跟 3b./3c./3d. 同一份 BUILDING_SPRITE_GRID_SPAN 對照
+        # 表算出來的 sprinkler_sz（2 * cell_size，也就是需求裡的
+        # tile_size * 2），跟 game_config.py 這次新增的
+        # BUILDING_DATA[SPRINKLER]["size"] = (2, 2) 對齊，
+        # _render_building_tile() 既有的 span_w/span_h 定位公式不用改
+        # 就能正確處理這個新的 2x2 建築。
+        #
+        # placeholder_category 這裡刻意留 None（不新增一個
+        # "sprinkler" 專屬佔位圖分類）：找不到檔案時會退回
+        # generate_placeholder() 最泛用的半透明灰色方塊，不影響遊戲
+        # 運作，之後如果想要更有辨識度的佔位圖，可以再仿照
+        # _PLACEHOLDER_KEYWORDS 裡 "furnace"/"lumberyard" 的寫法加一組
+        # 專屬分類，這次不在需求範圍內，不順手多做。
+        sprinkler_span_w, sprinkler_span_h = BUILDING_SPRITE_GRID_SPAN.get("sprinkler", (1, 1))
+        sprinkler_sz = (self.cell_size * sprinkler_span_w, self.cell_size * sprinkler_span_h)
+        self._load_1x4_spritesheet("sprinkler", "decorations/灑水器.png", sprinkler_sz,
+                                    colorkey=None, placeholder_category=None)
 
         # 3e. 富鐵花 (CropType.IRON_FLOWER) 成熟視覺。
         # 【檔名修正】使用者一開始說的檔名是 crops/富鐵花.png，同樣沒有

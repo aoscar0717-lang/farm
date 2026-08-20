@@ -959,7 +959,12 @@ class NightwatchFarmApp:
                 # 物品）而不是金幣，卡片說明文字用「2錠」/「5錠+100科技」
                 # 表示，跟其餘卡片「$金額」的呈現風格有意識地做出區分，
                 # 讓玩家一眼看出這兩張卡「要花的不是錢」。
-                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 周圍3x3雙倍生長", "sprinkler"),
+                # 【系統更新：自動灑水器 2x2 建築邏輯】卡片說明文字同步
+                # 更新：不再是「蓋下去就永久生效」的持續雙倍生長，改成
+                # 「需要玩家開啟，開啟後每隔一段時間對周圍作物澆水一次」
+                # ——跟 game_config.py BUILDING_DATA[SPRINKLER] 的
+                # water_interval=8.0 秒對應。
+                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 開啟後每8秒自動澆水3x3", "sprinkler"),
                 ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100科技 | 自動採收3x3", "auto_harvester"),
                 # Phase 4.5：打通上游生產線的基礎設施，一樣是「純資本」
                 # ——只花金幣，不消耗任何背包物品，所以說明文字維持跟
@@ -3036,11 +3041,15 @@ class NightwatchFarmApp:
 
     def _render_building_tile(self, building, px: int, py: int):
         """畫一座機台。Phase 2/3 的烤箱/熔爐走「開關-配方-倒數」那套，
-        右上角有明確的 ON/OFF 指示燈跟運作進度條；Phase 4 新增的灑水器/
-        自動採收機是 building.is_passive 為 True 的「蓋下去就永久生效」
-        機台，完全沒有開關狀態，畫 ON/OFF 圓點反而會誤導玩家以為它們
-        也需要手動開啟，所以這裡改成一個穩定不閃爍的淡科技綠外框，代表
+        右上角有明確的 ON/OFF 指示燈跟運作進度條；Phase 4 新增的自動
+        採收機是 building.is_passive 為 True 的「蓋下去就永久生效」
+        機台，完全沒有開關狀態，畫 ON/OFF 圓點反而會誤導玩家以為它也
+        需要手動開啟，所以這裡改成一個穩定不閃爍的淡科技綠外框，代表
         「持續生效中」，跟可切換機台的圓點指示燈明確做出視覺區分。
+        【系統更新：自動灑水器 2x2 建築邏輯】灑水器（SPRINKLER）這次
+        不再屬於這一類——is_passive 現在只有 AUTO_HARVESTER 是 True，
+        灑水器改成跟熔爐/伐木場一樣的開關式機台，會畫 ON/OFF 指示燈，
+        不會畫這圈綠外框。
         視覺升級（動態佔位圖系統）之後，asset_loader 已經會為這幾個
         asset_key 呼叫 _load_image()，就算 assets/buildings/ 底下還沒
         有真的放對應 PNG（目前確實還沒有），也會經由
@@ -3109,6 +3118,14 @@ class NightwatchFarmApp:
                 # 換影響），這裡照專案實際的計時器名稱寫。
                 step = int(self.anim_time / ANIMATION_SPEED) % 2
                 frame_index = 2 if step == 1 else 0
+            elif building.building_type == BuildingType.SPRINKLER:
+                # 【系統更新：自動灑水器 2x2 建築邏輯】需求文字明確要求
+                # 「若 is_active 為 True，則依序播放這 4 個影格」——不是
+                # 像熔爐那樣把 frame[0] 保留給關閉態、運作中只在
+                # frame[1]~最後一幀之間循環，而是單純 0→1→2→3→0... 完整
+                # 跑滿全部 4 幀，所以另外開一個分支，不共用下面熔爐那條
+                # 通用 else 規則。
+                frame_index = int(self.anim_time / ANIMATION_SPEED) % len(anim_frames)
             else:
                 # frame[0] 保留給「關閉/閒置」狀態，運作中的時候在
                 # frame[1] ~ frame[len-1] 之間循環（熔爐只有 3 幀，等於
