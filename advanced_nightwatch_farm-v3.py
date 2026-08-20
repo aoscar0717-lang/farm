@@ -585,10 +585,23 @@ class Particle:
 
 
 class FloatingText:
+    # 【系統優化：修復浮動文字重疊問題】真正的重疊成因：_update_buildings()
+    # 完成一輪產出、緊接著自動投料開始下一輪時（同一幀、不用 elif，見
+    # 該方法的說明），BUILDING_COLLECTED（"+1 木料"）跟 BUILDING_STARTED
+    # （"⚙️ 開始運作..."）兩個事件會在同一幀一起 emit，兩邊各自呼叫
+    # FloatingText(...) 時傳進來的 (x, y) 幾乎一樣（都是同一棟建築的
+    # 座標），加上 update() 兩者往上飄的速度完全相同 (24px/s)，不管經過
+    # 多久都會維持完全疊在一起，不會自然分開。
+    #
+    # 直接在建構子這裡統一加上小範圍隨機偏移，而不是去改每一個呼叫端
+    # （BUILDING_STARTED/BUILDING_COLLECTED/BUILDING_TOGGLED/
+    # BUILDING_STOPPED...等十幾處 self.floating_texts.append(
+    # FloatingText(...)) 呼叫）——這是全域性的修復，任何未來新增的浮動
+    # 文字呼叫點都自動受惠，不用每個人自己記得加偏移。
     def __init__(self, text: str, x: float, y: float, color=(255, 255, 255), duration: float = 1.2):
         self.text = text
-        self.x = x
-        self.y = y
+        self.x = x + random.randint(-15, 15)
+        self.y = y + random.randint(-10, 10)
         self.color = color
         self.duration = duration
         self.elapsed = 0.0
@@ -2081,9 +2094,15 @@ class NightwatchFarmApp:
                     FloatingText(f"📋 今日新訂單 x{order_count}！按 O 查看", 460, 143, C_TECH_GREEN)
                 )
             elif ev.event_type == EventType.BUILDING_STARTED:
+                # 【系統優化：中文化浮動提示文字】文字本來就已經是中文
+                # 「⚙️ 開始運作...」，不是使用者以為的英文字串——這裡只
+                # 調整顏色，原本是偏灰的木頭色 (200,190,178)，不夠醒目；
+                # 改成亮黃色（跟頭部狀態列「☀️ 白天」用的同一個亮黃
+                # (255,235,59) 一致，沿用既有色票而不是另外發明一個新
+                # 顏色），狀態提示更容易被玩家注意到。
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
-                self.floating_texts.append(FloatingText("⚙️ 開始運作...", px - 35, py - 14, (200, 190, 178)))
+                self.floating_texts.append(FloatingText("⚙️ 開始運作！", px - 35, py - 14, (255, 235, 59)))
             # 注意：EventType.BUILDING_READY（Phase 2 的「完成待手動採收」
             # 通知）在 Phase 3 已經不會再被 emit——機台改成開關式自動化，
             # 完成的當下直接自動採收、併進 BUILDING_COLLECTED，不再有
@@ -2124,8 +2143,13 @@ class NightwatchFarmApp:
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
                 output_name = ev.data.get("output_name", ev.data["output_key"])
+                # 【系統優化：中文化浮動提示文字】使用者要求資源產出用棕色/
+                # 綠色系而非原本的淡金黃 C_FLOATTEXT_GOLD（跟金幣收入的顏色
+                # 太像，容易讓玩家誤以為是賺到金幣）。改用 (141, 110, 99)——
+                # 這個顏色本檔案其他地方（約第 2893 行附近）已經用來代表木頭
+                # /建材的棕色調，沿用同一色值維持全遊戲色彩語言一致。
                 self.floating_texts.append(FloatingText(
-                    f"+{ev.data['output_qty']} {output_name}", px - 20, py - 14, C_FLOATTEXT_GOLD
+                    f"+{ev.data['output_qty']} {output_name}", px - 20, py - 14, (141, 110, 99)
                 ))
                 self._spawn_particles(px, py, C_GOLD, count=12)
 
