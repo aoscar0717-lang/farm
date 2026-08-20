@@ -3059,8 +3059,25 @@ class NightwatchFarmApp:
             pygame.draw.circle(self.screen, C_RED, dot_center, 6)
             pygame.draw.circle(self.screen, (255, 255, 255), dot_center, 6, width=1)
 
-        icon_surf = FONT_MD.render("📋", True, C_TEXT_ON_DARK)
-        self.screen.blit(icon_surf, icon_surf.get_rect(center=order_btn_rect.center))
+        # 原本用 FONT_MD.render("📋", ...) 畫剪貼板 emoji 當按鈕圖示，
+        # 但 emoji 落在 safe_text() 的允許範圍外，會被無聲濾掉，畫出
+        # 一個空字串——按鈕因此完全沒有任何圖案，玩家看不出這格能點。
+        # 改成純幾何畫法：一塊剪貼板外框 + 上緣的夾夾 + 3 條代表清單
+        # 項目的橫線，跟旁邊「☰」選單按鈕用畫線湊出圖示是同一套做法，
+        # 不依賴任何字型，換字型/換素材都不會壞。
+        cx, cy = order_btn_rect.center
+        board = pygame.Rect(0, 0, 18, 20)
+        board.center = (cx, cy + 2)
+        pygame.draw.rect(self.screen, C_TEXT_ON_DARK, board, width=2, border_radius=3)
+
+        clip = pygame.Rect(0, 0, 8, 5)
+        clip.center = (cx, board.top)
+        pygame.draw.rect(self.screen, C_TEXT_ON_DARK, clip, border_radius=1)
+
+        for i in range(3):
+            line_y = board.top + 6 + i * 5
+            pygame.draw.line(self.screen, C_TEXT_ON_DARK,
+                              (board.x + 4, line_y), (board.right - 4, line_y), 2)
 
     def _render_flat_meadow_and_farm(self):
         map_w = self.game.width * CELL_SIZE
