@@ -1729,7 +1729,7 @@ class NightwatchFarmApp:
                 self.sound.play("ui_click")
             return
 
-        # 訂單佈告欄開啟中：面板內的「交付」/「✕」按鈕優先判定，點擊
+        # 訂單佈告欄開啟中：面板內的「交付」/「×」按鈕優先判定，點擊
         # 面板外的半透明遮罩、或再點一次「📋」按鈕，都當作關閉面板。
         # 跟暫停選單一樣攔下這一輪剩下所有的點擊，不會讓點擊穿透到
         # 底下的地圖/商店。
@@ -2669,7 +2669,7 @@ class NightwatchFarmApp:
         _draw_menu_button(self.btn_continue_rect, "▶ 繼續遊戲", (86, 108, 140), disabled=not has_save)
 
         self.btn_exit_rect = pygame.Rect(btn_x, start_y + (btn_h + gap) * 2, btn_w, btn_h)
-        _draw_menu_button(self.btn_exit_rect, "✖ 離開", (150, 70, 60))
+        _draw_menu_button(self.btn_exit_rect, "× 離開", (150, 70, 60))
 
         # 【Phase 7】沒存檔時點「繼續遊戲」的短暫提示，畫在按鈕群下方，
         # 剩餘時間歸零（由 run() 每幀遞減 self.menu_message_timer）之後
@@ -2810,9 +2810,9 @@ class NightwatchFarmApp:
         is_close_hover = close_rect.collidepoint(self.mouse_pos)
         draw_wood_panel(self.screen, close_rect, self.loader, "ui_wood_button",
                          (150, 70, 60), border_radius=8, depth=2, pressed=is_close_hover)
-        blit_text_with_shadow(self.screen, FONT_MD, "✕", C_TEXT_ON_DARK, center=close_rect.center)
+        blit_text_with_shadow(self.screen, FONT_MD, "×", C_TEXT_ON_DARK, center=close_rect.center)
 
-        self.screen.blit(FONT_XS.render("按 O 鍵或點擊「✕」可關閉", True, (200, 190, 178)),
+        self.screen.blit(FONT_XS.render("按 O 鍵或點擊「×」可關閉", True, (200, 190, 178)),
                           (panel.x + 16, header_rect.bottom + 2))
 
         self._order_deliver_rects = []
