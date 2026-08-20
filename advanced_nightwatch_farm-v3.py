@@ -68,7 +68,16 @@ FPS = 60
 CELL_SIZE = 60  # 原本 50，配合網格從 18x13 裁到 16x11 換來 +20% 放大
 ANIMATION_SPEED = 0.2  # 熔爐 Sprite Sheet 動畫每幀停留秒數（frame[1]/frame[2] 來回切換的節奏）
 GRID_X = 24
-GRID_Y = 86
+# 【系統修復：UI 元素重疊/文字溢出/導覽列被切斷】原本 GRID_Y=86，只比
+# 頂部資源列 (0~70) 多留 16px；但正下方緊貼的飛船 AI 任務橫幅
+# (MISSION_BANNER_Y=84, 高 32px，涵蓋到 y=116) 卻幾乎整條都落在
+# GRID_Y=86 之後——因為 _render() 的繪製順序是「先畫頭部資源列→畫任務
+# 橫幅→再畫農田地圖」，農田地圖範圍從 y=86 開始整片鋪色，會直接蓋掉
+# 任務橫幅下半部 (86~116) 這 30px，畫面上看起來就像「頂部導覽列被地圖
+# 背景截斷」。修正做法是把 GRID_Y（連帶所有從它推算座標的地圖/商店
+# 面板/建築/特效座標）整體往下挪，讓農田地圖真正從任務橫幅結束之後才
+# 開始，兩者不再有任何重疊，不需要為了圖層順序另外犧牲繪製效能重畫。
+GRID_Y = 124
 
 # 扁平現代色彩（地圖/農田本身維持原本清爽的現代配色，這次改版只動
 # UI 外殼——頂部狀態列、右側商店面板、商品卡片這些「介面」，農田視覺
@@ -2189,8 +2198,11 @@ class NightwatchFarmApp:
     # DIVIDEND 浮動文字需要知道這條橫幅實際佔用到哪個 y 才不會互相
     # 重疊，兩處共用同一組常數，之後只要調這裡一個地方就好，不用同時
     # 改兩個檔案位置裡各自寫死的魔術數字。
-    MISSION_BANNER_Y = 84       # 頭部資源列 (y:0~70) 正下方，落在需求
-                                # 要求的 y=80~90 區間內。
+    # 【系統修復：UI 元素重疊/文字溢出/導覽列被切斷】頭部資源列高度從
+    # 70 加到 76（多留一點上下留白），任務橫幅緊接在下方 (82~114)，
+    # GRID_Y 已同步改成 124，兩者跟農田地圖之間都留了乾淨的間距，不再
+    # 互相重疊或被截斷。
+    MISSION_BANNER_Y = 82
     MISSION_BANNER_H = 32
 
     def _render_mission_ui(self):
@@ -2368,8 +2380,6 @@ class NightwatchFarmApp:
         # 的縫隙看起來像木頭底下的陰影，而不是穿幫的畫布白邊。
         self.screen.fill((46, 34, 24))
 
-        self._render_header_banner()
-        self._render_mission_ui()
         self._render_flat_meadow_and_farm()
 
         if self.game.phase == GamePhase.NIGHT:
@@ -2390,6 +2400,16 @@ class NightwatchFarmApp:
             self.screen.blit(flash_s, (0, 0))
 
         self._render_shop_panel()
+
+        # 【系統修復：UI 元素重疊/文字溢出/導覽列被切斷】頭部資源列
+        # (含金幣/科技點/莊園等級/晝夜進度) 跟正下方的任務橫幅，刻意搬到
+        # _render() 幾乎最後才畫（只留彈窗類 modal 在它們之後）——即使
+        # GRID_Y 已經調整到不會再跟地圖/商店面板重疊，這裡仍然依照需求
+        # 明確要求的「頂部導覽列必須是最後繪製的 UI 圖層之一」，讓它們
+        # 永遠疊在地圖、建築、特效、商店面板之上，不會被任何地圖元件
+        # 意外蓋掉或穿透。
+        self._render_header_banner()
+        self._render_mission_ui()
 
         if self.show_intro:
             self._render_story_modal()
@@ -2553,7 +2573,10 @@ class NightwatchFarmApp:
 
     def _render_header_banner(self):
         is_day = (self.game.phase == GamePhase.DAY)
-        header_rect = pygame.Rect(0, 0, SCREEN_WIDTH, 70)
+        # 【系統修復：UI 元素重疊/文字溢出/導覽列被切斷】高度從 70 加到
+        # 76，讓頂部欄位本身、跟正下方緊接的任務橫幅之間多一點呼吸空間
+        # （上下留白），不是緊貼著切齊 0px 間距。
+        header_rect = pygame.Rect(0, 0, SCREEN_WIDTH, 76)
         # 頂部狀態列的深木頭底色。這一整條是矩形貼齊畫面上緣，沒有圓角，
         # 立體雕刻邊框只在下緣畫一條陰影線，做出「這塊木頭嵌板釘在畫面
         # 頂端」的錯覺，不用整條套 draw_beveled_rect()（那是設計給四邊
@@ -2630,7 +2653,13 @@ class NightwatchFarmApp:
         # 裡的木牌貼圖，就是把 draw_beveled_rect() 這行換成
         # screen.blit(貼圖, rect.topleft)，見 draw_beveled_rect() 的
         # docstring 有完整範例寫法。
-        gold_rect = pygame.Rect(545, 12, 155, 44)
+        # 【系統修復：UI 元素重疊/文字溢出/導覽列被切斷】金幣卡/科技點數
+        # 卡各縮 15px（155→140、145→130），把讓出來的 30px 全部挪給常常
+        # 溢出的莊園等級卡；等級卡右邊界不再寫死 287 這個固定寬度，改成
+        # 「動態算到訂單按鈕左側」，這樣不管以後訂單按鈕或選單按鈕的位置
+        # 再怎麼調整，等級卡都保證有正確的可用寬度，不會又被寫死的數字
+        # 卡死、擠壓到後面的進度條/文字。
+        gold_rect = pygame.Rect(545, 12, 140, 44)
         draw_beveled_rect(self.screen, gold_rect, C_WOOD_MID, border_radius=10)
         pygame.draw.circle(self.screen, C_GOLD, (gold_rect.x + 22, gold_rect.centery), 12)
         self.screen.blit(FONT_SM.render("G", True, (60, 40, 0)), (gold_rect.x + 17, gold_rect.centery - 8))
@@ -2638,28 +2667,38 @@ class NightwatchFarmApp:
 
         # 科技點數卡：新的終局進度貨幣，用螢光科技綠 (C_TECH_GREEN) 跟
         # 金幣的暖金色系拉開差距，一眼就能分辨這是不同的資源。
-        tech_rect = pygame.Rect(gold_rect.right + 8, 12, 145, 44)
+        tech_rect = pygame.Rect(gold_rect.right + 8, 12, 130, 44)
         draw_beveled_rect(self.screen, tech_rect, C_WOOD_MID, border_radius=10)
         self.screen.blit(
             FONT_SM.render(f"⚡ 科技點數: {self.game.tech_points}", True, C_TECH_GREEN),
             (tech_rect.x + 10, tech_rect.centery - 8)
         )
 
-        lvl_rect = pygame.Rect(tech_rect.right + 8, 12, 287, 44)
+        lvl_rect_x = tech_rect.right + 8
+        lvl_rect_right_limit = self._order_board_button_rect().x - 8
+        lvl_rect = pygame.Rect(lvl_rect_x, 12, max(200, lvl_rect_right_limit - lvl_rect_x), 44)
         draw_beveled_rect(self.screen, lvl_rect, C_WOOD_MID, border_radius=10)
         lvl_name = FARM_LEVELS[self.game.farm_level]["name"]
-        self.screen.blit(FONT_MD.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_TEXT_ON_DARK), (lvl_rect.x + 14, lvl_rect.y + 4))
+        # 字級從 FONT_MD (18px) 降成 FONT_SM (15px)：等級名稱長度會隨玩家
+        # 進度變動（"初級農莊"~"傳奇仙境" 都是 4 個中文字，但不同名稱的
+        # 實際像素寬度仍有差異），縮小字級加上前面新加的動態寬度，雙重
+        # 保證「莊園等級：Lv.X」這行文字不會頂到卡片邊緣。
+        self.screen.blit(FONT_SM.render(f"🏆 莊園等級: Lv.{self.game.farm_level} ({lvl_name})", True, C_TEXT_ON_DARK), (lvl_rect.x + 14, lvl_rect.y + 6))
 
         goals = {1: 40, 2: 100, 3: 200, 4: 350, 5: 500}
         next_goal = goals.get(self.game.farm_level, 500)
         curr_p = self.game.prosperity_score
         p_ratio = min(1.0, curr_p / next_goal)
 
-        # 繁榮度進度條原本 270px 寬，這次讓給科技點數卡片，縮到 131px
-        # ——縮小後的長度已用文字量測結果核對過「進度條 + 右側的
-        # 繁榮度數字文字」仍完整落在 lvl_rect 範圍內，不會被裁切，只是
-        # 條本身視覺上變細一點。
-        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, 131, 12)
+        # 進度條寬度改成跟著 lvl_rect 的實際寬度走（原本寫死 131px，是
+        # 當初卡片只有 287px 寬時量出來的數字，卡片變寬之後繼續沿用舊
+        # 數字沒有意義）：保留卡片左右各 14px 內距，右側再預留約 100px
+        # 給「繁榮度: NNN / NNN」文字跟 12px 間距，算出來的寬度上限用
+        # 131px 打底，卡片變寬時進度條會跟著等比變寬，不會出現「卡片明明
+        # 變寬了、進度條卻還是舊尺寸擠在角落」的不協調感，右側文字也保證
+        # 落在卡片範圍內、不再需要靠肉眼量測賭運氣。
+        p_bar_w = max(131, lvl_rect.width - 14 - 14 - 100)
+        p_bar = pygame.Rect(lvl_rect.x + 14, lvl_rect.y + 24, p_bar_w, 12)
         draw_beveled_rect(self.screen, p_bar, C_WOOD_BEVEL_DARK, border_radius=6, depth=1, pressed=True)
         if p_ratio > 0:
             # 原本是鮮豔的紫色，跟木質風格不搭；改用翠綠色，呼應「繁榮/
