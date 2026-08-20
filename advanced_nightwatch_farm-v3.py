@@ -954,8 +954,14 @@ class NightwatchFarmApp:
         # rect 先放 Rect(0,0,0,0) 佔位，實際位置由 _layout_shop_tabs()
         # 每一幀依面板座標算出來（跟卡片列表一樣，位置不是寫死的）。
         self.tab_buttons = [
-            ("CROPS", "農田耕作 (11)", pygame.Rect(0, 0, 0, 0)),
-            ("DECO", "莊園景觀 (20)", pygame.Rect(0, 0, 0, 0)),
+            # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】
+            # PLACE_SPRINKLER 搬進 CROPS 分頁之後，這裡的卡片數量標籤
+            # 順便一併校正成目前清單的實際卡片數（CROPS 12 張、DECO 17
+            # 張，用註解掉的卡片不計算在內）——這兩個數字本來就是純
+            # 顯示用的靜態文字，沒有任何程式碼會依賴它，不校正也不會
+            # 造成功能性錯誤，但放著舊數字容易誤導玩家。
+            ("CROPS", "農田耕作 (12)", pygame.Rect(0, 0, 0, 0)),
+            ("DECO", "莊園景觀 (17)", pygame.Rect(0, 0, 0, 0)),
             ("DEFENSE", "防禦寵物 (6)", pygame.Rect(0, 0, 0, 0)),
             ("TOOLS", "主動工具 (4)", pygame.Rect(0, 0, 0, 0)),
         ]
@@ -998,6 +1004,18 @@ class NightwatchFarmApp:
                 # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的
                 # 「富鐵花」，描述文字（產1礦石結晶）維持上一版的修改。
                 ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石結晶", "iron_flower"),
+                # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】原本
+                # 放在 DECO 分頁（跟其餘加工機台一起，只能蓋在四周莊園
+                # 景觀區）。使用者這次要求灑水器改成只能蓋在「農田耕作」
+                # 對應的地形（中央農田 FARM_ZONE，見 game_config.py
+                # BUILDING_DATA[SPRINKLER]["required_zone"] 的說明），
+                # 卡片分類也一併搬到 CROPS 分頁，讓「哪個分頁能買」跟
+                # 「能蓋在哪種地形」保持一致，不會出現「卡片在 DECO 分頁
+                # 卻要蓋在農田上」的錯位體感。action_id/asset_key/
+                # BuildingType.SPRINKLER 都不變，_CARD_BUILDING_TYPES/
+                # 點擊處理/鎖卡判定不需要跟著改——這些查表邏輯都是用
+                # action_id 當 key，不關心卡片實際放在哪個分頁清單裡。
+                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 需種在農田上，每8秒為周圍3x3灌溉溪水", "sprinkler"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -1051,16 +1069,9 @@ class NightwatchFarmApp:
                 # 物品）而不是金幣，卡片說明文字用「2錠」/「5錠+100科技」
                 # 表示，跟其餘卡片「$金額」的呈現風格有意識地做出區分，
                 # 讓玩家一眼看出這兩張卡「要花的不是錢」。
-                # 【系統更新：自動灑水器 2x2 建築邏輯】卡片說明文字同步
-                # 更新：不再是「蓋下去就永久生效」的持續雙倍生長，改成
-                # 「需要玩家開啟，開啟後每隔一段時間對周圍作物澆水一次」
-                # ——跟 game_config.py BUILDING_DATA[SPRINKLER] 的
-                # water_interval=8.0 秒對應。
-                # 【系統修復與文本重構】說明文字改成使用者要求的「木製
-                # 水車齒輪自動運轉、提供潔淨溪水」的意象，取代原本偏機械
-                # 感的「自動澆水」講法；名稱「自動灑水器」維持不變（使用
-                # 者這次只要求改描述，沒有要求改名）。
-                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 水車齒輪自動運轉，每8秒為周圍3x3灌溉溪水", "sprinkler"),
+                # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】
+                # PLACE_SPRINKLER 這張卡片搬到上面的 "CROPS"（農田耕作）
+                # 分頁，理由見該處新增位置的說明；這裡不再放。
                 # 【系統邏輯更新：隱藏「收割機」建築】商店卡片註解掉，
                 # 對應的 BUILDING_DATA[AUTO_HARVESTER] 設定同步在
                 # game_config.py 註解掉（見該處說明）；_CARD_BUILDING_
@@ -1405,8 +1416,21 @@ class NightwatchFarmApp:
                 if tile.zone != ZoneType.FARM_ZONE or not tile.is_empty:
                     return True
             elif act.startswith("PLACE_"):
-                # 其餘 PLACE_* 都是景觀裝飾/加工機台，只能放在莊園景觀區。
-                if tile.zone != ZoneType.DECORATION_ZONE or not tile.is_empty:
+                # 其餘 PLACE_* 大多是景觀裝飾/加工機台，只能放在莊園
+                # 景觀區。
+                # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】
+                # PLACE_SPRINKLER 是例外——這次改成只能蓋在中央農田
+                # (FARM_ZONE)，跟其餘機台完全相反，直接讀
+                # BUILDING_DATA[SPRINKLER]["required_zone"]（跟
+                # place_building() 實際檢查用的同一個欄位），不用在這裡
+                # 另外寫死一個 SPRINKLER 判斷式，兩處的地形限制保證不會
+                # 兜不起來。這個預覽框合法性檢查本身只影響滑鼠格線高光
+                # 的顏色（白/紅），不影響實際能不能蓋下去——真正擋下
+                # 建造的判斷在 game_state.py 的 place_building()。
+                _card_building_type = self._CARD_BUILDING_TYPES.get(act)
+                required_zone = (BUILDING_DATA[_card_building_type].get("required_zone", ZoneType.DECORATION_ZONE)
+                                  if _card_building_type else ZoneType.DECORATION_ZONE)
+                if tile.zone != required_zone or not tile.is_empty:
                     return True
             elif act == "WATER_CROP":
                 if not (tile.crop and not tile.crop.is_mature):

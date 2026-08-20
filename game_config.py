@@ -669,6 +669,14 @@ BUILDING_DATA = {
         "build_cost_gold": 0,
         "build_cost_tech": 0,
         "build_cost_items": {"metal_ingot": 2},
+        # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】新增欄位，
+        # 讓 place_building() 檢查改讀這裡而不是寫死的
+        # ZoneType.DECORATION_ZONE——灑水器的功用是幫中央農田的作物
+        # 自動澆水，蓋在四周景觀區反而要對著遠處的作物澆水，這次改成
+        # 只能直接蓋在農田本體上。沒有這個欄位的其餘建築（熔爐/伐木場/
+        # 藍頂莊園木屋）在 place_building() 讀取時用 .get(...,
+        # ZoneType.DECORATION_ZONE) 取預設值，行為完全不受影響。
+        "required_zone": ZoneType.FARM_ZONE,
         "recipe": {},  # 開關式機台的既有介面需要這個欄位（跟 LUMBERYARD
                         # 一樣「無消耗」），toggle_building() 開啟前的
                         # 原料預檢查會讀它；SPRINKLER 本身不會真的走

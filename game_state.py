@@ -382,14 +382,29 @@ class GameState:
         # 建造（不會蓋出一半在景觀區一半在別的區域、或蓋在已被佔用的
         # 格子上的殘破狀態）。
         size_w, size_h = config.get("size", (1, 1))
+        # 【系統邏輯更新：修改灑水器商店分類與建造地形限制】原本所有
+        # 加工機台一律只能蓋在「四周的莊園景觀區」(DECORATION_ZONE)，
+        # 這次使用者要求灑水器 (SPRINKLER) 反過來只能蓋在「中央農田」
+        # (FARM_ZONE) 上——跟其餘機台完全相反的地形限制，且只針對
+        # 灑水器這一種建築，不能動到熔爐/伐木場/藍頂莊園木屋等其餘
+        # 建築原本「只能蓋在莊園景觀區」的規則。這裡改成讀
+        # BUILDING_DATA 新增的 "required_zone" 欄位（沒有這個欄位的
+        # 建築預設仍是 DECORATION_ZONE，行為完全不變），不是寫死判斷
+        # building_type == SPRINKLER 的特例分支——之後如果還有其他
+        # 建築也想蓋在農田上，只要在 BUILDING_DATA 補這個欄位即可，不
+        # 用再回頭改這裡的邏輯。
+        required_zone = config.get("required_zone", ZoneType.DECORATION_ZONE)
+        zone_desc = "中央農田" if required_zone == ZoneType.FARM_ZONE else "四周的莊園景觀區"
+        opposite_desc = "四周的莊園景觀區，請保留給作物與防禦設施" if required_zone == ZoneType.FARM_ZONE \
+            else "中央農田請保留給作物與防禦設施"
         footprint = [(x + dx, y + dy) for dy in range(size_h) for dx in range(size_w)]
         footprint_tiles = []
         for fx, fy in footprint:
             ftile = self.get_tile(fx, fy)
             if not ftile:
                 return False, "座標無效！建築範圍超出地圖邊界。"
-            if ftile.zone != ZoneType.DECORATION_ZONE:
-                return False, "加工機台只能建造在「四周的莊園景觀區」！中央農田請保留給作物與防禦設施。"
+            if ftile.zone != required_zone:
+                return False, f"{config['name']} 只能建造在「{zone_desc}」！{opposite_desc}。"
             if not ftile.is_empty:
                 return False, "該位置已有物件，無法建造加工機台！"
             footprint_tiles.append(ftile)
