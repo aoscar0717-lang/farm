@@ -1088,6 +1088,13 @@ class NightwatchFarmApp:
                 # 成「風力研磨」，跟「伐木場」搭在一起語意不通順，這裡
                 # 一併調整回貼合伐木場本身、但保留溫馨語氣的說法。
                 ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木料", "lumberyard"),
+                # 【系統更新：藍頂木屋 2x2 建築】使用者明確要求這是一棟
+                # 「標準 2x2 建築」（BUILDING_DATA，非 DECO 分頁既有的
+                # DecorationType.WINDMILL「莊園木屋」1x1 裝飾），所以放
+                # 在這個「加工機台」卡片區塊、跟熔爐/灑水器/伐木場同一組，
+                # 不是加進上面的 DecorationType 那排。純裝飾用途，沒有
+                # 配方/產出，說明文字直接用使用者提供的描述。
+                ("PLACE_BLUE_WOOD_HOUSE", "藍頂木屋", "$300 | 一棟舒適溫馨的木造小屋", "blue_wood_house"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -1336,6 +1343,7 @@ class NightwatchFarmApp:
         "PLACE_SPRINKLER": BuildingType.SPRINKLER,
         "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
         "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
+        "PLACE_BLUE_WOOD_HOUSE": BuildingType.BLUE_WOOD_HOUSE,
     }
 
     _DEFENSE_ACTION_IDS = {"PLACE_FENCE", "PLACE_TRAP", "PLACE_SCARECROW", "PLACE_BEEHIVE"}
@@ -1890,6 +1898,8 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.AUTO_HARVESTER)
         elif act == "PLACE_LUMBERYARD":
             success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
+        elif act == "PLACE_BLUE_WOOD_HOUSE":
+            success, msg = self.game.place_building(gx, gy, BuildingType.BLUE_WOOD_HOUSE)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -2197,7 +2207,7 @@ class NightwatchFarmApp:
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
             elif card.action_id in ("PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
-                                     "PLACE_LUMBERYARD"):
+                                     "PLACE_LUMBERYARD", "PLACE_BLUE_WOOD_HOUSE"):
                 # 熔爐/灑水器/自動採收機/伐木場/礦場的
                 # unlock_level 都直接讀 BUILDING_DATA 定義比對
                 # self.game.farm_level，不用另外走 is_crop_unlocked 那套
@@ -3202,6 +3212,7 @@ class NightwatchFarmApp:
         BuildingType.SPRINKLER: "灑水",
         BuildingType.AUTO_HARVESTER: "採收",
         BuildingType.LUMBERYARD: "伐木",
+        BuildingType.BLUE_WOOD_HOUSE: "木屋",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
@@ -3331,8 +3342,14 @@ class NightwatchFarmApp:
             # 被動永久生效：一圈穩定的淡科技綠外框，不閃爍、不需要玩家
             # 操作，跟下面「開關式機台」的圓點指示燈明確區分開，避免
             # 誤以為這種機台也有 ON/OFF 兩態。
-            body_rect = pygame.Rect(px + 6, py + 10, span_w - 12, span_h - 16)
-            pygame.draw.rect(self.screen, (90, 200, 150), body_rect, width=2, border_radius=6)
+            # 【系統更新：藍頂木屋 2x2 建築】這圈綠框原本的語意是「自動化
+            # 科技持續運作中」（AUTO_HARVESTER），藍頂木屋只是純裝飾用的
+            # 小屋、沒有任何自動化效果，畫上這圈綠框反而會讓玩家誤以為
+            # 它也在自動產出什麼——這裡特別排除，讓它單純顯示貼圖本身，
+            # 不疊加任何狀態指示。
+            if building.building_type != BuildingType.BLUE_WOOD_HOUSE:
+                body_rect = pygame.Rect(px + 6, py + 10, span_w - 12, span_h - 16)
+                pygame.draw.rect(self.screen, (90, 200, 150), body_rect, width=2, border_radius=6)
             return
 
         # ON/OFF 指示燈（只有開關式機台才有）：機台右上角一個小圓點，

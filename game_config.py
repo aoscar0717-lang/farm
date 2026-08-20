@@ -95,6 +95,28 @@ class BuildingType(Enum):
     # 走的仍然是熔爐那套「開關-配方-倒數」模型 (is_active/
     # is_processing)，只是 recipe 是空字典（見 BUILDING_DATA 說明）。
     LUMBERYARD = "LUMBERYARD"            # 伐木場：無消耗，定期產出 wood
+    # 【系統更新：藍頂木屋 2x2 建築】使用者要求把 decorations/House_1_
+    # Wood_Base_Blue.png 這張圖實作成一棟「完整的 2x2 建築」，明確指定
+    # 要用 BUILDING_DATA（而不是既有的 DecorationType/DECORATION_DATA
+    # 系統）——但這張同一張圖其實在更早的任務裡已經被拿來重新蒙皮
+    # DecorationType.WINDMILL（商店卡片顯示為「莊園木屋」，1x1，
+    # +220繁榮/+66G/天 被動收益），架構上是完全不同的兩套系統：
+    # Decoration 一律 1x1、沒有 "size" 欄位、靠 tile.decoration.
+    # prosperity_score 貢獻 recalculate_prosperity() 帶動莊園等級跟
+    # 每日金幣分紅；Building 才支援多格 "size"、開關/配方/被動效果，
+    # 但完全沒有對應的「被動繁榮/金幣分紅」機制。這裡照使用者的字面
+    # 需求新增一個獨立的 BuildingType.BLUE_WOOD_HOUSE，讓它成為貨真
+    # 價實的 2x2 建築（見下方 BUILDING_DATA 定義），不去動既有的
+    # WINDMILL 裝飾——兩者會共用同一張來源圖但屬於商店裡兩張不同的
+    # 卡片（「莊園木屋」1x1 裝飾 vs.「藍頂木屋」2x2 建築），是刻意保留
+    # 的設計，不是重複資料的疏漏。因為 Building 系統目前沒有被動繁榮/
+    # 金幣分紅的介面，這棟「藍頂木屋」建築本身不會複製 WINDMILL 那組
+    # +220繁榮/+66G/天 的效果，純粹是一棟裝飾用途的 2x2 建築（走跟
+    # AUTO_HARVESTER 一樣的 passive_effect 分支、但完全不做任何事，
+    # 見 BUILDING_DATA 的 "passive_effect": "STATIC" 說明）——如果日後
+    # 需要讓它也產生被動收益，需要另外幫 Building 系統補上對應機制，
+    # 不在本次改動範圍內。
+    BLUE_WOOD_HOUSE = "BLUE_WOOD_HOUSE"  # 藍頂木屋：純裝飾用途的 2x2 建築
     # 系統大重構 Phase 7：MINE（礦場）整批移除——使用者要求以全新的
     # 「富鐵花」(CropType.IRON_FLOWER) 農作物取代，metal_ore 改由採收
     # 富鐵花取得，不再由建築產出。詳見 CROP_DATA[IRON_FLOWER] 與
@@ -721,6 +743,27 @@ BUILDING_DATA = {
         "walkable": False,
         "asset_key": "lumberyard",
         "size": (2, 2),  # 系統大重構 Phase 7：同 FURNACE，改成 2x2 佔地
+    },
+    # 【系統更新：藍頂木屋 2x2 建築】見上方 BuildingType.BLUE_WOOD_HOUSE
+    # enum 成員的說明。走跟 AUTO_HARVESTER 相同的 "passive_effect" 分支
+    # （GameState._update_buildings() 迴圈最前面看到 passive_effect 就
+    # continue 跳過一般開關-配方-倒數邏輯），避免它去讀根本不存在的
+    # "recipe"/"output_key" 而噴 KeyError；但 passive_effect 給的是全新
+    # 值 "STATIC"（不是複用 "AUTO_HARVESTER"/"SPRINKLER"），
+    # _update_buildings() 對應新增一個「什麼都不做、純粹跳過」的分支，
+    # 確保這棟建築不會意外觸發自動採收/自動澆水的邏輯。沒有
+    # "toggleable" 旗標，所以 Building.is_passive 為 True——渲染層
+    # 因此不會畫 ON/OFF 指示燈/進度條（那些只對開關式機台有意義），
+    # 玩家也不能點擊切換它，符合「純裝飾用途、蓋好就定住不動」的定位。
+    BuildingType.BLUE_WOOD_HOUSE: {
+        "name": "藍頂木屋",
+        "unlock_level": 1,   # 純裝飾用途，比照最基礎的伐木場門檻，一開局就能蓋
+        "build_cost_gold": 300,
+        "build_cost_tech": 0,
+        "passive_effect": "STATIC",
+        "walkable": False,
+        "asset_key": "blue_wood_house",
+        "size": (2, 2),
     },
     # 系統大重構 Phase 7：BuildingType.MINE（礦場）連同這筆 BUILDING_DATA
     # 一併整批移除——使用者要求以全新的富鐵花 (CropType.IRON_FLOWER)

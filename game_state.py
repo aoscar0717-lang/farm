@@ -537,7 +537,14 @@ class GameState:
             config = building.config
 
             passive_effect = config.get("passive_effect")
-            if passive_effect == "AUTO_HARVESTER":
+            if passive_effect == "STATIC":
+                # 【系統更新：藍頂木屋 2x2 建築】純裝飾用途的建築，蓋好之後
+                # 不需要每幀做任何事——跟 AUTO_HARVESTER/SPRINKLER 共用
+                # 「有 passive_effect 就跳過一般開關-配方-倒數迴圈」的
+                # 判斷式，但這裡是專屬分支，直接 continue，不掃描周圍
+                # 格子、不累積計時器，避免誤觸其他被動機台的邏輯。
+                continue
+            elif passive_effect == "AUTO_HARVESTER":
                 if self.phase == GamePhase.NIGHT:
                     continue
                 building.scan_timer += dt

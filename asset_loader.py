@@ -758,10 +758,19 @@ class AssetLoader:
             # 【系統更新：自動灑水器 2x2 建築邏輯】跟 game_config.py
             # BUILDING_DATA[SPRINKLER]["size"] 手動保持一致。
             "sprinkler": (2, 2),
+            # 【系統更新：藍頂木屋 2x2 建築】跟 game_config.py
+            # BUILDING_DATA[BLUE_WOOD_HOUSE]["size"] 手動保持一致。
+            "blue_wood_house": (2, 2),
         }
         buildings = [
             ("furnace", "buildings/furnace.png", "furnace"),
             ("lumberyard", "buildings/lumberyard.png", "lumberyard"),
+            # 【系統更新：藍頂木屋 2x2 建築】跟 furnace/lumberyard/sprinkler
+            # 同一個理由補這筆佔位保險：下面專屬載入區塊如果真的讀不到
+            # decorations/House_1_Wood_Base_Blue.png（缺檔/載入例外），
+            # self.images["blue_wood_house"] 至少還有這裡的
+            # generate_placeholder() 佔位圖可用，不會是空白商店卡片。
+            ("blue_wood_house", "buildings/blue_wood_house.png", "blue_wood_house"),
             # 【系統更新：自動灑水器 2x2 建築邏輯】跟 furnace/lumberyard
             # 同一個理由補上這筆：下面 _load_1x4_spritesheet("sprinkler",
             # ...) 成功時會覆寫 self.images["sprinkler"] = frames[0]，
@@ -864,6 +873,66 @@ class AssetLoader:
         sprinkler_sz = (self.cell_size * sprinkler_span_w, self.cell_size * sprinkler_span_h)
         self._load_1x4_spritesheet("sprinkler", "decorations/灑水器.png", sprinkler_sz,
                                     colorkey=None, placeholder_category=None)
+
+        # 3d-3. 藍頂木屋 (BuildingType.BLUE_WOOD_HOUSE) 2x2 建築本體貼圖。
+        # 【系統更新：藍頂木屋 2x2 建築】使用者這次明確要求把
+        # decorations/House_1_Wood_Base_Blue.png 實作成「標準 2x2
+        # 建築」——這張圖先前已經在「隱藏收割機/替換建築外觀」那次任務
+        # 被拿來重新蒙皮 DecorationType.WINDMILL（1x1 裝飾），當時已經
+        # 用 aspect ratio（寬 >= 高 * 3）自動判斷過是靜態單張圖、不是
+        # 1x4 sprite sheet，這裡沿用同一份判斷結果與載入邏輯，只是把
+        # 縮放尺寸換成這次新增的 blue_wood_house_sz（2 * cell_size，
+        # 對應 BUILDING_DATA[BLUE_WOOD_HOUSE]["size"] = (2, 2)），而不是
+        # windmill 那邊用的單格 sz。
+        #
+        # 使用者原始需求寫的是「強制縮放 pygame.transform.scale(image,
+        # (tile_size*2, tile_size*2))，存入 self.assets['blue_wood_
+        # house']」——這裡照專案既有架構修正：self.assets 這個字典從頭
+        # 到尾都不存在（沿用本檔案一貫的 self.images 單張圖 + self.
+        # building_anim_frames 動畫幀兩個字典的既有慣例），key 也照
+        # BUILDING_DATA[BLUE_WOOD_HOUSE]["asset_key"] 的值取一致的
+        # "blue_wood_house"，不是額外造一個新字典。
+        #
+        # 去背處理：跟 windmill 區塊一樣，讓 _load_1x4_spritesheet()/
+        # _load_image() 內部的既有自動偵測邏輯處理（原生 alpha 就走
+        # convert_alpha()，沒有就退回 convert()+set_colorkey）；
+        # House_1_Wood_Base_Blue.png 先前已經確認過是原生帶 alpha 透明
+        # 度的 PNG，這裡不用另外手動指定 colorkey。
+        blue_house_path = os.path.join(ASSET_ROOT, "decorations/House_1_Wood_Base_Blue.png")
+        blue_house_is_spritesheet = False
+        if os.path.exists(blue_house_path):
+            try:
+                raw = pygame.image.load(blue_house_path)
+                img_w, img_h = raw.get_size()
+                blue_house_is_spritesheet = img_h > 0 and img_w >= img_h * 3
+            except Exception as e:
+                print(f"[AssetLoader] 讀取 decorations/House_1_Wood_Base_Blue.png（藍頂木屋建築版）尺寸失敗: {e}")
+
+        blue_house_span_w, blue_house_span_h = BUILDING_SPRITE_GRID_SPAN.get("blue_wood_house", (1, 1))
+        blue_house_sz = (self.cell_size * blue_house_span_w, self.cell_size * blue_house_span_h)
+
+        if blue_house_is_spritesheet:
+            self._load_1x4_spritesheet("blue_wood_house", "decorations/House_1_Wood_Base_Blue.png",
+                                        blue_house_sz, colorkey=None, placeholder_category=None)
+        else:
+            # pygame.transform.scale()（非 smoothscale）強制縮放到完整的
+            # 2x2 大小 (tile_size*2, tile_size*2)，符合使用者「強制縮放」
+            # 的要求；_load_image() 內部本來就是呼叫 pygame.transform.
+            # scale()，不是 smoothscale（本次專案先前已經把僅存的一處
+            # smoothscale 呼叫改掉，全專案統一用不做內插的 scale()，
+            # 放大後像素邊緣才不會糊掉）。
+            blue_house_img = self._load_image("decorations/House_1_Wood_Base_Blue.png",
+                                               blue_house_sz, name="blue_wood_house")
+            self.images["blue_wood_house"] = blue_house_img
+            # 建築渲染管線 (_render_building_tile()) 一律先呼叫
+            # get_anim_frames(asset_key)，沒有動畫幀時才落到 self.images
+            # 靜態圖那條路徑——這裡跟 windmill 區塊一樣，即使來源圖是
+            # 靜態單張，也額外存一份 [image]*4 的單幀陣列進
+            # building_anim_frames，符合使用者「如果架構要求陣列格式，
+            # 存成單幀陣列防止報錯」的要求，也讓這棟建築跟 furnace/
+            # lumberyard/sprinkler 三座既有 2x2 建築在資料格式上完全對
+            # 稱（即使目前 4 個影格內容相同、不會真的播放動畫）。
+            self.building_anim_frames["blue_wood_house"] = [blue_house_img] * 4
 
         # 3e. 富鐵花 (CropType.IRON_FLOWER) 成熟視覺。
         # 【檔名修正】使用者一開始說的檔名是 crops/富鐵花.png，同樣沒有
