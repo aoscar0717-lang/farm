@@ -795,24 +795,27 @@ class NightwatchFarmApp:
         # 一次，_handle_menu_mouse_down() 會把 current_story_index/
         # story_char_index 重新歸零，這裡的初始值只是避免屬性不存在。
         #
-        # 【系統升級：動態劇情背景圖切換】story_lines 這次從「純字串
-        # 陣列」改成「{"text":..., "bg_key":...} 字典陣列」——每一句
-        # 台詞現在都各自帶一個 bg_key，對應 self.loader.get(bg_key)
-        # 拿到的其中一張全螢幕背景圖（title_bg / bg_crash /
+        # 【系統升級：動態劇情背景圖切換（修正分鏡版）】story_lines 從
+        # 「純字串陣列」改成「{"text":..., "bg_key":...} 字典陣列」——
+        # 每一句台詞現在都各自帶一個 bg_key，對應 self.loader.get(
+        # bg_key) 拿到的其中一張全螢幕背景圖（title_bg / bg_crash /
         # bg_iron_flower，三張都在下面 self.loader = AssetLoader(...)
         # 建立時的 load_all() 裡統一載入），_render_story() 會依目前
-        # 播到第幾句動態切換背景，不再像上一版整段劇情共用同一張
-        # title_bg.png。分鏡（哪句配哪張圖）照使用者這次指定的對照表
-        # 原樣套用；最後一句台詞內容也照這次給的新版本更新（「夜巡
-        # 農場」改成「夜巡計畫」）。
+        # 播到第幾句動態切換背景，不再整段劇情共用同一張圖。
+        #
+        # 這次是「修正分鏡版」，跟上一版的對照表不同：title_bg 這次改
+        # 成只在第一句破題用（原本是放在最後一句），最後一句改回
+        # bg_crash（原本是 title_bg）——第 2~6 句的 bg_crash/
+        # bg_iron_flower 分配維持不變。照使用者這次指定的新對照表原樣
+        # 套用。
         self.story_lines = [
-            {"text": "警告：主引擎嚴重受損。即將迫降於未知行星座標...", "bg_key": "bg_crash"},
+            {"text": "警告：主引擎嚴重受損。即將迫降於未知行星座標...", "bg_key": "title_bg"},
             {"text": "系統重啟中... 偵測到外部環境充滿未知生命體。", "bg_key": "bg_crash"},
             {"text": "指揮官，好消息是我們活下來了。更好的消息是，這裡的植物似乎能長出我們急需的工業金屬...", "bg_key": "bg_iron_flower"},
             {"text": "但壞消息是，飛船的防禦護盾已完全離線，而當地的變異生物對金屬的能量極度渴望。", "bg_key": "bg_crash"},
             {"text": "每當夜幕降臨，它們就會蜂擁而至，試圖奪取資源並摧毀我們的機台。", "bg_key": "bg_crash"},
             {"text": "生存的首要任務：開墾荒地，種植『富鐵花』，並盡快建立自動化防禦網。", "bg_key": "bg_iron_flower"},
-            {"text": "『夜巡計畫』基地防禦協議，正式啟動。請指揮官下達第一道指令！", "bg_key": "title_bg"},
+            {"text": "『夜巡計畫』基地防禦協議，正式啟動。請指揮官下達第一道指令！", "bg_key": "bg_crash"},
         ]
         self.current_story_index = 0
         self.story_char_index = 0.0
