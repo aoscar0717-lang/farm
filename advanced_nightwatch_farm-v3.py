@@ -1027,7 +1027,12 @@ class NightwatchFarmApp:
                 # 直接把卡片放進「農田耕作」(CROPS) 分頁清單，對應使用
                 # 者要的分類。跟灑水器一樣要求 required_zone=FARM_ZONE，
                 # 說明文字同步提示。
-                ("PLACE_FARM_WINDMILL", "農業風車", "500G+60工藝 | 需種在農田上，手持種子點擊可3x3範圍播種，並每3秒自動收成", "farm_windmill"),
+                # 【使用者確認：農業風車改成物品成本】說明文字同步更新，
+                # 對應 game_config.py BUILDING_DATA[FARM_WINDMILL] 新的
+                # 建造成本（0G+30工藝+3個礦石結晶+10個木料），跟金幣/
+                # 科技點數兩張卡片「$金額」的呈現風格做出區分，比照
+                # SPRINKLER 卡片「2錠」這種標示物品成本的既有寫法。
+                ("PLACE_FARM_WINDMILL", "農業風車", "30工藝+3礦石結晶+10木料 | 需種在農田上，手持種子點擊可3x3範圍播種，並每3秒自動收成", "farm_windmill"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),

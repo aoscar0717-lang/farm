@@ -841,8 +841,19 @@ BUILDING_DATA = {
     BuildingType.FARM_WINDMILL: {
         "name": "農業風車",
         "unlock_level": 5,
-        "build_cost_gold": 500,
-        "build_cost_tech": 60,
+        # 【使用者確認：農業風車改成物品成本】原本是純金幣/工藝點數
+        # (500G + 60工藝)，完全沒有背包物品成本。使用者確認後的最終
+        # 規格：金幣改成 0（物品成本取代金幣）、工藝點數降到 30、新增
+        # build_cost_items 需要 metal_ore x3 + wood x10——原始需求寫的
+        # 「ore_crystal」這個 key 在程式碼裡不存在，這裡改用真實存在的
+        # "metal_ore"（玩家看到的顯示名稱是「礦石結晶」，透過收成富鐵花
+        # (CropType.IRON_FLOWER) 取得，_item_display_name() 已經有這個
+        # 對照）。build_cost_items 是既有的通用欄位（SPRINKLER 已經在
+        # 用），place_building() 本來就會讀取並檢查/扣除，不用改動任何
+        # 建造邏輯，只需要修改這裡的設定值。
+        "build_cost_gold": 0,
+        "build_cost_tech": 30,
+        "build_cost_items": {"metal_ore": 3, "wood": 10},
         # passive_effect 用全新的 "FARM_WINDMILL" 值（不是複用
         # AUTO_HARVESTER/SPRINKLER/STATIC），讓 _update_buildings() 走
         # 專屬分支：跳過一般開關-配方-倒數迴圈，改成每隔 scan_interval
