@@ -657,18 +657,28 @@ BUILDING_DATA = {
         "asset_key": "sprinkler",
         "size": (2, 2),
     },
-    BuildingType.AUTO_HARVESTER: {
-        "name": "自動採收機",
-        "unlock_level": 5,   # 比灑水器(4)更高階——「自動幫你賺錢」理應是最終期科技
-        "build_cost_gold": 0,
-        "build_cost_tech": 100,
-        "build_cost_items": {"metal_ingot": 5},
-        "passive_effect": "AUTO_HARVESTER",
-        "effect_radius": 1,  # 同樣是以自身為中心的 3x3
-        "scan_interval": 1.0,  # 每 1 秒掃描一次周圍成熟作物，不用每幀掃，省效能
-        "walkable": False,
-        "asset_key": "auto_harvester",
-    },
+    # 【系統邏輯更新：隱藏「收割機」建築】使用者確認目前不需要自動採收
+    # 機，這裡整組 BUILDING_DATA 設定註解掉（不是刪除 BuildingType.
+    # AUTO_HARVESTER 這個 enum 成員本身，也不動 game_state.py 裡
+    # passive_effect == "AUTO_HARVESTER" 那個分支——之後想恢復，只要
+    # 把這段取消註解、商店卡片那行也取消註解即可，不用重寫任何邏輯）。
+    # 拿掉之後 place_building(x, y, BuildingType.AUTO_HARVESTER) 會因為
+    # BUILDING_DATA 查不到這個 key 直接 KeyError——這是刻意的：商店卡片
+    # 移除後玩家已經完全無法從 UI 觸發這個呼叫，如果還有任何程式碼路徑
+    # 意外呼叫到它，直接讓它壞掉遠比「悄悄允許建造一個已經隱藏的建築」
+    # 更安全，能第一時間發現問題而不是被吃掉。
+    # BuildingType.AUTO_HARVESTER: {
+    #     "name": "自動採收機",
+    #     "unlock_level": 5,   # 比灑水器(4)更高階——「自動幫你賺錢」理應是最終期科技
+    #     "build_cost_gold": 0,
+    #     "build_cost_tech": 100,
+    #     "build_cost_items": {"metal_ingot": 5},
+    #     "passive_effect": "AUTO_HARVESTER",
+    #     "effect_radius": 1,  # 同樣是以自身為中心的 3x3
+    #     "scan_interval": 1.0,  # 每 1 秒掃描一次周圍成熟作物，不用每幀掃，省效能
+    #     "walkable": False,
+    #     "asset_key": "auto_harvester",
+    # },
     # Phase 4.5：打通上游生產線。伐木場/礦場刻意沿用熔爐那套
     # 「開關-配方-倒數」模型（is_active/is_processing/toggle_building()/
     # GameState._update_buildings() 既有的那段迴圈），而不是像 SPRINKLER/

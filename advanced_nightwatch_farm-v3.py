@@ -1042,7 +1042,15 @@ class NightwatchFarmApp:
                 # 感的「自動澆水」講法；名稱「自動灑水器」維持不變（使用
                 # 者這次只要求改描述，沒有要求改名）。
                 ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 水車齒輪自動運轉，每8秒為周圍3x3灌溉溪水", "sprinkler"),
-                ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100工藝 | 自動採收3x3", "auto_harvester"),
+                # 【系統邏輯更新：隱藏「收割機」建築】商店卡片註解掉，
+                # 對應的 BUILDING_DATA[AUTO_HARVESTER] 設定同步在
+                # game_config.py 註解掉（見該處說明）；_CARD_BUILDING_
+                # TYPES/_update_card_states()/_handle_mouse_up() 裡還留
+                # 著的 "PLACE_AUTO_HARVESTER" 分支不會動——那些都是「只
+                # 有真的存在這張卡片時才會被觸發」的程式碼，卡片本身沒了
+                # 就自然不會被呼叫到，不用逐一清乾淨，之後要復原這個
+                # 建築時也不用重新補寫這些分支。
+                # ("PLACE_AUTO_HARVESTER", "自動採收機", "5錠+100工藝 | 自動採收3x3", "auto_harvester"),
                 # Phase 4.5：打通上游生產線的基礎設施，一樣是「純資本」
                 # ——只花金幣，不消耗任何背包物品，所以說明文字維持跟
                 # 一般景觀裝飾一致的「$金額」格式，不用像灑水器/採收機
@@ -2107,10 +2115,17 @@ class NightwatchFarmApp:
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
                 self.floating_texts.append(FloatingText("⏸️ 原料不足，已自動停工", px - 55, py - 14, C_RED))
             elif ev.event_type == EventType.BUILDING_COLLECTED:
+                # 【系統邏輯更新：伐木場生產】原本這裡直接顯示
+                # ev.data['output_key']，是內部英文代稱（"wood"/
+                # "metal_ingot"），玩家會在伐木場/熔爐頭上看到「+1
+                # wood」這種裸英文浮動字——改讀 game_state.py 新增的
+                # "output_name"（已經用 _item_display_name() 轉成中文，
+                # 例如「木料」），伐木場運作完成時會正確顯示「+1 木料」。
                 px = GRID_X + ev.data["x"] * CELL_SIZE + CELL_SIZE // 2
                 py = GRID_Y + ev.data["y"] * CELL_SIZE
+                output_name = ev.data.get("output_name", ev.data["output_key"])
                 self.floating_texts.append(FloatingText(
-                    f"+{ev.data['output_qty']} {ev.data['output_key']}", px - 20, py - 14, C_FLOATTEXT_GOLD
+                    f"+{ev.data['output_qty']} {output_name}", px - 20, py - 14, C_FLOATTEXT_GOLD
                 ))
                 self._spawn_particles(px, py, C_GOLD, count=12)
 

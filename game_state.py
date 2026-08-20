@@ -624,11 +624,22 @@ class GameState:
                         self.crop_inventory[output_key] = self.crop_inventory.get(output_key, 0) + output_qty
                     else:
                         self.inventory[output_key] = self.inventory.get(output_key, 0) + output_qty
+                    # 【系統邏輯更新：伐木場生產】event data 這裡新增
+                    # "output_name"——渲染層 (advanced_nightwatch_
+                    # farm-v3.py 的 BUILDING_COLLECTED 浮動文字) 原本
+                    # 直接把 output_key（"wood"/"metal_ingot" 這種內部
+                    # 英文代稱）塞進 "+{qty} {key}" 字串，玩家會在伐木場
+                    # 頭上看到「+1 wood」這種裸英文，跟這裡的事件 log
+                    # 訊息（已經用 _item_display_name() 轉成「木料」）
+                    # 顯示不一致。這裡把轉換過的中文名稱一併放進 data，
+                    # 讓浮動文字也能改讀這個欄位，不用在渲染層重新引入
+                    # 一份翻譯表。
                     self._emit_event(
                         EventType.BUILDING_COLLECTED,
                         f"📦 {config['name']} 自動產出 {output_qty} 個 {self._item_display_name(output_key)}！",
                         {"x": building.x, "y": building.y, "building_type": building.building_type.value,
-                         "output_key": output_key, "output_qty": output_qty}
+                         "output_key": output_key, "output_qty": output_qty,
+                         "output_name": self._item_display_name(output_key)}
                     )
 
             if building.is_active and not building.is_processing:
