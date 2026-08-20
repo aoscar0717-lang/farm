@@ -1080,6 +1080,19 @@ class Building:
                                     # scan_interval 就掃描一次周圍作物，SPRINKLER 【系統更新：自動灑水器
                                     # 2x2 建築邏輯】之後也改用同一個欄位累積到 water_interval 就自動澆水
                                     # 一次，兩者互不影響（各自的 Building 實例各有一份）
+    # 【遊戲機制升級：實作風車的「全自動循環種植」模式】只對
+    # BuildingType.FARM_WINDMILL 有意義：玩家手持某種種子點擊風車時
+    # 寫入這裡（見 game_state.py 的 sow_around_building()），記住「這座
+    # 風車現在負責自動循環種植哪種作物」。之所以放在通用的 Building
+    # dataclass 而不是額外拆一個 WindmillBuilding 子類別，是延續這個
+    # 專案從 Phase 1 就維持的「所有機台共用同一個 dataclass、用
+    # BUILDING_DATA 的設定值 + 少數幾個泛用欄位互相組合出不同行為」的
+    # 既有設計（跟上面 scan_timer 被 AUTO_HARVESTER/SPRINKLER 共用是
+    # 同一個道理），不是為了節省程式碼而隨便共用。對其餘所有建築（熔爐/
+    # 伐木場/灑水器/藍頂莊園木屋）完全沒有意義，預設 None、永遠不會被
+    # 讀取。CropType 就定義在本檔案這個 Building dataclass 之前，
+    # 直接寫 Optional[CropType] 不需要額外處理。
+    target_crop_type: Optional[CropType] = None
 
     @property
     def config(self) -> dict:

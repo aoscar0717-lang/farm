@@ -629,12 +629,40 @@ class GameState:
                     continue
                 building.scan_timer = 0.0
                 radius = config.get("effect_radius", 1)
+                # 【遊戲機制升級：實作風車的「全自動循環種植」模式】原本
+                # 這裡只做「收成」，這次擴充成「收成 + 立刻補種同一種
+                # 作物」的永久循環——不是額外開一個 GROWING/READY_TO_
+                # HARVEST 狀態機（那其實是 Crop 這個 dataclass 早就有的
+                # 概念，CropStage.SEED/SPROUT/GROWING/MATURE +
+                # growth_timer，Building 身上重複做一份等於同時維護兩套
+                # 「這格東西長到哪了」的真相來源，容易兜不起來），而是
+                # 讓風車在每次收成的同一格立刻呼叫 plant_crop() 補種
+                # target_crop_type——新種下去的 Crop 走的是完全相同的
+                # 既有生長管線，下一輪 scan_interval 再掃到時，它多半又
+                # 已經成熟，自然形成「收成->補種->收成->補種...」的無限
+                # 循環，直到玩家手動剷除這格作物、拔除風車本身、或用
+                # 別種種子重新點擊風車換掉 target_crop_type 為止。
+                # 同時也補種範圍內「原本就是空地」的農田格（例如玩家
+                # 一開始點擊時金幣不夠、只種了一部分；或某格被剷除過）
+                # ——只要 target_crop_type 有設定，每次 scan 都會盡量把
+                # 範圍內所有空農田補滿，不用等玩家再點一次風車。
+                target_crop_type = building.target_crop_type
                 for dy in range(-radius, radius + 1):
                     for dx in range(-radius, radius + 1):
+                        if dx == 0 and dy == 0:
+                            continue
                         nx, ny = building.x + dx, building.y + dy
                         ntile = self.get_tile(nx, ny)
-                        if ntile and ntile.crop is not None and ntile.crop.is_mature:
+                        if not ntile:
+                            continue
+                        if ntile.crop is not None and ntile.crop.is_mature:
                             self.harvest_crop(nx, ny)
+                        if target_crop_type is not None and ntile.crop is None and ntile.zone == ZoneType.FARM_ZONE:
+                            # 金幣不夠時 plant_crop() 會自然失敗、靜默
+                            # 略過（不 emit 任何錯誤事件），這格會維持
+                            # 空地，等下一次 scan_interval 金幣夠了再
+                            # 自動補上，不會讓遊戲卡住或洗版錯誤訊息。
+                            self.plant_crop(nx, ny, target_crop_type)
                 continue
             elif passive_effect == "SPRINKLER":
                 # 【系統更新：自動灑水器 2x2 建築邏輯】改成需要玩家手動
@@ -810,9 +838,19 @@ class GameState:
             req_lvl = CROP_DATA[crop_type]["unlock_level"]
             return 0, 0, f"{CROP_DATA[crop_type]['name']} 需要莊園等級 Lv.{req_lvl} 才能種植！"
 
+        # 【遊戲機制升級：實作風車的「全自動循環種植」模式】玩家手持某
+        # 種子點擊風車的當下，就記住「這座風車以後自動循環種植這種
+        # 作物」——寫在這裡（解鎖等級檢查之後、金幣檢查之前），是刻意
+        # 讓「記住種子」跟「這次立刻夠不夠錢種下去」兩件事分開：就算
+        # 玩家這次點擊時錢不夠、一格都種不下去，風車還是會記住這個選擇
+        # ，之後 _update_buildings() 的自動收成循環裡，只要日後金幣夠了
+        # 就會自動幫忙種下去，不需要玩家再點一次。這正是使用者要求的
+        # 「就算玩家點別的東西，也會記住這個種子」。
+        tile.building.target_crop_type = crop_type
+
         cost = CROP_DATA[crop_type]["seed_cost"]
         if self.gold < cost:
-            return 0, 0, f"金幣不足！購買種子需要 {cost} 金幣，目前持有 {self.gold} 金幣。"
+            return 0, 0, f"金幣不足！購買種子需要 {cost} 金幣，目前持有 {self.gold} 金幣。（風車已記住 {CROP_DATA[crop_type]['name']}，之後金幣足夠會自動補種）"
 
         radius = tile.building.config.get("effect_radius", 1)
         planted = 0
