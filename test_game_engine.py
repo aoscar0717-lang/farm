@@ -110,16 +110,20 @@ def test_scarecrow_and_trap():
 
 
 def test_game_over_bankruptcy():
-    print("[測試 5] 破產淘汰判定測試...")
+    print("[測試 5] 破產判定已取消測試...")
+    # 【使用者要求：取消「金錢過少判定失敗」機制】原本這裡測試「持金
+    # 過低 + 農田無作物」會觸發強制破產淘汰；使用者要求取消這個機制
+    # 之後，改成驗證同樣的極端窮困情境「不會」再被判定成遊戲結束，
+    # check_game_over() 應該回傳 False，玩家可以繼續遊戲。
     game = GameState()
     game.gold = 5
     for row in game.grid:
         for tile in row:
             tile.crop = None
-            
-    assert game.check_game_over()
-    assert game.game_over
-    print(f"  ✓ 破產判定正常觸發: {game.game_over_reason}")
+
+    assert not game.check_game_over(), "金錢過少+無作物不應再被判定為遊戲失敗"
+    assert not game.game_over, "取消破產機制後，遊戲不應被強制結束"
+    print("  ✓ 金錢過少不再強制判定失敗，玩家可以繼續遊戲！")
 
 
 def test_starting_gold_and_fence_durability():

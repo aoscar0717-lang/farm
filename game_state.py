@@ -2253,25 +2253,19 @@ class GameState:
     # =========================================================================
 
     def check_game_over(self) -> bool:
-        if self.game_over:
-            return True
-
-        min_seed_cost = min(c["seed_cost"] for c in CROP_DATA.values())
-        has_enough_gold = (self.gold >= min_seed_cost)
-
-        crops_count = sum(
-            1 for row in self.grid for tile in row
-            if tile.zone == ZoneType.FARM_ZONE and tile.crop is not None
-        )
-
-        if not has_enough_gold and crops_count == 0:
-            self.game_over = True
-            self.game_over_reason = f"莊園資金斷絕破產！持金不足購買任何種子（< {min_seed_cost} G），且農田已無作物！"
-            self._emit_event(
-                EventType.GAME_OVER,
-                f"💀 【遊戲結束】{self.game_over_reason}",
-                {"total_days_survived": self.day_count, "final_gold": self.gold}
-            )
-            return True
-
-        return False
+        # 【使用者要求：取消「金錢過少判定失敗」機制】原本這裡會在
+        # 「持金不足以買任何一種最便宜的種子」且「農田上完全沒有任何
+        # 作物」時，直接判定破產、強制結束遊戲（game_over=True）。
+        # 使用者要求取消這個判定，玩家沒錢又沒作物時只是手頭很緊，
+        # 不會被強制淘汰、遊戲繼續進行，讓玩家有機會靠白天分紅/訂單/
+        # 存活過夜等其他方式東山再起。
+        #
+        # 保留整個方法本身跟 game_over/game_over_reason 兩個既有欄位不
+        # 刪：(1) update()/_execute_enemy_action() 等既有呼叫點會繼續呼叫
+        # check_game_over()，直接刪掉方法會讓那些呼叫點噴例外；(2) 這是
+        # 目前唯一的破產判定路徑，但 self.game_over 這個旗標本身是通用
+        # 的「遊戲是否已結束」開關，UI 判斷畫面要不要顯示 Game Over
+        # 畫面也讀這個旗標，未來如果想加其他真正的敗北條件（例如金庫
+        # 被搬空到某個門檻、莊園繁榮度連續倒退...），可以直接在這裡
+        # 加新的判斷分支，不用重新設計整套遊戲結束機制。
+        return self.game_over
