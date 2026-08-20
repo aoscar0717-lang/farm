@@ -2242,21 +2242,17 @@ class NightwatchFarmApp:
     def _render_main_menu(self):
         """開始畫面。
 
-        【系統升級：動態劇情背景圖切換】背景圖 key 這次從上一版的
-        "main_menu_bg"（讀 assets/crops/bg_crash.png）統一改成
-        "bg_crash"（讀 assets/bg_crash.png，根目錄，不在 crops/ 底下
-        了）——這次跟 title_bg/bg_iron_flower 一起放進同一組「三張
-        全螢幕劇情/選單背景圖」共用載入邏輯（見 asset_loader.py），不
-        再另外維護一個專門給主選單用、路徑指向 crops/ 底下的獨立
-        "main_menu_bg" key，兩者本來就是同一張圖，統一成一個 key 之後
-        _render_story() 播到最後一句（bg_key="title_bg"）跟這裡的主
-        選單背景圖也能共用完全同一套載入/取用機制。self.title_bg 這個
-        獨立於 AssetLoader 之外的舊載入路徑已經整個移除（見 __init__
-        的說明），STORY/MENU 兩個畫面現在統一透過 self.loader.get(...)
-        取用背景圖。
+        【修復：主選單背景圖與標題文字更新】背景圖 key 這次從
+        "bg_crash"（墜毀太空船場景圖，語意上是「已經迫降之後」的劇情
+        畫面用圖，不該出現在玩家連新遊戲都還沒點的最初主選單）改回
+        "title_bg"——title_bg 才是專屬給主選單用的標題背景圖。
+        bg_crash 本身沒有被刪除，_render_story() 的分鏡表裡（見
+        __init__ 的 self.story_lines）第 2/4/5/7 句仍然照舊使用它，
+        這裡單純是主選單改用另一個 key，兩張圖各自的用途沒有互相
+        影響。
 
-        loader.get("bg_crash") 理論上不會是 None：AssetLoader.
-        load_all() 一律會呼叫 self._load_image("bg_crash.png", ...)
+        loader.get("title_bg") 理論上不會是 None：AssetLoader.
+        load_all() 一律會呼叫 self._load_image("title_bg.png", ...)
         幫這個 key 賦值，就算檔案還沒放進 assets/ 目錄，_load_image()
         內部的 except 也會自動退回 generate_placeholder() 生成一張
         佔位圖，而不是回傳 None。這裡仍然保留 if/else 防呆判斷，跟這
@@ -2268,12 +2264,12 @@ class NightwatchFarmApp:
         真的貼圖時自動退回立體木頭色塊）+ blit_text_with_shadow（帶
         陰影文字，深色背景圖上也看得清楚）畫按鈕，維持跟遊戲其餘彈窗
         一致的視覺語言，不是另外設計一套風格。"""
-        main_menu_bg = self.loader.get("bg_crash")
+        main_menu_bg = self.loader.get("title_bg")
         if main_menu_bg:
             self.screen.blit(main_menu_bg, (0, 0))
         else:
             # 找不到圖時的後備：深藍色純色背景，比純黑柔和，也呼應
-            # 「墜毀太空船」這個主題色調的暗示（深空藍），不會讓畫面
+            # 「星際拓荒」這個主題色調的暗示（深空藍），不會讓畫面
             # 看起來像壞掉、缺圖的空白畫面。
             self.screen.fill((12, 16, 38))
 
@@ -2286,24 +2282,32 @@ class NightwatchFarmApp:
         # 【UI 視覺優化：修復主選單標題吃色問題】上面那層是整個畫面的
         # 淡淡遮罩（alpha 90，本來就存在），這裡另外疊一塊「只蓋在標題
         # 文字附近」、更暗一階的區域性遮罩（alpha 100，寬度等於整個
-        # 螢幕、高度約 120px），專門把主標題「夜巡農場 Nightwatch
-        # Farm」正後方那一小塊背景再壓暗一次——黃色文字最容易在太空船
-        # 背景圖本身較亮的區域（例如星空/艙體反光）被吃色，這塊局部加
-        # 深的遮罩加上下面的文字描邊雙重保險，確保不管背景圖哪個區域
-        # 剛好落在標題位置，文字都維持足夠對比度。
+        # 螢幕、高度約 120px），專門把主標題「夜巡計畫：異星拓荒
+        # (Project Nightwatch)」正後方那一小塊背景再壓暗一次——黃色
+        # 文字最容易在 title_bg 背景圖本身較亮的區域（例如星空/艙體
+        # 反光）被吃色，這塊局部加深的遮罩加上下面的文字描邊雙重保險，
+        # 確保不管背景圖哪個區域剛好落在標題位置，文字都維持足夠對
+        # 比度——這套機制是既有的，這次只是把註解裡引用的舊標題文字
+        # 同步更新，機制本身不用改。
         title_band_h = 120
         title_band_y = SCREEN_HEIGHT // 2 - 180 - title_band_h // 2
         title_band = pygame.Surface((SCREEN_WIDTH, title_band_h), pygame.SRCALPHA)
         title_band.fill((0, 0, 0, 100))
         self.screen.blit(title_band, (0, title_band_y))
 
+        # 【修復：主選單標題與副標題文字更新】文案改成科幻求生風格，
+        # 呼應 title_bg 的迫降場景跟 STORY 開場劇情的敘事口吻（主引擎
+        # 受損、迫降未知座標），不再是原本偏休閒農場模擬的「經典精緻
+        # 像素塔防農場」說法。
+        #
         # 主標題/副標題改用 draw_text_with_outline()：8 方向黑色描邊 +
         # 正中央黃色/米白色主體文字，比原本 blit_text_with_shadow() 的
-        # 4 方向 1px 描邊更強，搭配上面新增的局部遮罩，雙重解決背景圖
-        # 亮度不可預期造成的吃色問題。
-        draw_text_with_outline(self.screen, "🌾 夜巡農場 Nightwatch Farm", FONT_TITLE, C_GOLD, (0, 0, 0),
+        # 4 方向 1px 描邊更強，搭配上面既有的局部遮罩，雙重解決背景圖
+        # 亮度不可預期造成的吃色問題——這套「描邊 + 局部遮罩」的組合是
+        # 既有機制，換了背景圖跟文案之後同樣適用，不需要另外加強。
+        draw_text_with_outline(self.screen, "夜巡計畫：異星拓荒 (Project Nightwatch)", FONT_TITLE, C_GOLD, (0, 0, 0),
                                 center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 180), outline_width=2)
-        draw_text_with_outline(self.screen, "經典精緻像素塔防農場", FONT_SM, C_TEXT_ON_DARK, (0, 0, 0),
+        draw_text_with_outline(self.screen, "「伊甸號」迫降於未知座標。通訊中斷，引擎損毀...", FONT_SM, C_TEXT_ON_DARK, (0, 0, 0),
                                 center_pos=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140), outline_width=2)
 
         def _draw_menu_button(rect, label, base_color, disabled=False):
