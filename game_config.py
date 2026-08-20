@@ -672,7 +672,13 @@ BUILDING_DATA = {
     #      _get_sprinkler_boosted_tiles()/growth_bonus_dt_mult 這兩個
     #      東西在 game_state.py 裡被移除的原因。
     BuildingType.SPRINKLER: {
-        "name": "自動灑水器",
+        # 【資產替換與切圖邏輯升級】名稱改成「科幻噴水池」——這裡改的是
+        # BUILDING_DATA["name"]，是遊戲內所有訊息（建造成功/失敗提示、
+        # 拆除提示、鎖卡文字裡的 f"{config['name']} 需要..." 等）實際
+        # 讀取的內部顯示名稱，不是只改商店卡片文字。只改卡片、不改這裡
+        # 的話，卡片會顯示新名字，但建造成功後跳出的提示、右鍵拆除的
+        # 訊息卻還是舊名字「自動灑水器」，兩邊會對不上。
+        "name": "科幻噴水池",
         "unlock_level": 4,   # 比熔爐(3)高一階，符合「高階科技」的定位
         "build_cost_gold": 0,
         "build_cost_tech": 0,

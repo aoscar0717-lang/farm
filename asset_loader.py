@@ -64,6 +64,15 @@ WINDMILL_HUB_COLS = 2
 WINDMILL_HUB_ROWS = 2
 WINDMILL_HUB_CHROMA_KEY = (0, 0, 0)
 
+# ---- 科幻噴水池 (assets/decorations/噴水池.png) 精靈圖設定 -----------------
+# 【資產替換與切圖邏輯升級：適配 2x2 網格動畫】灑水器 (BuildingType.
+# SPRINKLER) 這次把外觀從 1x4 橫向長條圖 (灑水器.png) 換成 2x2 田字型
+# 排列的「科幻噴水池.png」，跟農業風車的 風車.png 是同一種規格：2 欄
+# x 2 列共 4 格，row-major 順序切出，背景純黑去背。
+FOUNTAIN_HUB_COLS = 2
+FOUNTAIN_HUB_ROWS = 2
+FOUNTAIN_HUB_CHROMA_KEY = (0, 0, 0)
+
 # ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
 # 實測 128x32，原本以為是 4 格橫向排列、每格 32x32，但其實每組是 2 個 16x32 並排
 # (左邊健康，右邊枯萎)。將寬度減半為 16 以排除連在一起的枯萎版本。
@@ -599,20 +608,23 @@ class AssetLoader:
         }
         return frames
 
-    def _load_farm_windmill_frames(self):
+    def _load_2x2_grid_frames(self, rel_path: str, cols: int, rows: int,
+                               chroma_key: Tuple[int, int, int] = (0, 0, 0)) -> list:
         """
-        切出 decorations/風車.png 的 2x2 精靈圖，回傳 List[Surface]（4
-        格，row-major 順序：左上、右上、左下、右下）。這座建築沒有
-        方向性（1x1、原地待機旋轉），不像暗夜魔蝠/野豬那樣需要
-        Dict[方向, List[Surface]]，直接回傳一份扁平的幀列表即可。畫格
-        維持精靈圖原始尺寸，縮放留給呼叫端依格子大小處理。
+        【資產替換與切圖邏輯升級：適配 2x2 網格動畫】通用的「2x2 田字型
+        Sprite Sheet」切圖器，抽出來給農業風車 (風車.png) 跟這次的科幻
+        噴水池 (噴水池.png) 共用——兩者原本是各自獨立的方法，內容除了
+        檔名/常數完全一樣，這次改成同一份泛用邏輯，之後如果還有其他
+        1x1、無方向性、2x2 排列的待機動畫素材，也可以直接呼叫這個方法
+        不用再複製一份。
 
+        回傳 List[Surface]，row-major 順序（左上、右上、左下、右下）。
         找不到檔案 / 切不出畫格時回傳 []，呼叫端要自己 fallback 回
         generate_placeholder() 產生的佔位圖，不要讓遊戲直接壞掉。
         """
-        full_path = os.path.join(ASSET_ROOT, "decorations/風車.png")
+        full_path = os.path.join(ASSET_ROOT, rel_path)
         if not os.path.exists(full_path):
-            print("[AssetLoader] 找不到 decorations/風車.png，農業風車動畫將退回佔位圖。")
+            print(f"[AssetLoader] 找不到 {rel_path}，對應的動畫將退回佔位圖。")
             return []
 
         try:
@@ -622,27 +634,43 @@ class AssetLoader:
             # 同一套處理，對應使用者要求的 set_colorkey((0, 0, 0))。
             sheet = pygame.image.load(full_path).convert()
         except Exception as e:
-            print(f"[AssetLoader] 載入 decorations/風車.png 失敗: {e}")
+            print(f"[AssetLoader] 載入 {rel_path} 失敗: {e}")
             return []
 
-        sheet.set_colorkey(WINDMILL_HUB_CHROMA_KEY, pygame.RLEACCEL)
+        sheet.set_colorkey(chroma_key, pygame.RLEACCEL)
 
         sheet_w, sheet_h = sheet.get_size()
-        frame_width = sheet_w // WINDMILL_HUB_COLS
-        frame_height = sheet_h // WINDMILL_HUB_ROWS
+        frame_width = sheet_w // cols
+        frame_height = sheet_h // rows
         if frame_width <= 0 or frame_height <= 0:
-            print(f"[AssetLoader] 風車.png 尺寸 {sheet.get_size()} 切不出 "
-                  f"{WINDMILL_HUB_COLS}x{WINDMILL_HUB_ROWS} 的畫格。")
+            print(f"[AssetLoader] {rel_path} 尺寸 {sheet.get_size()} 切不出 {cols}x{rows} 的畫格。")
             return []
 
         frames = []
-        for row in range(WINDMILL_HUB_ROWS):
-            for col in range(WINDMILL_HUB_COLS):
+        for row in range(rows):
+            for col in range(cols):
                 rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
                 frame = sheet.subsurface(rect).copy()
-                frame.set_colorkey(WINDMILL_HUB_CHROMA_KEY, pygame.RLEACCEL)
+                frame.set_colorkey(chroma_key, pygame.RLEACCEL)
                 frames.append(frame.convert_alpha())
         return frames
+
+    def _load_farm_windmill_frames(self):
+        """切出 decorations/風車.png 的 2x2 精靈圖（農業風車待機旋轉動畫），
+        委派給通用的 _load_2x2_grid_frames()，見該方法的說明。"""
+        return self._load_2x2_grid_frames("decorations/風車.png", WINDMILL_HUB_COLS, WINDMILL_HUB_ROWS,
+                                           WINDMILL_HUB_CHROMA_KEY)
+
+    def _load_fountain_hub_frames(self):
+        """
+        切出 decorations/噴水池.png 的 2x2 精靈圖（科幻噴水池待機噴水
+        動畫），委派給通用的 _load_2x2_grid_frames()。
+        【檔名澄清】使用者提到「副檔名可能是 jpg 或 png」，實際用
+        device_list_dir 確認 assets/decorations/ 底下放的是「噴水池
+        .png」（沒有 .jpg 版本），這裡直接用真實存在的檔名。
+        """
+        return self._load_2x2_grid_frames("decorations/噴水池.png", FOUNTAIN_HUB_COLS, FOUNTAIN_HUB_ROWS,
+                                           FOUNTAIN_HUB_CHROMA_KEY)
 
     def _load_dog_walk_frames(self):
         """
@@ -976,36 +1004,36 @@ class AssetLoader:
         self._load_1x4_spritesheet("lumberyard", "decorations/伐木場.png", lumberyard_sz,
                                     colorkey=None, placeholder_category="lumberyard")
 
-        # 3d-2. 自動灑水器 Sprite Sheet 特定影格動畫。
-        # 【系統更新：自動灑水器 2x2 建築邏輯】使用者已經把
-        # decorations/灑水器.png 放進 assets/，明確說明是「1x4 的橫向
-        # 長條圖」——跟伐木場/富鐵花是同一種規格，直接沿用同一份通用的
-        # _load_1x4_spritesheet()，不需要另外寫一套載入邏輯。
+        # 3d-2. 灑水器 -> 科幻噴水池 (BuildingType.SPRINKLER) 待機噴水
+        # 動畫。
+        # 【資產替換與切圖邏輯升級：適配 2x2 網格動畫】外觀從舊版
+        # decorations/灑水器.png（1x4 橫向長條圖）換成新的
+        # decorations/噴水池.png（2x2 田字型排列），asset_key 沿用不變
+        # 的 "sprinkler"（BuildingType.SPRINKLER 這個 enum 成員、
+        # action_id "PLACE_SPRINKLER" 都不變，只換貼圖來源跟切法，跟
+        # 「熔爐改名不動 enum」是同一種處理原則）。改呼叫新增的通用
+        # _load_fountain_hub_frames()，不再用 _load_1x4_spritesheet()。
         #
-        # colorkey 傳 None：需求文字寫「若背景為純白則 set_colorkey
-        # ((255,255,255))，若有 Alpha 通道則 convert_alpha()」，這正是
-        # _load_1x4_spritesheet() 內部 colorkey=None 時的既有自動偵測
-        # 行為（讀 raw.get_masks()[3] 判斷來源圖是否原生帶 alpha，有就
-        # convert_alpha()，沒有就退回 convert() + set_colorkey
-        # ((255,255,255))），完全符合規格描述，不用另外手寫判斷式。
-        #
-        # 縮放尺寸用跟 3b./3c./3d. 同一份 BUILDING_SPRITE_GRID_SPAN 對照
-        # 表算出來的 sprinkler_sz（2 * cell_size，也就是需求裡的
-        # tile_size * 2），跟 game_config.py 這次新增的
-        # BUILDING_DATA[SPRINKLER]["size"] = (2, 2) 對齊，
-        # _render_building_tile() 既有的 span_w/span_h 定位公式不用改
-        # 就能正確處理這個新的 2x2 建築。
-        #
-        # placeholder_category 這裡刻意留 None（不新增一個
-        # "sprinkler" 專屬佔位圖分類）：找不到檔案時會退回
-        # generate_placeholder() 最泛用的半透明灰色方塊，不影響遊戲
-        # 運作，之後如果想要更有辨識度的佔位圖，可以再仿照
-        # _PLACEHOLDER_KEYWORDS 裡 "furnace"/"lumberyard" 的寫法加一組
-        # 專屬分類，這次不在需求範圍內，不順手多做。
+        # 縮放尺寸：SPRINKLER 上一個任務已經從 2x2 改回 1x1，
+        # BUILDING_SPRITE_GRID_SPAN.get("sprinkler", (1,1)) 現在會拿到
+        # (1, 1)，sprinkler_sz 等於 (cell_size, cell_size)，正好對應
+        # 使用者這次要求的「強制縮放為符合地圖網格的大小 (tile_size,
+        # tile_size)」，不用另外寫死。
         sprinkler_span_w, sprinkler_span_h = BUILDING_SPRITE_GRID_SPAN.get("sprinkler", (1, 1))
         sprinkler_sz = (self.cell_size * sprinkler_span_w, self.cell_size * sprinkler_span_h)
-        self._load_1x4_spritesheet("sprinkler", "decorations/灑水器.png", sprinkler_sz,
-                                    colorkey=None, placeholder_category=None)
+        fountain_frames_native = self._load_fountain_hub_frames()
+        if fountain_frames_native:
+            self.building_anim_frames["sprinkler"] = [
+                pygame.transform.scale(f, sprinkler_sz) for f in fountain_frames_native
+            ]
+            # 跟其餘機台同樣的既有慣例：動畫幀切出成功時，順手把
+            # self.images["sprinkler"] 覆寫成 frame[0]，讓只呼叫
+            # loader.get("sprinkler") 的商店卡片也能顯示真的噴水池
+            # 貼圖。
+            self.images["sprinkler"] = self.building_anim_frames["sprinkler"][0]
+        # 噴水池.png 缺檔或切圖失敗時，building_anim_frames 沒有這個
+        # key，self.images["sprinkler"] 維持上面 buildings 清單載入的
+        # generate_placeholder() 佔位圖，不會讓遊戲壞掉。
 
         # 3d-3. 藍頂木屋 (BuildingType.BLUE_WOOD_HOUSE) 2x2 建築本體貼圖。
         # 【系統更新：藍頂木屋 2x2 建築】使用者這次明確要求把

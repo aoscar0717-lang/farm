@@ -1015,7 +1015,12 @@ class NightwatchFarmApp:
                 # BuildingType.SPRINKLER 都不變，_CARD_BUILDING_TYPES/
                 # 點擊處理/鎖卡判定不需要跟著改——這些查表邏輯都是用
                 # action_id 當 key，不關心卡片實際放在哪個分頁清單裡。
-                ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 需種在農田上，每8秒為周圍3x3灌溉溪水", "sprinkler"),
+                # 【資產替換與切圖邏輯升級】名稱改成「科幻噴水池」，
+                # action_id "PLACE_SPRINKLER"/asset_key "sprinkler"/
+                # BuildingType.SPRINKLER 都不變（只換外觀貼圖跟顯示
+                # 名稱），game_config.py 的 BUILDING_DATA["name"] 同步
+                # 改了，兩邊名稱保持一致。
+                ("PLACE_SPRINKLER", "科幻噴水池", "2錠 | 需種在農田上，每8秒為周圍3x3灌溉溪水", "sprinkler"),
                 # 【系統核心更新：實作 1x1 農業中樞風車】BUILDING_DATA
                 # 沒有 "category"/"tab" 這種欄位（商店分頁是這裡寫死的
                 # tuple 清單，不是從 BUILDING_DATA 動態讀出來的），這裡
@@ -3299,7 +3304,7 @@ class NightwatchFarmApp:
     # 時的處理方式一致）。
     _BUILDING_ICONS = {
         BuildingType.FURNACE: "熔煉",
-        BuildingType.SPRINKLER: "灑水",
+        BuildingType.SPRINKLER: "噴泉",  # 【資產替換與切圖邏輯升級】對應改名「科幻噴水池」
         BuildingType.AUTO_HARVESTER: "採收",
         BuildingType.LUMBERYARD: "伐木",
         BuildingType.BLUE_WOOD_HOUSE: "木屋",
