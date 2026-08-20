@@ -2225,9 +2225,14 @@ class GameState:
                             f"🏆 柴犬成功消滅了 {closest_enemy.config['name']}！",
                             {"enemy_id": closest_enemy.id}
                         )
-                    else:
-                        if closest_enemy.enemy_type != EnemyType.BOSS_BOAR_KING:
-                            self._set_enemy_flee_path(closest_enemy)
+                    # 咬一口沒咬死不再強制逃跑：敵人維持原本的 state
+                    # (MOVING 在路上 / ACTING 正在掠奪中)，下一輪照舊
+                    # 攻擊果園，直到真的被咬死為止。跟先前
+                    # _retreat_or_reengage() 修掉的「吃完作物就跑」是
+                    # 同一種「不合理撤退」，只是這裡的觸發點是被狗咬，
+                    # 那次改動沒有涵蓋到這一段，屬於殘留的不一致。
+                    # 蜂巢攻擊 (_update_beehives) 本來就沒有這段
+                    # 「打不死就逃跑」邏輯，這裡改完兩者才是一致的。
             else:
                 step = dog.speed * dt
                 dog.x += (dx / dist) * step

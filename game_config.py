@@ -909,7 +909,7 @@ DOG_CONFIG = {
                    # _update_dog())，改這一個數字就整體等比例變慢。
     "detection_radius": 5.5,
     "attack_range": 0.9,
-    "attack_power": 50,
+    "attack_power": 33,  # 原本 50，削弱為 2/3 (50*2/3≈33.3，取整數)
     "attack_cooldown": 0.8,
     "home_pos": (8, 5),
     "asset_key": "guard_dog",
