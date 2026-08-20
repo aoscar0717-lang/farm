@@ -607,6 +607,35 @@ class GameState:
                             # 完全複用既有的「事件驅動」UI 回饋管線。
                             self.harvest_crop(nx, ny)
                 continue
+            elif passive_effect == "FARM_WINDMILL":
+                # 【系統核心更新：實作 1x1 農業中樞風車】被動的「範圍
+                # 自動收成」這半部，跟上面 AUTO_HARVESTER 分支是完全
+                # 相同的邏輯（每隔 scan_interval 秒掃描 effect_radius
+                # 範圍內的成熟作物，逐一呼叫 harvest_crop() 自動收成，
+                # 沿用它既有的金幣入帳/crop_inventory 記錄/
+                # CROP_HARVESTED 事件——渲染層已經會對這個事件顯示
+                # 「+{金幣} G」浮動文字，不用另外處理）——這裡沒有直接
+                # 複用同一個 elif 分支（例如改成
+                # `elif passive_effect in ("AUTO_HARVESTER",
+                # "FARM_WINDMILL")`），是因為風車另外還有「範圍播種」
+                # 這個主動互動（見 sow_around_building()），未來這兩種
+                # 建築的自動收成節奏/範圍/條件很可能會分別調整，保持
+                # 各自獨立的分支，改一個不會不小心連動改到另一個。
+                if self.phase == GamePhase.NIGHT:
+                    continue
+                building.scan_timer += dt
+                interval = config.get("scan_interval", 3.0)
+                if building.scan_timer < interval:
+                    continue
+                building.scan_timer = 0.0
+                radius = config.get("effect_radius", 1)
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        nx, ny = building.x + dx, building.y + dy
+                        ntile = self.get_tile(nx, ny)
+                        if ntile and ntile.crop is not None and ntile.crop.is_mature:
+                            self.harvest_crop(nx, ny)
+                continue
             elif passive_effect == "SPRINKLER":
                 # 【系統更新：自動灑水器 2x2 建築邏輯】改成需要玩家手動
                 # 開啟（is_active，透過 toggle_building()）才會運作，
@@ -745,6 +774,69 @@ class GameState:
             {"x": x, "y": y, "crop_type": crop_type.value, "cost": cost, "remaining_gold": self.gold}
         )
         return True, "種植成功！"
+
+    def sow_around_building(self, x: int, y: int, crop_type: CropType) -> Tuple[int, int, str]:
+        """【系統核心更新：實作 1x1 農業中樞風車】範圍播種：玩家手持
+        種子/作物工具點擊已建好的農業風車 (BuildingType.FARM_WINDMILL)
+        時觸發，以風車為中心掃描 effect_radius 範圍（預設 3x3），對每個
+        空農田格重複呼叫既有的 plant_crop()——沿用它原本就有的全部檢查
+        （夜晚禁止、解鎖等級、農田分區、空地判定、金幣是否足夠），不用
+        另外重寫一份重複的種植邏輯，也保證單格手動種植跟風車範圍播種
+        的規則永遠一致。
+
+        【風車腳下那一格的處理】使用者原文寫「以風車為中心的 3x3 網格
+        內（含風車腳下以外的 8 格）」——風車本身那一格已經被建築佔用，
+        tile.is_empty 一定是 False，plant_crop() 本來就會自然拒絕，這裡
+        額外用 (dx, dy) == (0, 0) 直接跳過，不用浪費一次無意義的呼叫，
+        語意上也更明確「這格本來就不在範圍內」而不是「呼叫了但剛好失敗」。
+
+        金幣不足時的行為：不是一次性檢查「夠不夠買滿範圍內所有格子」，
+        而是按掃描順序逐格嘗試，錢花完就停在那一格，已經種下去的格子
+        不會被撤銷——完全對應使用者「若金幣不足則播種到沒錢為止」的
+        要求。
+
+        回傳 (成功種植格數, 實際花費總金幣, 訊息)——種植格數是 0 時，
+        訊息會說明是「範圍內沒有空農田」還是「金幣不足」，UI 層可以直接
+        顯示；種植格數 > 0 時，UI 層負責疊加對應數量的浮動文字/音效。
+        """
+        tile = self.get_tile(x, y)
+        if not tile or tile.building is None or tile.building.building_type != BuildingType.FARM_WINDMILL:
+            return 0, 0, "此處沒有農業風車，無法範圍播種！"
+
+        if self.phase == GamePhase.NIGHT:
+            return 0, 0, "夜晚防守期間無法種植作物！"
+
+        if not self.is_crop_unlocked(crop_type):
+            req_lvl = CROP_DATA[crop_type]["unlock_level"]
+            return 0, 0, f"{CROP_DATA[crop_type]['name']} 需要莊園等級 Lv.{req_lvl} 才能種植！"
+
+        cost = CROP_DATA[crop_type]["seed_cost"]
+        if self.gold < cost:
+            return 0, 0, f"金幣不足！購買種子需要 {cost} 金幣，目前持有 {self.gold} 金幣。"
+
+        radius = tile.building.config.get("effect_radius", 1)
+        planted = 0
+        total_cost = 0
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if self.gold < cost:
+                    break
+                success, _ = self.plant_crop(x + dx, y + dy, crop_type)
+                if success:
+                    planted += 1
+                    total_cost += cost
+            if self.gold < cost:
+                break
+
+        if planted == 0:
+            return 0, 0, "風車周圍沒有可播種的空農田！"
+
+        return planted, total_cost, (
+            f"🌬️ 農業風車自動播種 {planted} 格 {CROP_DATA[crop_type]['name']}，"
+            f"共花費 {total_cost} 金幣！"
+        )
 
     def harvest_crop(self, x: int, y: int) -> Tuple[bool, int, str]:
         if self.phase == GamePhase.NIGHT:

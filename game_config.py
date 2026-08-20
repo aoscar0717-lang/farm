@@ -117,6 +117,14 @@ class BuildingType(Enum):
     # 需要讓它也產生被動收益，需要另外幫 Building 系統補上對應機制，
     # 不在本次改動範圍內。
     BLUE_WOOD_HOUSE = "BLUE_WOOD_HOUSE"  # 藍頂木屋：純裝飾用途的 2x2 建築
+    # 【系統核心更新：實作 1x1 農業中樞風車】新增獨立的 enum 成員，
+    # 命名刻意避開既有的 DecorationType.WINDMILL（1x1 純裝飾，商店卡片
+    # 顯示「莊園木屋」，跟這次的「農業風車」是完全不同的兩個東西，只是
+    # 都叫「風車」容易搞混）。這座建築有主動的「範圍播種」互動（見
+    # game_state.py 新增的 sow_around_building()）跟被動的「範圍自動
+    # 收成」（見 _update_buildings() 新增的 "FARM_WINDMILL" 分支），不
+    # 是單純裝飾。
+    FARM_WINDMILL = "FARM_WINDMILL"      # 農業風車：3x3 範圍自動播種+自動收成
     # 系統大重構 Phase 7：MINE（礦場）整批移除——使用者要求以全新的
     # 「富鐵花」(CropType.IRON_FLOWER) 農作物取代，metal_ore 改由採收
     # 富鐵花取得，不再由建築產出。詳見 CROP_DATA[IRON_FLOWER] 與
@@ -815,6 +823,37 @@ BUILDING_DATA = {
         "walkable": False,
         "asset_key": "blue_wood_house",
         "size": (2, 2),
+    },
+    # 【系統核心更新：實作 1x1 農業中樞風車】使用者沒有指定明確的價格/
+    # 解鎖等級數字，這裡的取捨：灑水器（自動澆水加速生長，Lv.4）已經是
+    # 農業自動化的中階科技，這座風車同時具備「主動範圍播種」+「被動
+    # 範圍自動收成」，功能明顯更強（等於同時省掉玩家手動種植跟手動採收
+    # 兩道步驟），訂在比灑水器更高的 Lv.5、金幣成本也訂得比灑水器
+    # （純物品成本，無金幣）更高，反映它是農業自動化路線的頂層建築。
+    # 這是合理的預設猜測，不是使用者明確指定的數字，如果覺得太貴/
+    # 太晚解鎖歡迎再告訴我調整。
+    BuildingType.FARM_WINDMILL: {
+        "name": "農業風車",
+        "unlock_level": 5,
+        "build_cost_gold": 500,
+        "build_cost_tech": 60,
+        # passive_effect 用全新的 "FARM_WINDMILL" 值（不是複用
+        # AUTO_HARVESTER/SPRINKLER/STATIC），讓 _update_buildings() 走
+        # 專屬分支：跳過一般開關-配方-倒數迴圈，改成每隔 scan_interval
+        # 秒對 effect_radius 範圍（3x3）內的成熟作物自動收成一次——跟
+        # AUTO_HARVESTER 的既有掃描邏輯是同一套寫法，差別只在觸發
+        # 條件/建築類型不同。
+        "passive_effect": "FARM_WINDMILL",
+        "effect_radius": 1,     # 以自身為中心的 3x3（radius=1 代表左右上下各 1 格）
+        "scan_interval": 3.0,   # 自動收成的掃描週期（秒）
+        # 【系統邏輯更新：跟灑水器一樣的地形限制】沿用上一個任務新增的
+        # 通用 "required_zone" 欄位，只能蓋在中央農田，不能蓋在四周莊園
+        # 景觀區——place_building() 已經是讀這個欄位做通用判斷，不用
+        # 再改一次那段邏輯。
+        "required_zone": ZoneType.FARM_ZONE,
+        "walkable": False,
+        "asset_key": "farm_windmill",
+        "size": (1, 1),
     },
     # 系統大重構 Phase 7：BuildingType.MINE（礦場）連同這筆 BUILDING_DATA
     # 一併整批移除——使用者要求以全新的富鐵花 (CropType.IRON_FLOWER)

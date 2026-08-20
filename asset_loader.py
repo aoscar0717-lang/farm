@@ -56,6 +56,14 @@ BAT_UP_ROW = 4      # 向上移動動畫
 # 背景是純黑色去背 (Chroma Key)，不是 alpha 透明。
 BAT_CHROMA_KEY = (0, 0, 0)
 
+# ---- 農業風車 (assets/decorations/風車.png) 精靈圖設定 ---------------------
+# 【系統核心更新：實作 1x1 農業中樞風車】2 欄 x 2 列的網格，共 4 格，
+# 依「先橫向再往下一列」的順序 (row-major：0,1 是第一排，2,3 第二排)
+# 全部切出來當成待機旋轉動畫的 4 幀，背景純黑去背。
+WINDMILL_HUB_COLS = 2
+WINDMILL_HUB_ROWS = 2
+WINDMILL_HUB_CHROMA_KEY = (0, 0, 0)
+
 # ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
 # 實測 128x32，原本以為是 4 格橫向排列、每格 32x32，但其實每組是 2 個 16x32 並排
 # (左邊健康，右邊枯萎)。將寬度減半為 16 以排除連在一起的枯萎版本。
@@ -591,6 +599,51 @@ class AssetLoader:
         }
         return frames
 
+    def _load_farm_windmill_frames(self):
+        """
+        切出 decorations/風車.png 的 2x2 精靈圖，回傳 List[Surface]（4
+        格，row-major 順序：左上、右上、左下、右下）。這座建築沒有
+        方向性（1x1、原地待機旋轉），不像暗夜魔蝠/野豬那樣需要
+        Dict[方向, List[Surface]]，直接回傳一份扁平的幀列表即可。畫格
+        維持精靈圖原始尺寸，縮放留給呼叫端依格子大小處理。
+
+        找不到檔案 / 切不出畫格時回傳 []，呼叫端要自己 fallback 回
+        generate_placeholder() 產生的佔位圖，不要讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "decorations/風車.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 decorations/風車.png，農業風車動畫將退回佔位圖。")
+            return []
+
+        try:
+            # 背景是純黑色去背，不是 alpha 透明：用 .convert()（無 alpha
+            # 通道）載入，指定 colorkey 之後再 convert_alpha() 把去背色
+            # 烤成真正的 per-pixel alpha——跟 enemy_bat.png/pig.png
+            # 同一套處理，對應使用者要求的 set_colorkey((0, 0, 0))。
+            sheet = pygame.image.load(full_path).convert()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 decorations/風車.png 失敗: {e}")
+            return []
+
+        sheet.set_colorkey(WINDMILL_HUB_CHROMA_KEY, pygame.RLEACCEL)
+
+        sheet_w, sheet_h = sheet.get_size()
+        frame_width = sheet_w // WINDMILL_HUB_COLS
+        frame_height = sheet_h // WINDMILL_HUB_ROWS
+        if frame_width <= 0 or frame_height <= 0:
+            print(f"[AssetLoader] 風車.png 尺寸 {sheet.get_size()} 切不出 "
+                  f"{WINDMILL_HUB_COLS}x{WINDMILL_HUB_ROWS} 的畫格。")
+            return []
+
+        frames = []
+        for row in range(WINDMILL_HUB_ROWS):
+            for col in range(WINDMILL_HUB_COLS):
+                rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+                frame = sheet.subsurface(rect).copy()
+                frame.set_colorkey(WINDMILL_HUB_CHROMA_KEY, pygame.RLEACCEL)
+                frames.append(frame.convert_alpha())
+        return frames
+
     def _load_dog_walk_frames(self):
         """
         切出 guard_dog_walk.png 的 4 方向走路動畫 + 白天坐姿待機動畫，
@@ -846,6 +899,11 @@ class AssetLoader:
             # self.images["blue_wood_house"] 至少還有這裡的
             # generate_placeholder() 佔位圖可用，不會是空白商店卡片。
             ("blue_wood_house", "buildings/blue_wood_house.png", "blue_wood_house"),
+            # 【系統核心更新：實作 1x1 農業中樞風車】同上，補一筆佔位
+            # 保險——下面 _load_farm_windmill_frames() 成功時會覆寫
+            # self.images["farm_windmill"] = frames[0]，缺檔/載入失敗時
+            # 至少還有這裡的 generate_placeholder() 佔位圖可用。
+            ("farm_windmill", "buildings/farm_windmill.png", "farm_windmill"),
             # 【系統更新：自動灑水器 2x2 建築邏輯】跟 furnace/lumberyard
             # 同一個理由補上這筆：下面 _load_1x4_spritesheet("sprinkler",
             # ...) 成功時會覆寫 self.images["sprinkler"] = frames[0]，
@@ -1008,6 +1066,30 @@ class AssetLoader:
             # lumberyard/sprinkler 三座既有 2x2 建築在資料格式上完全對
             # 稱（即使目前 4 個影格內容相同、不會真的播放動畫）。
             self.building_anim_frames["blue_wood_house"] = [blue_house_img] * 4
+
+        # 3d-4. 農業風車 (BuildingType.FARM_WINDMILL) 1x1 建築本體貼圖。
+        # 【系統核心更新：實作 1x1 農業中樞風車】使用者原始需求寫的是
+        # 「存入 self.assets['windmill_anim']」——沿用本檔案一貫的
+        # self.images（單張圖，供商店卡片顯示）+ self.building_anim_
+        # frames（動畫幀陣列，供地圖上的建築本體播放旋轉動畫）兩個既有
+        # 字典，key 統一用 BUILDING_DATA[FARM_WINDMILL]["asset_key"] 的
+        # 值 "farm_windmill"，不是額外造一個新字典。縮放尺寸直接用 sz
+        # （= CELL_SIZE，這座建築是 1x1，不用像 furnace/lumberyard/
+        # sprinkler 那樣另外查 BUILDING_SPRITE_GRID_SPAN 算 2x2 大小）。
+        farm_windmill_frames_native = self._load_farm_windmill_frames()
+        if farm_windmill_frames_native:
+            self.building_anim_frames["farm_windmill"] = [
+                pygame.transform.scale(f, sz) for f in farm_windmill_frames_native
+            ]
+            # 跟 furnace/lumberyard 同樣的既有慣例：動畫幀切出成功時，
+            # 順手把 self.images["farm_windmill"] 覆寫成 frame[0]（靜態
+            # 幀），讓只呼叫 loader.get("farm_windmill") 的商店卡片
+            # (ActionCard.draw()) 也能顯示真的風車貼圖，不用等地圖上蓋
+            # 出來才看得到。
+            self.images["farm_windmill"] = self.building_anim_frames["farm_windmill"][0]
+        # 風車.png 缺檔或切圖失敗時，building_anim_frames 沒有這個 key，
+        # self.images["farm_windmill"] 維持上面 buildings 清單載入的
+        # generate_placeholder() 佔位圖，不會讓遊戲壞掉。
 
         # 3e. 富鐵花 (CropType.IRON_FLOWER) 成熟視覺。
         # 【檔名修正】使用者一開始說的檔名是 crops/富鐵花.png，同樣沒有

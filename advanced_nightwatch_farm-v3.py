@@ -1016,6 +1016,13 @@ class NightwatchFarmApp:
                 # 點擊處理/鎖卡判定不需要跟著改——這些查表邏輯都是用
                 # action_id 當 key，不關心卡片實際放在哪個分頁清單裡。
                 ("PLACE_SPRINKLER", "自動灑水器", "2錠 | 需種在農田上，每8秒為周圍3x3灌溉溪水", "sprinkler"),
+                # 【系統核心更新：實作 1x1 農業中樞風車】BUILDING_DATA
+                # 沒有 "category"/"tab" 這種欄位（商店分頁是這裡寫死的
+                # tuple 清單，不是從 BUILDING_DATA 動態讀出來的），這裡
+                # 直接把卡片放進「農田耕作」(CROPS) 分頁清單，對應使用
+                # 者要的分類。跟灑水器一樣要求 required_zone=FARM_ZONE，
+                # 說明文字同步提示。
+                ("PLACE_FARM_WINDMILL", "農業風車", "500G+60工藝 | 需種在農田上，手持種子點擊可3x3範圍播種，並每3秒自動收成", "farm_windmill"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -1363,6 +1370,27 @@ class NightwatchFarmApp:
         "PLACE_AUTO_HARVESTER": BuildingType.AUTO_HARVESTER,
         "PLACE_LUMBERYARD": BuildingType.LUMBERYARD,
         "PLACE_BLUE_WOOD_HOUSE": BuildingType.BLUE_WOOD_HOUSE,
+        "PLACE_FARM_WINDMILL": BuildingType.FARM_WINDMILL,
+    }
+
+    # 【系統核心更新：實作 1x1 農業中樞風車】selected_action（例如
+    # "PLANT_RADISH"）到 CropType 的對照表——_apply_grid_action() 原本
+    # 是一長串 if/elif 字面判斷，沒有現成的字典可以查。這裡新增這份
+    # 對照表（內容跟 _apply_grid_action() 那段 elif 鏈完全對應），給
+    # 「點擊風車觸發範圍播種」這個新功能查詢玩家目前選的是哪種作物，
+    # 不用另外重寫一次判斷邏輯，也不會因為兩處各寫一份而日後兜不起來。
+    _PLANT_ACTION_CROPS = {
+        "PLANT_RADISH": CropType.WHITE_RADISH,
+        "PLANT_TOMATO": CropType.RED_TOMATO,
+        "PLANT_CORN": CropType.SWEET_CORN,
+        "PLANT_CARROT": CropType.CARROT,
+        "PLANT_STRAWBERRY": CropType.SWEET_STRAWBERRY,
+        "PLANT_PUMPKIN": CropType.MAGIC_PUMPKIN,
+        "PLANT_BLUEBERRY": CropType.BLUEBERRY,
+        "PLANT_WHEAT": CropType.WHEAT,
+        "PLANT_GRAPE": CropType.ROYAL_GRAPE,
+        "PLANT_STARLIGHT": CropType.STARLIGHT_FRUIT,
+        "PLANT_IRON_FLOWER": CropType.IRON_FLOWER,
     }
 
     _DEFENSE_ACTION_IDS = {"PLACE_FENCE", "PLACE_TRAP", "PLACE_SCARECROW", "PLACE_BEEHIVE"}
@@ -1798,6 +1826,34 @@ class NightwatchFarmApp:
             gx, gy = self.hovered_grid
             tile = self.game.get_tile(gx, gy)
             if tile and tile.building is not None:
+                # 【系統核心更新：實作 1x1 農業中樞風車】風車是
+                # is_passive=True（跟 AUTO_HARVESTER 一樣走
+                # passive_effect 分支，沒有開關概念）——如果不特別攔
+                # 截，下面的 toggle_building() 一定會先回傳「是蓋下去就
+                # 永久生效的巧妙裝置...」然後直接 return，玩家手持種子
+                # 點擊風車永遠不會走到範圍播種的邏輯。這裡在
+                # toggle_building() 之前優先判斷：如果點到的是風車、且
+                # 玩家目前選的是某種作物種子（selected_action 在
+                # _PLANT_ACTION_CROPS 裡查得到），改呼叫
+                # sow_around_building() 觸發範圍播種，不進入開關切換
+                # 分支；其餘情況（點風車但沒選種子、或點其他任何建築）
+                # 完全維持原本的 toggle_building() 行為不變。
+                if tile.building.building_type == BuildingType.FARM_WINDMILL:
+                    crop_type = self._PLANT_ACTION_CROPS.get(self.selected_action)
+                    if crop_type is not None:
+                        planted, spent, msg = self.game.sow_around_building(gx, gy, crop_type)
+                        px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
+                        py = GRID_Y + gy * CELL_SIZE
+                        if planted > 0:
+                            self.log_messages.append(f"🌬️ {msg}")
+                            self.floating_texts.append(FloatingText(f"-{spent} G", px - 25, py - 14, C_RED))
+                            self._spawn_particles(px, py, C_GREEN, count=16)
+                            self.sound.play("build")
+                        else:
+                            self.log_messages.append(f"❌ {msg}")
+                            self.floating_texts.append(FloatingText(f"❌ {msg}", px - 60, py - 12, C_RED))
+                            self.sound.play("error")
+                        return
                 success, msg = self.game.toggle_building(gx, gy)
                 if not success:
                     px = GRID_X + gx * CELL_SIZE + CELL_SIZE // 2
@@ -1932,6 +1988,8 @@ class NightwatchFarmApp:
             success, msg = self.game.place_building(gx, gy, BuildingType.LUMBERYARD)
         elif act == "PLACE_BLUE_WOOD_HOUSE":
             success, msg = self.game.place_building(gx, gy, BuildingType.BLUE_WOOD_HOUSE)
+        elif act == "PLACE_FARM_WINDMILL":
+            success, msg = self.game.place_building(gx, gy, BuildingType.FARM_WINDMILL)
         # 工具
         elif act == "SHOVEL":
             success, msg, refund = self.game.demolish_tile(gx, gy)
@@ -2239,7 +2297,7 @@ class NightwatchFarmApp:
                 card.is_locked = not self.game.is_crop_unlocked(CropType.MAGIC_PUMPKIN)
                 card.lock_reason = "需莊園等級 Lv.3"
             elif card.action_id in ("PLACE_FURNACE", "PLACE_SPRINKLER", "PLACE_AUTO_HARVESTER",
-                                     "PLACE_LUMBERYARD", "PLACE_BLUE_WOOD_HOUSE"):
+                                     "PLACE_LUMBERYARD", "PLACE_BLUE_WOOD_HOUSE", "PLACE_FARM_WINDMILL"):
                 # 熔爐/灑水器/自動採收機/伐木場/礦場的
                 # unlock_level 都直接讀 BUILDING_DATA 定義比對
                 # self.game.farm_level，不用另外走 is_crop_unlocked 那套
@@ -3245,6 +3303,7 @@ class NightwatchFarmApp:
         BuildingType.AUTO_HARVESTER: "採收",
         BuildingType.LUMBERYARD: "伐木",
         BuildingType.BLUE_WOOD_HOUSE: "木屋",
+        BuildingType.FARM_WINDMILL: "風車",
     }
 
     def _render_building_tile(self, building, px: int, py: int):
@@ -3294,7 +3353,19 @@ class NightwatchFarmApp:
         # list，例如貼圖缺檔或載入失敗）時，anim_frames 是 falsy，直接
         # 落到下面既有的 img/色塊防呆邏輯，不受影響。
         anim_frames = self.loader.get_anim_frames(asset_key) if asset_key else []
-        if anim_frames:
+        if anim_frames and building.building_type == BuildingType.FARM_WINDMILL:
+            # 【系統核心更新：實作 1x1 農業中樞風車】風車是 is_passive
+            # （沒有開關概念，is_active 永遠是預設的 False），下面通用
+            # 的 is_running 判斷式如果直接套用在它身上，會永遠判定成
+            # 「關閉」、frame_index 卡死在 0，畫面上風車永遠靜止不轉，
+            # 不符合「這是一座持續自動運作的建築」的視覺語意。改成獨立
+            # 分支：不看任何開關旗標，單純 0→1→2→3→0... 無條件持續循環
+            # 播放全部 4 幀，象徵風車一直在轉動、隨時準備自動收成。
+            frame_index = int(self.anim_time / ANIMATION_SPEED) % len(anim_frames)
+            frame_img = anim_frames[frame_index]
+            img_rect = frame_img.get_rect(midbottom=(px + span_w // 2, py + span_h))
+            self.screen.blit(frame_img, img_rect)
+        elif anim_frames:
             # 「開啟/運作中」該看哪個旗標，兩種機台的需求文字給的定義不
             # 一樣：熔爐當初明確要求看 is_processing（這一輪配方是否正在
             # 倒數，避免兩輪配方交接的空檔誤判成「關閉」而閃爍）；伐木場
