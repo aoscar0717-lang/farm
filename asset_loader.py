@@ -791,14 +791,26 @@ class AssetLoader:
         # _render_flat_meadow_and_farm() 說明），所以刻意不再把
         # "iron_flower_seed"/"_sprout"/"_growing"/"_mature" 這幾個
         # per-stage key 塞進上面的 crops 清單。
-        # 【系統更新：資產路徑更新】使用者這次把富鐵花素材換成新檔案，
-        # 路徑也跟著改成 crops/bg_iron_flower.png（取代上一版的
-        # crops/iron_flower.png）。切圖邏輯本身完全不用改——
-        # _load_1x4_spritesheet() 一樣會把它切成 4 幀、縮放成 sz（單一
-        # 格 CELL_SIZE x CELL_SIZE，1x1），colorkey 繼續傳 None 讓自動
-        # 偵測邏輯依這張圖實際的 alpha 通道決定要不要去背，去背設定跟
-        # 上一版行為一致，不用另外處理。
-        self._load_1x4_spritesheet("iron_flower", "crops/bg_iron_flower.png", sz,
+        # 【修復：重新綁定路徑】富鐵花作物本體的路徑改回
+        # crops/iron_flower.png（上一版曾經改成 crops/bg_iron_flower.png
+        # ——但那其實是同一次改動裡另外新增、給 STORY 開場劇情用的全
+        # 螢幕背景圖 assets/bg_iron_flower.png 搞混了路徑；作物本體跟
+        # 劇情背景圖是兩張完全不同用途、不同尺寸規格的圖，這次改回
+        # crops/iron_flower.png 才是正確的作物 sprite sheet 路徑）。
+        #
+        # 切圖邏輯本身完全不用改，也不需要另外手寫一套新的載入程式碼
+        # ——_load_1x4_spritesheet()（定義見上方，約第 283 行）本來就
+        # 已經完整實作了這次需求描述的每一個步驟：
+        #   - frame_w, frame_h = sheet_w // 4, sheet_h（單幀尺寸計算）
+        #   - colorkey=None 時自動偵測 raw.get_masks()[3]：有 alpha 就
+        #     convert_alpha()，沒有就退回 convert() +
+        #     set_colorkey((255, 255, 255))（視為白底去背）
+        #   - 橫向切 4 格、pygame.transform.scale() 縮放成 sz（單一格
+        #     CELL_SIZE x CELL_SIZE，1x1 網格大小）
+        #   - 4 幀存進 self.building_anim_frames["iron_flower"]，透過
+        #     get_anim_frames("iron_flower") 取用
+        # 這裡只需要換路徑字串，不需要另外新增一套平行的載入邏輯。
+        self._load_1x4_spritesheet("iron_flower", "crops/iron_flower.png", sz,
                                     colorkey=None, placeholder_category="iron_flower")
 
         # 【系統升級：動態劇情背景圖切換】三張全螢幕劇情/選單背景圖，
