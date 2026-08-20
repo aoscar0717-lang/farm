@@ -337,7 +337,15 @@ CROP_DATA = {
         "asset_key": "carrot",
     },
     CropType.SWEET_STRAWBERRY: {
-        "name": "漿果灌木",
+        # 【Bug 修復：訂單要求名稱跟商店可種植名稱不一致】這裡原本寫
+        # 「漿果灌木」，但商店裡這個作物的種子卡片 (PLANT_STRAWBERRY)
+        # 標籤是「鮮甜草莓」——兩者是同一個 CropType.SWEET_STRAWBERRY，
+        # 只是內部設定的 "name" 欄位跟商店卡片標籤沒有同步，導致訂單
+        # (_item_display_name() 直接讀這個 "name" 欄位) 要求玩家交付
+        # 「漿果灌木」時，玩家在商店裡完全找不到叫這個名字的種子可以
+        # 種——其實就是「鮮甜草莓」，改成跟商店一致的名稱，不是新增
+        # 一種作物。
+        "name": "鮮甜草莓",
         "unlock_level": 2,
         "seed_cost": 70,
         "grow_time": 14.0,
