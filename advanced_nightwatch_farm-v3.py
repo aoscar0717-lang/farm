@@ -822,7 +822,7 @@ class NightwatchFarmApp:
         self.story_lines = [
             {"text": "在遙遠的山谷深處，有一座被世人遺忘許久的農莊，靜靜等待著它的新主人。", "bg_key": "title_bg"},
             {"text": "荒煙蔓草間，古老的柵欄早已傾頹，土地也失去了往日的生機……", "bg_key": "bg_abandoned"},
-            {"text": "但當你踏入這片土地時，卻在角落發現一株散發微光的『晨露高麗菜』——傳說中的特級農產！", "bg_key": "bg_premium_crop"},
+            {"text": "但當你踏入這片土地時，卻在角落發現一株散發微光的『富鐵花』——傳說中的特級農產！", "bg_key": "bg_premium_crop"},
             {"text": "只不過，夜晚的森林裡，總有一些貪嘴的野生動物，會被作物的香氣悄悄吸引而來。", "bg_key": "bg_abandoned"},
             {"text": "你得重新豎起柵欄、佈置一些巧妙的機關，才能守護得來不易的每一份收成。", "bg_key": "bg_abandoned"},
             {"text": "只要用心耕耘，這片荒地終將重新綻放，成為遠近馳名的夢幻莊園。", "bg_key": "bg_premium_crop"},
@@ -847,8 +847,8 @@ class NightwatchFarmApp:
             {"text": "莊園精靈：想讓農莊運作起來，需要一點資金喔。打開商店，種下任意一種基礎作物吧！", "type": "plant_crop", "exclude_iron": True, "target": 1},
             {"text": "莊園精靈：作物成熟需要一點時間，耐心等它長大後點擊採收，就能換得金幣囉。", "type": "harvest_crop", "exclude_iron": True, "target": 1},
             {"text": "莊園精靈：夜幕降臨後，附近的野生動物會伺機而動。快去商店部署一些防禦設施吧！", "type": "place_defense", "target": 1},
-            {"text": "莊園精靈：防線穩固、資金也充裕了，來試著種下珍貴的『晨露高麗菜』吧！", "type": "plant_crop", "iron_only": True, "target": 1},
-            {"text": "莊園精靈：材料已經備齊，快建造風車磨坊或磚造烤窯，讓農莊的手藝更上一層樓！", "type": "place_building_2x2", "target": 1},
+            {"text": "莊園精靈：防線穩固、資金也充裕了，來試著種下珍貴的『富鐵花』吧！", "type": "plant_crop", "iron_only": True, "target": 1},
+            {"text": "莊園精靈：材料已經備齊，快建造伐木場或熔爐，讓農莊的手藝更上一層樓！", "type": "place_building_2x2", "target": 1},
             {"text": "莊園精靈：農莊已經穩定運作了。往後的故事，就交給你親手書寫，祝你順心如意！", "type": "complete", "target": 0},
         ]
         self.current_mission_idx = 0
@@ -948,7 +948,9 @@ class NightwatchFarmApp:
                 # 吸收了地脈礦砂，篩出來的礦石結晶」，而不是硬派科幻的
                 # 「工業金屬」，機制不變、只是說法換了一套更貼合溫馨奇幻
                 # 農場世界觀的解釋。
-                ("PLANT_IRON_FLOWER", "晨露高麗菜", "$150 | 15s熟 | 產1礦石結晶", "iron_flower"),
+                # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的
+                # 「富鐵花」，描述文字（產1礦石結晶）維持上一版的修改。
+                ("PLANT_IRON_FLOWER", "富鐵花", "$150 | 15s熟 | 產1礦石結晶", "iron_flower"),
             ],
             "DECO": [
                 ("PLACE_PATH", "石板小徑", "$20 | +10繁榮 | +3G/天", "stone_path"),
@@ -987,7 +989,9 @@ class NightwatchFarmApp:
                 # 照字面套用會變成文字騙人、跟實際點下去的效果對不上。
                 # 這裡改用一句貼合實際配方、但用詞從「熔爐煉鋼」換成更
                 # 溫馨的「柴火烤窯煉礦」講法，維持機制與文本一致。
-                ("PLACE_FURNACE", "磚造烤窯", "$200+18工藝 | 柴火烘烤礦石→精鐵錠", "furnace"),
+                # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的
+                # 「熔爐」，描述文字維持上一版的修改。
+                ("PLACE_FURNACE", "熔爐", "$200+18工藝 | 柴火烘烤礦石→精鐵錠", "furnace"),
                 # Phase 4：自動化農業科技，一樣沿用同一個 DECO 分頁、同一
                 # 個「四周莊園景觀區」放置規則，理由跟 Phase 2 加熔爐時
                 # 一樣——沒有另外開新分頁。花費是 metal_ingot（背包
@@ -1024,7 +1028,11 @@ class NightwatchFarmApp:
                 # 這裡維持「風車磨坊」這個溫馨改名，但說明文字照實際
                 # output_key 寫成「風力研磨，產出農莊建設所需的木料」，
                 # 機制跟文本才對得上。
-                ("PLACE_LUMBERYARD", "風車磨坊", "$50 | 風力研磨作物與林木，每10s產1木料", "lumberyard"),
+                # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的
+                # 「伐木場」——描述文字原本配合上一版改名「風車磨坊」寫
+                # 成「風力研磨」，跟「伐木場」搭在一起語意不通順，這裡
+                # 一併調整回貼合伐木場本身、但保留溫馨語氣的說法。
+                ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木料", "lumberyard"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),

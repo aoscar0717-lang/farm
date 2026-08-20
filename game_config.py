@@ -368,7 +368,11 @@ CROP_DATA = {
         # 內部識別字，不是玩家看到的文字，改了反而會牽動存檔相容性、
         # asset_loader.py 的貼圖 key、測試等一大串跟這次「文本替換」
         # 無關的東西。
-        "name": "晨露高麗菜",
+        # 【使用者回饋：熔爐/伐木場/富鐵花 保留】上一版把「富鐵花」改名
+        # 成「晨露高麗菜」，這次使用者明確要求把這三個名字改回原本的
+        # 「熔爐/伐木場/富鐵花」——只還原名稱本身，其餘（商店卡片描述、
+        # 其他名詞的溫馨化文本、劇情、任務引導）維持上一版的修改。
+        "name": "富鐵花",
         "unlock_level": 3,
         "seed_cost": 150,
         "grow_time": 15.0,
@@ -569,7 +573,8 @@ BUILDING_DATA = {
         # 【系統修復與文本重構】「熔爐」改名為「磚造烤窯」，enum 成員
         # BuildingType.FURNACE、recipe（metal_ore x2 -> metal_ingot）
         # 都維持不變，只換名稱文字。
-        "name": "磚造烤窯",
+        # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的「熔爐」。
+        "name": "熔爐",
         "unlock_level": 3,
         "build_cost_gold": 200,
         "build_cost_tech": 18,
@@ -694,7 +699,8 @@ BUILDING_DATA = {
         # 【系統修復與文本重構】「伐木場」改名為「風車磨坊」，enum 成員
         # BuildingType.LUMBERYARD、output_key（仍是 wood）都維持不變，
         # 只換名稱文字。
-        "name": "風車磨坊",
+        # 【使用者回饋：熔爐/伐木場/富鐵花 保留】名稱改回原本的「伐木場」。
+        "name": "伐木場",
         "unlock_level": 1,   # 最基礎的原料來源，刻意設成遊戲一開局就能蓋，不卡關
         "build_cost_gold": 50,
         "build_cost_tech": 0,
