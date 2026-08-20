@@ -3451,6 +3451,31 @@ class NightwatchFarmApp:
                     img = self.loader.get("enemy_thief")
                 if img:
                     self.screen.blit(img, (px, py))
+            elif enemy.enemy_type == EnemyType.SHADOW_BAT:
+                # 【系統更新：實裝 8x8 規格的全新敵人 Sprite Sheet
+                # (enemy_bat)】暗夜魔蝠原本落在下面的通用 else 分支，只
+                # 畫靜態圖、完全沒有動畫；enemy_bat.png 換成新的 8x8
+                # 規格之後，改成跟野豬/小偷同一套「依 enemy.facing_
+                # direction 選方向幀清單」的動畫模式，而不是使用者原始
+                # 需求裡另外寫的 frame_index = int(self.animation_timer
+                # / ANIMATION_SPEED) % 8——self.animation_timer 這個屬性
+                # 在專案裡不存在，而且野豬/小偷的既有動畫都是直接用
+                # pygame.time.get_ticks() 換算幀數（不受暫停/日夜切換
+                # 影響，也不用額外維護一個計時器變數），這裡沿用同一種
+                # 寫法保持一致，8 幀、每 120ms 切換一幀（介於野豬的
+                # 200ms 跟小偷的 100ms 之間，符合魔蝠「速度 2.2」比野豬
+                # 快、比小偷穩的節奏）。
+                # left/right 水平翻轉已經在 asset_loader.py 的
+                # _load_bat_frames() 裡處理過（left 幀是 right 幀的
+                # pygame.transform.flip() 結果），這裡不用重複翻轉。
+                frames = self.loader.bat_frames.get(enemy.facing_direction, [])
+                if frames:
+                    frame_index = (pygame.time.get_ticks() // 120) % len(frames)
+                    img = frames[frame_index]
+                else:
+                    img = self.loader.get("enemy_bat")
+                if img:
+                    self.screen.blit(img, (px, py))
             else:
                 k = ENEMY_DATA[enemy.enemy_type].get("asset_key", "enemy_thief")
                 img = self.loader.get(k)

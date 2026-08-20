@@ -39,6 +39,20 @@ THIEF_DIRECTION_ROWS = {"down": 0, "right": 1, "left": 2, "up": 3}
 # 所以這裡直接用 convert_alpha() 吃原本就有的 per-pixel alpha，不套用
 # chroma key，避免誤傷素材本身的黑色部分。
 
+# ---- 暗夜魔蝠 (assets/characters/enemy_bat.png) 精靈圖設定 -----------------
+# 【系統更新：實裝 8x8 規格的全新敵人 Sprite Sheet】使用者確認新版素材
+# 是 8 欄 x 8 列的網格、背景純黑去背。跟 pig.png 同一種做法：只切出
+# 「正面」(row=0) 跟「側向」(row=2) 這兩排真正需要的動畫，up/down 共用
+# 正面那排（素材沒有另外畫背面），right 用側向那排，left 不佔額外的
+# 列，直接把 right 的幀水平翻轉取得——沿用 pig.png 既有的
+# frames["left"] = flip(frames["right"]) 慣例，不用另外切一排。
+BAT_COLS = 8
+BAT_ROWS = 8
+BAT_FRONT_ROW = 0   # 正面移動動畫（up/down 共用）
+BAT_SIDE_ROW = 2    # 側向移動動畫（right，left 用翻轉取得）
+# 背景是純黑色去背 (Chroma Key)，不是 alpha 透明。
+BAT_CHROMA_KEY = (0, 0, 0)
+
 # ---- 玉米 (assets/crops/玉米.png) 精靈圖設定 -------------------------------
 # 實測 128x32，原本以為是 4 格橫向排列、每格 32x32，但其實每組是 2 個 16x32 並排
 # (左邊健康，右邊枯萎)。將寬度減半為 16 以排除連在一起的枯萎版本。
@@ -516,6 +530,60 @@ class AssetLoader:
         for direction, row in THIEF_DIRECTION_ROWS.items():
             frames[direction] = [_cut(row, col) for col in range(THIEF_COLS)]
 
+        return frames
+
+    def _load_bat_frames(self):
+        """
+        切出 enemy_bat.png 的 8x8 精靈圖，回傳 Dict[str, List[Surface]]
+        (key 是 'down'/'up'/'right'/'left')。素材只有「正面」(row=0) 跟
+        「側向」(row=2) 兩排真正的動畫，up/down 共用正面那排（沒有另外
+        畫背面），right 用側向那排，left 用 pygame.transform.flip() 把
+        right 水平翻轉取得——跟 pig.png 的 _load_pig_frames() 是同一套
+        慣例。畫格維持精靈圖原始尺寸，縮放留給呼叫端依格子大小處理
+        （見 load_all() 裡統一 scale 成 (tile_size, tile_size) 的部分）。
+
+        找不到檔案 / 切不出畫格時回傳 {}，呼叫端要自己 fallback 回原本
+        的靜態 enemy_bat.png，不要讓遊戲直接壞掉。
+        """
+        full_path = os.path.join(ASSET_ROOT, "characters/enemy_bat.png")
+        if not os.path.exists(full_path):
+            print("[AssetLoader] 找不到 characters/enemy_bat.png，暗夜魔蝠動畫將退回靜態圖片。")
+            return {}
+
+        try:
+            # 背景是純黑色去背，不是 alpha 透明：用 .convert()（無 alpha
+            # 通道）載入，指定 colorkey 之後再 convert_alpha() 把去背色
+            # 烤成真正的 per-pixel alpha——跟 pig.png 完全同一套處理，
+            # 對應使用者要求的 set_colorkey((0, 0, 0))。
+            sheet = pygame.image.load(full_path).convert()
+        except Exception as e:
+            print(f"[AssetLoader] 載入 enemy_bat.png 失敗: {e}")
+            return {}
+
+        sheet.set_colorkey(BAT_CHROMA_KEY, pygame.RLEACCEL)
+
+        sheet_w, sheet_h = sheet.get_size()
+        frame_width = sheet_w // BAT_COLS
+        frame_height = sheet_h // BAT_ROWS
+        if frame_width <= 0 or frame_height <= 0:
+            print(f"[AssetLoader] enemy_bat.png 尺寸 {sheet.get_size()} 切不出 {BAT_COLS}x{BAT_ROWS} 的畫格。")
+            return {}
+
+        def _cut(row: int, col: int) -> pygame.Surface:
+            rect = pygame.Rect(col * frame_width, row * frame_height, frame_width, frame_height)
+            frame = sheet.subsurface(rect).copy()
+            frame.set_colorkey(BAT_CHROMA_KEY, pygame.RLEACCEL)
+            return frame.convert_alpha()
+
+        front_frames = [_cut(BAT_FRONT_ROW, col) for col in range(BAT_COLS)]
+        side_frames = [_cut(BAT_SIDE_ROW, col) for col in range(BAT_COLS)]
+
+        frames = {
+            "down": front_frames,
+            "up": front_frames,
+            "right": side_frames,
+            "left": [pygame.transform.flip(f, True, False) for f in side_frames],
+        }
         return frames
 
     def _load_dog_walk_frames(self):
@@ -1076,6 +1144,31 @@ class AssetLoader:
             # theif.png 還沒放進 assets/characters/，或切圖失敗時，
             # 空字典——渲染層要檢查並退回 enemy_thief 靜態圖，不會讓遊戲壞掉。
             self.thief_frames: Dict[str, list] = {}
+
+        # 6.2 暗夜魔蝠 (enemy_bat.png) 的 8x8 精靈圖動畫，縮放成一般格子
+        # 大小 (tile_size, tile_size)——對應使用者要求的
+        # pygame.transform.scale(image, (tile_size, tile_size))，強制
+        # 縮放，不保留原始長寬比，跟熔爐/伐木場等 2x2 建築動畫幀是同一
+        # 種 pygame.transform.scale()（非 smoothscale）處理方式。
+        bat_frames_native = self._load_bat_frames()
+        if bat_frames_native:
+            # 使用者原始需求寫的是 self.assets['enemy_bat_anim']（單一
+            # 8 幀陣列，不分方向）；這裡沿用專案既有慣例，改存進
+            # self.bat_frames 這個「方向 -> 8 幀陣列」的字典（跟
+            # thief_frames/enemy_boar_frames 同一種資料結構），down 這
+            # 個方向剛好就是使用者要的「8 個影格」陣列，
+            # self.bat_frames.get("down") 即可直接對應
+            # self.assets['enemy_bat_anim'] 的用途，不需要額外多存一份
+            # 重複資料。
+            self.bat_frames: Dict[str, list] = {
+                d: [pygame.transform.scale(f, sz) for f in frames]
+                for d, frames in bat_frames_native.items()
+            }
+        else:
+            # enemy_bat.png 切不出 8x8 畫格時（例如舊版素材還沒換成新的
+            # 8x8 規格），空字典——渲染層要檢查並退回 enemy_bat 靜態圖，
+            # 不會讓遊戲壞掉。
+            self.bat_frames: Dict[str, list] = {}
 
         # 6.5 看門柴犬 (guard_dog_walk.png) 的 4 方向走路動畫 (晚上用) +
         # 坐姿待機動畫 (白天用)，縮放成一般格子大小，寫法跟上面的小偷
