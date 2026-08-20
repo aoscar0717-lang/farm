@@ -515,13 +515,25 @@ DECORATION_DATA = {
         "walkable": True,
         "asset_key": "sundial_tower",
     },
-    DecorationType.WINDMILL: {
-        "name": "彩虹風車磨坊",
-        "cost": 300,
-        "prosperity_score": 220,
-        "walkable": True,
-        "asset_key": "windmill",
-    }
+    # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】使用者確認
+    # 最終需求是「藍頂木屋直接取代並繼承莊園木屋的所有資料與功能」，不是
+    # 單純隱藏——但 Decoration 系統架構上就是每格固定 1x1（DECORATION_DATA
+    # 完全沒有 "size" 欄位，place_decoration() 也只會佔用單一格），沒辦法
+    # 直接把這筆資料改成 2x2；2x2 的「繼承者」已經是新增的
+    # BuildingType.BLUE_WOOD_HOUSE（見下方 BUILDING_DATA，這次補上原本
+    # 屬於這裡的 unlock_level/cost/prosperity_score，讓它真正繼承莊園
+    # 木屋的資料與功能）。這裡把原本的 DecorationType.WINDMILL 這筆
+    # BUILDING_DATA 設定註解掉（不是刪除 DecorationType.WINDMILL 這個
+    # enum 成員本身），做法比照先前 AUTO_HARVESTER 隱藏時的「只註解掉
+    # 資料/商店卡片，enum 成員跟其餘參照程式碼不動」慣例，避免商店裡
+    # 同時看到「莊園木屋」跟「藍頂木屋」兩張外觀相同但機制不同的卡片。
+    # DecorationType.WINDMILL: {
+    #     "name": "彩虹風車磨坊",
+    #     "cost": 300,
+    #     "prosperity_score": 220,
+    #     "walkable": True,
+    #     "asset_key": "windmill",
+    # }
 }
 
 DEFENSE_DATA = {
@@ -755,12 +767,29 @@ BUILDING_DATA = {
     # "toggleable" 旗標，所以 Building.is_passive 為 True——渲染層
     # 因此不會畫 ON/OFF 指示燈/進度條（那些只對開關式機台有意義），
     # 玩家也不能點擊切換它，符合「純裝飾用途、蓋好就定住不動」的定位。
+    # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】原本這棟
+    # 建築是「純裝飾用途，不繼承任何被動收益」（見上一版註解），這次使用
+    # 者明確要求要「繼承並替換」原本 DecorationType.WINDMILL（莊園木屋）
+    # 的解鎖等級、價格、跟被動繁榮/金幣分紅功能，而不是只沿用外觀。
+    #   - unlock_level：莊園木屋原本沒有 unlock_level 這個概念
+    #     （DECORATION_DATA 裡沒有這個欄位，place_decoration() 只檢查
+    #     金幣，不檢查等級），這裡維持 Lv.1（等同「沒有等級門檻」）。
+    #   - build_cost_gold：莊園木屋原本的 "cost" 是 300，剛好跟藍頂木屋
+    #     原本就有的 build_cost_gold 一致，不用調整金額。
+    #   - "prosperity_score": 220：新增欄位，繼承莊園木屋原本的
+    #     prosperity_score。Building 系統原本沒有這個概念（只有
+    #     Decoration 才有），這次同步在 game_state.py
+    #     recalculate_prosperity() 補上「也讀取 tile.building.config 的
+    #     prosperity_score」這條路徑（見該函式的說明），讓這棟建築真正
+    #     繼承「+220繁榮 -> 帶動每日金幣分紅」的完整功能，不是只有外觀
+    #     沿用。
     BuildingType.BLUE_WOOD_HOUSE: {
-        "name": "藍頂木屋",
-        "unlock_level": 1,   # 純裝飾用途，比照最基礎的伐木場門檻，一開局就能蓋
+        "name": "藍頂莊園木屋",
+        "unlock_level": 1,
         "build_cost_gold": 300,
         "build_cost_tech": 0,
         "passive_effect": "STATIC",
+        "prosperity_score": 220,
         "walkable": False,
         "asset_key": "blue_wood_house",
         "size": (2, 2),

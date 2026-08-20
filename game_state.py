@@ -146,12 +146,29 @@ class GameState:
         return events
 
     def recalculate_prosperity(self):
+        # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】原本
+        # 繁榮度只會加總 Decoration（tile.decoration.prosperity_score），
+        # Building 完全沒有貢獻繁榮度的管道。BLUE_WOOD_HOUSE 這次新增了
+        # "prosperity_score" 這個欄位（見 game_config.py 的說明），要讓
+        # 它真的能推動莊園升級/每日分紅，這裡補上讀取 tile.building 的
+        # 這條路徑——用通用寫法（讀 BUILDING_DATA.get("prosperity_score",
+        # 0)），不是只為這一棟建築寫死特例，之後如果還有其他 2x2 建築
+        # 想要有被動繁榮效果，只要在 BUILDING_DATA 補上這個欄位就會自動
+        # 生效，不用再改這裡。
+        # 2x2（或更大）建築的每一格 tile 都會反向參照同一個 Building
+        # 物件（place_building() 展開 footprint 時是這樣同步的），如果
+        # 每一格都各自加總會把 220 重複算 4 次；這裡比照 _render() 迴圈
+        # 判斷「只在建築的錨點座標那一格」才計入一次的既有慣例
+        # (x, y) == (building.x, building.y)，用格子座標反推是不是錨點，
+        # 避免重複計算。
         total_score = 0
-        for row in self.grid:
-            for tile in row:
+        for gy, row in enumerate(self.grid):
+            for gx, tile in enumerate(row):
                 if tile.zone == ZoneType.DECORATION_ZONE and tile.decoration is not None:
                     total_score += tile.decoration.prosperity_score
-        
+                if tile.building is not None and (gx, gy) == (tile.building.x, tile.building.y):
+                    total_score += tile.building.config.get("prosperity_score", 0)
+
         self.prosperity_score = total_score
         
         new_level = 1
@@ -414,6 +431,16 @@ class GameState:
         for ftile in footprint_tiles:
             ftile.building = building
         self.buildings.append(building)
+
+        # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】
+        # BLUE_WOOD_HOUSE 這種會貢獻 prosperity_score 的建築，蓋好之後
+        # 要立刻重算繁榮度（原本 place_building() 完全不會呼叫這個函式
+        # ——建築系統原本沒有任何一種建築會影響繁榮度，這次新增
+        # BUILDING_DATA 的 "prosperity_score" 欄位之後才需要）。沒有這
+        # 個欄位的其餘建築（熔爐/伐木場/灑水器）config.get("prosperity_
+        # score", 0) 都是 0，多呼叫一次 recalculate_prosperity() 不會
+        # 改變它們的繁榮度，也不會有副作用。
+        self.recalculate_prosperity()
 
         cost_desc_parts = []
         if cost_gold:
@@ -1040,6 +1067,13 @@ class GameState:
                         ftile.building = None
 
             self.buildings = [b for b in self.buildings if b is not removed_building]
+
+            # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】
+            # 拆除會貢獻 prosperity_score 的建築（例如藍頂莊園木屋）之後
+            # 要重算繁榮度，理由跟上面 place_building() 新增的呼叫對稱
+            # ——否則拆掉建築後繁榮度/莊園等級/每日分紅會沿用拆除前的
+            # 舊值，直到玩家再蓋/拆別的裝飾才會意外被連帶更新。
+            self.recalculate_prosperity()
 
             refund_desc = f"{refund} 金幣"
             if item_refund_parts:

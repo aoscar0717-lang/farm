@@ -1012,7 +1012,13 @@ class NightwatchFarmApp:
                 ("PLACE_PET_HOUSE", "木材柴堆", "$130 | +90繁榮 | +27G/天", "pet_house"),
                 ("PLACE_FOUNTAIN", "野餐竹籃", "$160 | +110繁榮 | +33G/天", "fountain"),
                 ("PLACE_SUNDIAL", "向日葵叢", "$220 | +160繁榮 | +48G/天", "sundial_tower"),
-                ("PLACE_WINDMILL", "莊園木屋", "$300 | +220繁榮 | +66G/天", "windmill"),
+                # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】
+                # 這張卡片註解掉——game_config.py 已經同步把
+                # DecorationType.WINDMILL 的 BUILDING_DATA 設定註解掉，
+                # 商店裡不會再看到「莊園木屋」跟「藍頂木屋」重複的兩張
+                # 卡片，只保留下面 DECO 分頁尾端新增的 PLACE_BLUE_WOOD_
+                # HOUSE，繼承了原本這裡的解鎖等級/價格/繁榮效果。
+                # ("PLACE_WINDMILL", "莊園木屋", "$300 | +220繁榮 | +66G/天", "windmill"),
                 # 加工機台 (Phase 2)：跟其餘景觀裝飾一樣放在 DECO 分頁、
                 # 建在「四周莊園景觀區」——沒有另外開新分頁，是因為商店
                 # 的 2x2 分頁格版面 (_layout_shop_tabs) 是照剛好 4 個分頁
@@ -1088,13 +1094,15 @@ class NightwatchFarmApp:
                 # 成「風力研磨」，跟「伐木場」搭在一起語意不通順，這裡
                 # 一併調整回貼合伐木場本身、但保留溫馨語氣的說法。
                 ("PLACE_LUMBERYARD", "伐木場", "$50 | 每10s產1木料", "lumberyard"),
-                # 【系統更新：藍頂木屋 2x2 建築】使用者明確要求這是一棟
-                # 「標準 2x2 建築」（BUILDING_DATA，非 DECO 分頁既有的
-                # DecorationType.WINDMILL「莊園木屋」1x1 裝飾），所以放
-                # 在這個「加工機台」卡片區塊、跟熔爐/灑水器/伐木場同一組，
-                # 不是加進上面的 DecorationType 那排。純裝飾用途，沒有
-                # 配方/產出，說明文字直接用使用者提供的描述。
-                ("PLACE_BLUE_WOOD_HOUSE", "藍頂木屋", "$300 | 一棟舒適溫馨的木造小屋", "blue_wood_house"),
+                # 【系統邏輯修正：讓藍頂木屋繼承並替換原有的「莊園木屋」】
+                # 這張卡片原本是純裝飾、沒有任何被動效果，這次改成正式
+                # 繼承 DecorationType.WINDMILL（莊園木屋，卡片已註解掉）
+                # 的解鎖等級/價格/繁榮效果，說明文字同步改回「+220繁榮 |
+                # +66G/天」這組數值（跟 game_config.py BUILDING_DATA
+                # [BLUE_WOOD_HOUSE]["prosperity_score"]=220、
+                # game_state.py recalculate_prosperity() 新增的建築繁榮
+                # 加總邏輯保持一致），差別只在佔地從 1x1 放大成 2x2。
+                ("PLACE_BLUE_WOOD_HOUSE", "藍頂莊園木屋", "$300 | +220繁榮 | +66G/天", "blue_wood_house"),
             ],
             "DEFENSE": [
                 ("PLACE_FENCE", "原木木柵", "$15 | 阻擋+反傷", "wooden_fence"),
@@ -3452,25 +3460,33 @@ class NightwatchFarmApp:
                 if img:
                     self.screen.blit(img, (px, py))
             elif enemy.enemy_type == EnemyType.SHADOW_BAT:
-                # 【系統更新：實裝 8x8 規格的全新敵人 Sprite Sheet
-                # (enemy_bat)】暗夜魔蝠原本落在下面的通用 else 分支，只
-                # 畫靜態圖、完全沒有動畫；enemy_bat.png 換成新的 8x8
-                # 規格之後，改成跟野豬/小偷同一套「依 enemy.facing_
-                # direction 選方向幀清單」的動畫模式，而不是使用者原始
-                # 需求裡另外寫的 frame_index = int(self.animation_timer
-                # / ANIMATION_SPEED) % 8——self.animation_timer 這個屬性
-                # 在專案裡不存在，而且野豬/小偷的既有動畫都是直接用
-                # pygame.time.get_ticks() 換算幀數（不受暫停/日夜切換
-                # 影響，也不用額外維護一個計時器變數），這裡沿用同一種
-                # 寫法保持一致，8 幀、每 120ms 切換一幀（介於野豬的
-                # 200ms 跟小偷的 100ms 之間，符合魔蝠「速度 2.2」比野豬
-                # 快、比小偷穩的節奏）。
+                # 【系統更新：升級敵人 Sprite Sheet 為「多方向動畫字典」】
+                # 使用者這次要求依「移動向量 (vx, vy)」決定方向：
+                #   abs(vx) > abs(vy) 且 vx > 0 -> right
+                #   abs(vx) > abs(vy) 且 vx < 0 -> left
+                #   abs(vy) >= abs(vx) 且 vy > 0 -> down
+                #   abs(vy) >= abs(vx) 且 vy < 0 -> up
+                # 這正是 game_config.py 既有的 direction_from_delta(dx, dy)
+                # 函式已經在做的事（見該函式定義的說明），而且
+                # game_state.py 每次敵人移動時都會呼叫它並寫回
+                # enemy.facing_direction——不需要在渲染層另外算一次
+                # vx/vy 方向判斷，沿用既有欄位即可，跟野豬/小偷共用同一
+                # 套「依 enemy.facing_direction 選方向幀清單」的模式。
+                # 幀數：使用者這次要求 frame_index = int(self.
+                # animation_timer / ANIMATION_SPEED) % 8——
+                # self.animation_timer 這個屬性依然不存在（專案裡實際存
+                # 在、每幀累加且不受暫停/日夜切換影響的計時器叫
+                # self.anim_time，用在熔爐/伐木場/灑水器等建築動畫
+                # frame_index 的計算上），這裡改用 self.anim_time，但
+                # ANIMATION_SPEED（0.2 秒）這個常數確實存在，直接沿用
+                # 使用者指定的除法公式，不用像上一版那樣另外挑一個
+                # tick 間隔常數。
                 # left/right 水平翻轉已經在 asset_loader.py 的
                 # _load_bat_frames() 裡處理過（left 幀是 right 幀的
                 # pygame.transform.flip() 結果），這裡不用重複翻轉。
                 frames = self.loader.bat_frames.get(enemy.facing_direction, [])
                 if frames:
-                    frame_index = (pygame.time.get_ticks() // 120) % len(frames)
+                    frame_index = int(self.anim_time / ANIMATION_SPEED) % len(frames)
                     img = frames[frame_index]
                 else:
                     img = self.loader.get("enemy_bat")

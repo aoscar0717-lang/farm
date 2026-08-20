@@ -40,16 +40,19 @@ THIEF_DIRECTION_ROWS = {"down": 0, "right": 1, "left": 2, "up": 3}
 # chroma key，避免誤傷素材本身的黑色部分。
 
 # ---- 暗夜魔蝠 (assets/characters/enemy_bat.png) 精靈圖設定 -----------------
-# 【系統更新：實裝 8x8 規格的全新敵人 Sprite Sheet】使用者確認新版素材
-# 是 8 欄 x 8 列的網格、背景純黑去背。跟 pig.png 同一種做法：只切出
-# 「正面」(row=0) 跟「側向」(row=2) 這兩排真正需要的動畫，up/down 共用
-# 正面那排（素材沒有另外畫背面），right 用側向那排，left 不佔額外的
-# 列，直接把 right 的幀水平翻轉取得——沿用 pig.png 既有的
-# frames["left"] = flip(frames["right"]) 慣例，不用另外切一排。
+# 【系統更新：升級敵人 Sprite Sheet 為「多方向動畫字典」】這次使用者
+# 明確給出四個方向各自對應的列數（不再是 up/down 共用同一排）：
+# down=row0、right=row2、up=row4，left 一樣不佔額外的列，直接把 right
+# 那排水平翻轉取得。
+# 【檔名澄清】使用者這次寫的檔名是 enemy_bat.jpg，但實際用
+# device_list_dir 確認過 assets/characters/ 底下放的是 enemy_bat.png
+# （沒有 .jpg 這個檔案），這裡沿用先前任務已經在用、且真實存在的
+# enemy_bat.png，不是找不到檔案的 .jpg。
 BAT_COLS = 8
 BAT_ROWS = 8
-BAT_FRONT_ROW = 0   # 正面移動動畫（up/down 共用）
-BAT_SIDE_ROW = 2    # 側向移動動畫（right，left 用翻轉取得）
+BAT_DOWN_ROW = 0    # 向下移動動畫
+BAT_SIDE_ROW = 2    # 向右移動動畫（left 用水平翻轉取得，不佔額外的列）
+BAT_UP_ROW = 4      # 向上移動動畫
 # 背景是純黑色去背 (Chroma Key)，不是 alpha 透明。
 BAT_CHROMA_KEY = (0, 0, 0)
 
@@ -535,12 +538,13 @@ class AssetLoader:
     def _load_bat_frames(self):
         """
         切出 enemy_bat.png 的 8x8 精靈圖，回傳 Dict[str, List[Surface]]
-        (key 是 'down'/'up'/'right'/'left')。素材只有「正面」(row=0) 跟
-        「側向」(row=2) 兩排真正的動畫，up/down 共用正面那排（沒有另外
-        畫背面），right 用側向那排，left 用 pygame.transform.flip() 把
-        right 水平翻轉取得——跟 pig.png 的 _load_pig_frames() 是同一套
-        慣例。畫格維持精靈圖原始尺寸，縮放留給呼叫端依格子大小處理
-        （見 load_all() 裡統一 scale 成 (tile_size, tile_size) 的部分）。
+        (key 是 'down'/'up'/'right'/'left')。
+        【系統更新：升級敵人 Sprite Sheet 為「多方向動畫字典」】這次四個
+        方向各自對應獨立的列：down=row0、right=row2、up=row4，只有 left
+        沒有另外佔一列，直接把 right 的幀 pygame.transform.flip() 水平
+        翻轉取得——跟 pig.png 的 _load_pig_frames() 是同一套慣例。畫格
+        維持精靈圖原始尺寸，縮放留給呼叫端依格子大小處理（見 load_all()
+        裡統一 scale 成 (tile_size, tile_size) 的部分）。
 
         找不到檔案 / 切不出畫格時回傳 {}，呼叫端要自己 fallback 回原本
         的靜態 enemy_bat.png，不要讓遊戲直接壞掉。
@@ -575,14 +579,15 @@ class AssetLoader:
             frame.set_colorkey(BAT_CHROMA_KEY, pygame.RLEACCEL)
             return frame.convert_alpha()
 
-        front_frames = [_cut(BAT_FRONT_ROW, col) for col in range(BAT_COLS)]
-        side_frames = [_cut(BAT_SIDE_ROW, col) for col in range(BAT_COLS)]
+        down_frames = [_cut(BAT_DOWN_ROW, col) for col in range(BAT_COLS)]
+        right_frames = [_cut(BAT_SIDE_ROW, col) for col in range(BAT_COLS)]
+        up_frames = [_cut(BAT_UP_ROW, col) for col in range(BAT_COLS)]
 
         frames = {
-            "down": front_frames,
-            "up": front_frames,
-            "right": side_frames,
-            "left": [pygame.transform.flip(f, True, False) for f in side_frames],
+            "down": down_frames,
+            "right": right_frames,
+            "up": up_frames,
+            "left": [pygame.transform.flip(f, True, False) for f in right_frames],
         }
         return frames
 
